@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import * as fflate from "fflate";
 import * as XLSX from "xlsx";
+import { MultiProviderAIService, aiService } from './multiProviderAIService';
+import type { AIProvider } from './aiProviderConfig';
 
 const ASPIRE_SYSTEM_INSTRUCTION = `
 # ROLE:
@@ -318,14 +320,18 @@ const processDocx = async (file: FileData): Promise<{ text: string, images: File
 
 export const analyzeReimbursement = async (
   receiptImages: FileData[],
-  formImage: FileData | null
+  formImage: FileData | null,
+  preferredProvider?: AIProvider
 ) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Set preferred provider if specified
+  if (preferredProvider) {
+    aiService.setPreferredProvider(preferredProvider);
+  }
 
-  const parts = [];
+  const parts: any[] = [];
 
   // --- PRE-PROCESSING & NORMALIZATION ---
-  const processedReceipts = [];
+  const processedReceipts: FileData[] = [];
 
   // Helper to check if file is a "document" we need to parse manually
   const isDoc = (mime: string) => mime.includes('word') || mime.includes('officedocument') || mime.includes('csv') || mime.includes('excel') || mime.includes('spreadsheet');
@@ -402,21 +408,17 @@ export const analyzeReimbursement = async (
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      config: {
-        systemInstruction: ASPIRE_SYSTEM_INSTRUCTION,
-        temperature: 0.1, // Low temperature for consistent rule following
-      },
-      contents: [{
-        role: "user",
-        parts: parts,
-      }],
-    });
+    // Use multi-provider AI service with automatic fallback
+    const result = await aiService.generateContent(
+      parts.map(p => p.text || '').join('\n'),
+      parts.filter(p => p.inlineData).map(p => p),
+      ASPIRE_SYSTEM_INSTRUCTION
+    );
 
-    return response.text;
+    console.log(`AI Response generated using ${result.provider}${result.usedFallback ? ' (fallback)' : ''}`);
+    return result.text;
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    throw error;
+    console.error("All AI providers failed:", error);
+    throw new Error('All AI providers are unavailable or rate limited. Please try again later.');
   }
 };

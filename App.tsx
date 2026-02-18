@@ -9,7 +9,10 @@ import FileUpload from './components/FileUpload';
 import ProcessingStep from './components/ProcessingStep';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Logo from './components/Logo';
+import { AIProviderSelector } from './components/AIProviderSelector';
 import { analyzeReimbursement } from './services/geminiService';
+import type { AIProvider } from './services/aiProviderConfig';
+import { aiService } from './services/multiProviderAIService';
 import { fileToBase64 } from './utils/fileHelpers';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 import { supabase } from './services/supabaseClient';
@@ -106,6 +109,9 @@ export const App = () => {
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
     const [showEmployeeDropdown, setShowEmployeeDropdown] = useState<Map<number, boolean>>(new Map());
+
+    // AI Provider State
+    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('gemini');
 
     // Mass Edit State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1101,7 +1107,7 @@ export const App = () => {
                 name: formFiles[0].name
             } : null;
 
-            const fullResponse = await analyzeReimbursement(receiptImages, formImage);
+            const fullResponse = await analyzeReimbursement(receiptImages, formImage, selectedAIProvider);
 
             const parseSection = (tagStart: string, tagEnd: string, text: string) => {
                 const startIdx = text.indexOf(tagStart);
@@ -2326,6 +2332,17 @@ export const App = () => {
                             </div>
 
                             <div className="p-8 space-y-8">
+                                {/* AI Provider Selection */}
+                                <AIProviderSelector
+                                    selectedProvider={selectedAIProvider}
+                                    onProviderChange={(provider) => {
+                                        setSelectedAIProvider(provider);
+                                        aiService.setPreferredProvider(provider);
+                                    }}
+                                />
+
+                                <div className="h-px bg-white/5"></div>
+
                                 {/* Employee Database Section */}
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
