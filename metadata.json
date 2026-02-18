@@ -1,0 +1,5 @@
+{
+  "name": "Aspire Reimbursement",
+  "description": "AI-powered reimbursement auditing system that processes receipts and forms, enforces audit rules, and generates approval emails.",
+  "requestFramePermissions": []
+}
