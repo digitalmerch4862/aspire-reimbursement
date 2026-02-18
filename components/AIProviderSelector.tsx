@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, Zap, Sparkles, AlertCircle, Check } from 'lucide-react';
+import { Cpu, Zap, Sparkles, AlertCircle, Check, Brain } from 'lucide-react';
 import type { AIProvider } from '../services/aiProviderConfig';
 
 interface AIProviderSelectorProps {
@@ -44,6 +44,14 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
       icon: <Cpu size={18} />,
       color: 'text-emerald-400',
       status: 'available'
+    },
+    {
+      id: 'glm',
+      name: 'ChatGLM',
+      description: 'Zhipu AI - Fast & Free',
+      icon: <Brain size={18} />,
+      color: 'text-orange-400',
+      status: 'available'
     }
   ]);
 
@@ -57,6 +65,7 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
     const minimaxKey = process.env.MINIMAX_API_KEY;
+    const glmKey = process.env.GLM_API_KEY;
 
     setProviders(prev => prev.map(p => {
       let hasKey = false;
@@ -69,6 +78,9 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
           break;
         case 'minimax':
           hasKey = !!minimaxKey;
+          break;
+        case 'glm':
+          hasKey = !!glmKey;
           break;
       }
       return {

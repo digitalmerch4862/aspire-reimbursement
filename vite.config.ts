@@ -16,7 +16,8 @@ export default defineConfig(({ mode }) => {
         'process.env.GOOGLE_API_KEY': JSON.stringify(env.GOOGLE_API_KEY),
         'process.env.MINIMAX_API_KEY': JSON.stringify(env.MINIMAX_API_KEY),
         'process.env.KIMI_API_KEY': JSON.stringify(env.KIMI_API_KEY || env.MOONSHOT_API_KEY),
-        'process.env.MOONSHOT_API_KEY': JSON.stringify(env.MOONSHOT_API_KEY)
+        'process.env.MOONSHOT_API_KEY': JSON.stringify(env.MOONSHOT_API_KEY),
+        'process.env.GLM_API_KEY': JSON.stringify(env.GLM_API_KEY)
       },
       resolve: {
         alias: {

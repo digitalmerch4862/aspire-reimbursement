@@ -32,7 +32,8 @@ export class MultiProviderAIService {
     systemInstruction?: string
   ): Promise<GenerationResult> {
     // Try preferred provider first
-    const providers = [this.preferredProvider, ...(['gemini', 'kimi', 'minimax'] as AIProvider[]).filter(p => p !== this.preferredProvider)];
+    const allProviders: AIProvider[] = ['gemini', 'kimi', 'minimax', 'glm'];
+    const providers = [this.preferredProvider, ...allProviders.filter(p => p !== this.preferredProvider)];
     
     let lastError: Error | null = null;
     
@@ -79,6 +80,8 @@ export class MultiProviderAIService {
         return this.generateWithMinimax(prompt, systemInstruction);
       case 'kimi':
         return this.generateWithKimi(prompt, imageParts, systemInstruction);
+      case 'glm':
+        return this.generateWithGLM(prompt, imageParts, systemInstruction);
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
@@ -200,9 +203,65 @@ export class MultiProviderAIService {
     return data.choices?.[0]?.message?.content || '';
   }
 
+  private async generateWithGLM(
+    prompt: string,
+    imageParts?: any[],
+    systemInstruction?: string
+  ): Promise<string> {
+    const config = this.configs.glm;
+
+    // GLM API format (OpenAI compatible)
+    const messages: any[] = [];
+
+    if (systemInstruction) {
+      messages.push({ role: 'system', content: systemInstruction });
+    }
+
+    const userMessage: any = { role: 'user', content: prompt };
+
+    // Add images if provided (GLM supports vision models)
+    if (imageParts && imageParts.length > 0) {
+      userMessage.content = [
+        { type: 'text', text: prompt },
+        ...imageParts.map((part: any) => ({
+          type: 'image_url',
+          image_url: {
+            url: part.inlineData?.data
+              ? `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
+              : part.fileData?.fileUri
+          }
+        }))
+      ];
+    }
+
+    messages.push(userMessage);
+
+    const response = await fetch(config.baseUrl!, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: messages,
+        temperature: config.temperature,
+        max_tokens: config.maxTokens
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`GLM API error: ${error}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
+  }
+
   // Check which providers are available
   getAvailableProviders(): AIProvider[] {
-    return (['gemini', 'minimax', 'kimi'] as AIProvider[]).filter(
+    return (['gemini', 'minimax', 'kimi', 'glm'] as AIProvider[]).filter(
       provider => !!this.configs[provider].apiKey
     );
   }
@@ -210,17 +269,21 @@ export class MultiProviderAIService {
   // Get provider status
   getProviderStatus(): Record<AIProvider, { available: boolean; rateLimited: boolean }> {
     return {
-      gemini: { 
-        available: !!this.configs.gemini.apiKey, 
-        rateLimited: isRateLimited('gemini') 
+      gemini: {
+        available: !!this.configs.gemini.apiKey,
+        rateLimited: isRateLimited('gemini')
       },
-      minimax: { 
-        available: !!this.configs.minimax.apiKey, 
-        rateLimited: isRateLimited('minimax') 
+      minimax: {
+        available: !!this.configs.minimax.apiKey,
+        rateLimited: isRateLimited('minimax')
       },
-      kimi: { 
-        available: !!this.configs.kimi.apiKey, 
-        rateLimited: isRateLimited('kimi') 
+      kimi: {
+        available: !!this.configs.kimi.apiKey,
+        rateLimited: isRateLimited('kimi')
+      },
+      glm: {
+        available: !!this.configs.glm.apiKey,
+        rateLimited: isRateLimited('glm')
       }
     };
   }
