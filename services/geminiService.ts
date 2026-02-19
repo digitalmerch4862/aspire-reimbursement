@@ -321,7 +321,8 @@ const processDocx = async (file: FileData): Promise<{ text: string, images: File
 export const analyzeReimbursement = async (
   receiptImages: FileData[],
   formImage: FileData | null,
-  preferredProvider?: AIProvider
+  preferredProvider?: AIProvider,
+  extractedOCRText?: string
 ) => {
   // Set preferred provider if specified
   if (preferredProvider) {
@@ -329,6 +330,13 @@ export const analyzeReimbursement = async (
   }
 
   const parts: any[] = [];
+
+  // If we have pre-extracted OCR text from hybrid processing, add it first
+  if (extractedOCRText && extractedOCRText.trim().length > 0) {
+    parts.push({ 
+      text: `--- PRE-EXTRACTED RECEIPT TEXT (via ${extractedOCRText.length > 500 ? 'Hybrid OCR' : 'OCR'}) ---\n${extractedOCRText}\n--- END PRE-EXTRACTED TEXT ---` 
+    });
+  }
 
   // --- PRE-PROCESSING & NORMALIZATION ---
   const processedReceipts: FileData[] = [];
@@ -416,6 +424,12 @@ export const analyzeReimbursement = async (
     );
 
     console.log(`AI Response generated using ${result.provider}${result.usedFallback ? ' (fallback)' : ''}`);
+    console.log(`Response length: ${result.text?.length || 0} characters`);
+    if (result.text && result.text.length > 0) {
+      console.log(`Response preview: ${result.text.substring(0, 100)}...`);
+    } else {
+      console.warn('Warning: AI returned empty response');
+    }
     return result.text;
   } catch (error) {
     console.error("All AI providers failed:", error);

@@ -13,6 +13,7 @@ import { AIProviderSelector } from './components/AIProviderSelector';
 import { analyzeReimbursement } from './services/geminiService';
 import type { AIProvider } from './services/aiProviderConfig';
 import { aiService } from './services/multiProviderAIService';
+import { performHybridOCR, HybridOCRResult } from './services/hybridOCRService';
 import { fileToBase64 } from './utils/fileHelpers';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 import { supabase } from './services/supabaseClient';
@@ -76,6 +77,10 @@ export const App = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [showSaveModal, setShowSaveModal] = useState(false);
 
+    // OCR Status State
+    const [ocrStatus, setOcrStatus] = useState<string>('');
+    const [ocrMethod, setOcrMethod] = useState<'local' | 'cloud' | null>(null);
+
     const [emailCopied, setEmailCopied] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [reportCopied, setReportCopied] = useState<'nab' | 'eod' | 'analytics' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'generated' | null>(null);
@@ -111,7 +116,7 @@ export const App = () => {
     const [showEmployeeDropdown, setShowEmployeeDropdown] = useState<Map<number, boolean>>(new Map());
 
     // AI Provider State
-    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('gemini');
+    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('local');
 
     // Mass Edit State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -918,6 +923,8 @@ export const App = () => {
         setEmailCopied(false);
         setSaveStatus('idle');
         setIsEditing(false);
+        setOcrStatus('');
+        setOcrMethod(null);
     };
 
     const handleStartNewAudit = () => {
@@ -1093,8 +1100,39 @@ export const App = () => {
         setEmailCopied(false);
         setSaveStatus('idle');
         setIsEditing(false);
+        setOcrStatus('');
+        setOcrMethod(null);
 
         try {
+            // Step 1: Extract text from receipts using Hybrid OCR (Local first, then Cloud fallback)
+            setOcrStatus('Initializing OCR...');
+            console.log('[Process] Starting Hybrid OCR extraction');
+            
+            // Filter only image files for OCR
+            const imageFiles = receiptFiles.filter(file => file.type.startsWith('image/'));
+            let extractedText = '';
+            
+            if (imageFiles.length > 0) {
+                const ocrResult = await performHybridOCR(imageFiles, {
+                    preferredProvider: selectedAIProvider,
+                    onStatusChange: (status) => {
+                        setOcrStatus(status);
+                        console.log(`[OCR Status] ${status}`);
+                    }
+                });
+                
+                extractedText = ocrResult.text;
+                setOcrMethod(ocrResult.method);
+                
+                console.log(`[Process] OCR complete using ${ocrResult.method} method`);
+                if (ocrResult.method === 'local' && ocrResult.confidence) {
+                    console.log(`[Process] Local OCR confidence: ${ocrResult.confidence.toFixed(1)}%`);
+                } else if (ocrResult.method === 'cloud' && ocrResult.provider) {
+                    console.log(`[Process] Cloud OCR via ${ocrResult.provider}${ocrResult.localResults ? ' (after local failed)' : ''}`);
+                }
+            }
+
+            // Step 2: Prepare images for AI analysis
             const receiptImages = await Promise.all(receiptFiles.map(async (file) => ({
                 mimeType: file.type || 'application/octet-stream',
                 data: await fileToBase64(file),
@@ -1107,21 +1145,32 @@ export const App = () => {
                 name: formFiles[0].name
             } : null;
 
-            const fullResponse = await analyzeReimbursement(receiptImages, formImage, selectedAIProvider);
+            setOcrStatus('Analyzing with AI...');
+            // If 'local' is selected, use a cloud provider for AI analysis (since 'local' is only for OCR)
+            const aiProvider = selectedAIProvider === 'local' ? 'gemini' : selectedAIProvider;
+            const fullResponse = await analyzeReimbursement(receiptImages, formImage, aiProvider, extractedText);
 
-            const parseSection = (tagStart: string, tagEnd: string, text: string) => {
+            const parseSection = (tagStart: string, tagEnd: string, text: string, sectionName: string) => {
                 const startIdx = text.indexOf(tagStart);
                 const endIdx = text.indexOf(tagEnd);
-                if (startIdx === -1 || endIdx === -1) return "Section not found or parsing error.";
+                if (startIdx === -1 || endIdx === -1) {
+                    console.warn(`[Parse] Missing tags for ${sectionName}, using fallback`);
+                    return `[${sectionName}]: AI response did not contain expected format.\n\nFull Response:\n${text.substring(0, 1000)}...`;
+                }
                 return text.substring(startIdx + tagStart.length, endIdx).trim();
             };
 
-            if (!fullResponse) throw new Error("No response from AI");
+            if (!fullResponse || fullResponse.trim().length === 0) {
+                throw new Error("No response from AI - the response was empty");
+            }
 
-            let phase1 = parseSection('<<<PHASE_1_START>>>', '<<<PHASE_1_END>>>', fullResponse);
-            const phase2 = parseSection('<<<PHASE_2_START>>>', '<<<PHASE_2_END>>>', fullResponse);
-            const phase3 = parseSection('<<<PHASE_3_START>>>', '<<<PHASE_3_END>>>', fullResponse);
-            let phase4 = parseSection('<<<PHASE_4_START>>>', '<<<PHASE_4_END>>>', fullResponse);
+            console.log(`[Process] Got AI response: ${fullResponse.length} characters`);
+            console.log(`[Process] Response preview: ${fullResponse.substring(0, 200)}...`);
+
+            let phase1 = parseSection('<<<PHASE_1_START>>>', '<<<PHASE_1_END>>>', fullResponse, 'Receipt Analysis');
+            const phase2 = parseSection('<<<PHASE_2_START>>>', '<<<PHASE_2_END>>>', fullResponse, 'Data Standardization');
+            const phase3 = parseSection('<<<PHASE_3_START>>>', '<<<PHASE_3_END>>>', fullResponse, 'Audit Results');
+            let phase4 = parseSection('<<<PHASE_4_START>>>', '<<<PHASE_4_END>>>', fullResponse, 'Email Output');
 
             const staffNameMatch = phase4.match(/\*\*Staff Member:\*\*\s*(.*)/);
             if (staffNameMatch) {
@@ -1734,10 +1783,37 @@ export const App = () => {
                                     <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Process Status</h3>
                                     <div className="space-y-6 pl-2">
                                         <ProcessingStep status={processingState === ProcessingState.IDLE ? 'idle' : 'complete'} title="Upload" description="Receipts & Forms received" />
-                                        <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'processing' : results ? 'complete' : 'idle'} title="AI Extraction" description="Analyzing receipt data" />
+                                        <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'processing' : results ? 'complete' : 'idle'} title="AI Extraction" description={ocrStatus || "Analyzing receipt data"} />
                                         <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Rule Engine" description="Validating policy limits" />
                                         <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Final Decision" description="Email generation" />
                                     </div>
+                                    
+                                    {/* OCR Method Badge */}
+                                    {processingState === ProcessingState.PROCESSING && ocrMethod && (
+                                        <div className="mt-4 pt-4 border-t border-white/5">
+                                            <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
+                                                ocrMethod === 'local' 
+                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                                                    : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                            }`}>
+                                                {ocrMethod === 'local' ? (
+                                                    <>
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                        Using Local OCR (Free)
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                                                        </svg>
+                                                        Using Cloud API
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -1759,7 +1835,24 @@ export const App = () => {
                                             <div className="absolute inset-4 border-b-4 border-purple-400 rounded-full animate-spin animation-delay-300"></div>
                                         </div>
                                         <h2 className="text-xl font-bold text-white">Analyzing Documents...</h2>
-                                        <p className="text-slate-400 mt-2 animate-pulse">Running compliance checks</p>
+                                        <p className="text-slate-400 mt-2 animate-pulse">{ocrStatus || 'Running compliance checks'}</p>
+                                        
+                                        {/* OCR Method Indicator */}
+                                        {ocrMethod && (
+                                            <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-white/5 text-slate-400 border border-white/10">
+                                                {ocrMethod === 'local' ? (
+                                                    <>
+                                                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                                        Processing locally to save API costs
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                                                        Using cloud AI for better accuracy
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 {results && (
