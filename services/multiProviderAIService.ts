@@ -58,75 +58,9 @@ export class MultiProviderAIService {
       }
     }
 
-    // Providers failed, fallthrough to mock
-
-
-    // FALLBACK MOCK RESPONSE FOR DEVELOPMENT
-    console.warn("All AI providers failed. Falling back to MOCK response for development.");
-    const MOCK_RESPONSE = `<<<PHASE_1_START>>>
-| Receipt # | Store Name Date & Time | Product (Per Item) | Category | Item Amount | Grand Total |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | Officeworks (MOCK) 19/02/2026 09:30 | Printer Paper | Other Expenses-Office Supplies | 15.00 | 15.00 |
-
-| Receipt # | Store Name | Receipt ID | Grand Total |
-|:---|:---|:---|:---|
-| 1 | Officeworks (MOCK) | MOCK-REC-001 | $15.00 |
-| **Total Amount** | | | **$15.00** |
-<<<PHASE_1_END>>>
-
-<<<PHASE_2_START>>>
-\`\`\`pgsql
--- PHASE 1 BLOCK: Mock Staff
-Client name / Location: Sydney
-Smith, John
-Approved by: Admin
-Type of expense: Other Expenses-Office Supplies
-02/19/2026
-$15.00
-\`\`\`
-
-\`\`\`sql
--- PHASE 2 BLOCK: Mock Staff
-Block 1: John Smith
-Block 2: 15.00
-\`\`\`
-<<<PHASE_2_END>>>
-
-<<<PHASE_3_START>>>
-Matches Exactly.
-<<<PHASE_3_END>>>
-
-<<<PHASE_4_START>>>
-Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed today.
-
-**Staff Member:** Smith, John
-**Client / Location:** Sydney
-**Approved By:** Admin
-**Amount:** $15.00
-**Receipt ID:** MOCK-REC-001
-**NAB Reference:** PENDING
-
-| Receipt # | Store Name Date & Time | Product (Per Item) | Category | Item Amount | Grand Total |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | Officeworks (MOCK) 19/02/2026 09:30 | Printer Paper | Other Expenses-Office Supplies | 15.00 | 15.00 |
-
-**TOTAL AMOUNT: $15.00**
-
-| Receipt # | Store Name | Receipt ID | Grand Total |
-|:---|:---|:---|:---|
-| 1 | Officeworks (MOCK) | MOCK-REC-001 | $15.00 |
-| **Total Amount** | | | **$15.00** |
-<<<PHASE_4_END>>>`;
-
-    return {
-      text: MOCK_RESPONSE,
-      provider: 'local', // Valid provider type to avoid errors
-      usedFallback: true
-    };
+    // All providers failed
+    console.error("All AI providers failed:", lastError);
+    throw new Error('All AI providers failed. Please check your API keys and internet connection.');
   }
 
   private async generateWithProvider(
@@ -136,11 +70,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
     systemInstruction?: string
   ): Promise<string> {
     const config = this.configs[provider];
-
-    // Handle local OCR provider - it's handled separately by hybridOCRService
-    if (provider === 'local') {
-      throw new Error('Local OCR is handled separately by the Hybrid OCR Service. This provider should not be used directly for text generation.');
-    }
 
     if (!config.apiKey) {
       throw new Error(`No API key configured for ${provider}`);
@@ -359,18 +288,14 @@ I am writing to confirm that your reimbursement request has been successfully pr
 
   // Check which providers are available
   getAvailableProviders(): AIProvider[] {
-    return (['local', 'gemini', 'minimax', 'kimi', 'glm'] as AIProvider[]).filter(
-      provider => !!this.configs[provider].apiKey || provider === 'local'
+    return (['gemini', 'minimax', 'kimi', 'glm'] as AIProvider[]).filter(
+      provider => !!this.configs[provider].apiKey
     );
   }
 
   // Get provider status
   getProviderStatus(): Record<AIProvider, { available: boolean; rateLimited: boolean }> {
     return {
-      local: {
-        available: true, // Local OCR is always available
-        rateLimited: false // No rate limits for local
-      },
       gemini: {
         available: !!this.configs.gemini.apiKey,
         rateLimited: isRateLimited('gemini')
