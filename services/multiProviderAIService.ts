@@ -1,66 +1,109 @@
-import type { AIProvider, ProviderConfig } from './aiProviderConfig';
-import {
-  DEFAULT_PROVIDER_CONFIGS,
-  isRateLimited,
-  incrementRequestCount,
-  getNextAvailableProvider
-} from './aiProviderConfig';
-import { GoogleGenAI } from "@google/genai";
+import { z } from 'zod';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { AIProvider, DEFAULT_PROVIDER_CONFIGS, incrementRequestCount, isRateLimited } from './aiProviderConfig';
 
-export interface GenerationResult {
-  text: string;
-  provider: AIProvider;
-  usedFallback: boolean;
-}
+/**
+ * 1. STANDARDIZED OUTPUT SCHEMA (Zod)
+ * Force all AI providers to return this exact structure
+ */
+export const ReceiptSchema = z.object({
+  merchantName: z.string(),
+  totalAmount: z.number(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  items: z.array(z.object({
+    name: z.string(),
+    price: z.number()
+  }))
+});
+
+export type ReceiptData = z.infer<typeof ReceiptSchema>;
+
+/**
+ * UTILITY: Strip Markdown and Clean JSON
+ */
+const cleanAIResponse = (text: string): string => {
+  return text
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .trim();
+};
 
 export class MultiProviderAIService {
-  private configs: Record<AIProvider, ProviderConfig>;
-  private preferredProvider: AIProvider;
+  private configs = DEFAULT_PROVIDER_CONFIGS;
+  private usageStats = {
+    totalRequests: 0,
+    openaiUsed: 0,
+    estimatedCost: 0
+  };
 
-  constructor(preferredProvider: AIProvider = 'gemini') {
-    this.configs = { ...DEFAULT_PROVIDER_CONFIGS };
-    this.preferredProvider = preferredProvider;
-  }
+  private preferredProvider: AIProvider | null = null;
 
-  setPreferredProvider(provider: AIProvider): void {
+  /**
+   * Set the preferred provider for the service.
+   */
+  setPreferredProvider(provider: AIProvider | null) {
     this.preferredProvider = provider;
   }
 
-  async generateContent(
+  /**
+   * 2. UNIFIED RECEIPT PARSER FUNCTION
+   * Implements robust Gemini -> Groq fallback
+   */
+  async ReceiptParser(
     prompt: string,
-    imageParts?: any[],
-    systemInstruction?: string
-  ): Promise<GenerationResult> {
-    // Try preferred provider first
-    const allProviders: AIProvider[] = ['gemini', 'kimi', 'minimax', 'glm'];
-    const providers = [this.preferredProvider, ...allProviders.filter(p => p !== this.preferredProvider)];
+    imageParts?: any[]
+  ): Promise<ReceiptData> {
+    // Determine provider order: Primary (Preferred if set) -> Others
+    const baseProviders: AIProvider[] = ['gemini', 'groq', 'openai'];
+    const providers = this.preferredProvider
+      ? [this.preferredProvider, ...baseProviders.filter(p => p !== this.preferredProvider)]
+      : baseProviders;
 
-    let lastError: Error | null = null;
+    let lastError: any = null;
+
+    const systemInstruction = `
+      You are a specialized vision assistant for receipt auditing.
+      Extract data exactly according to the schema.
+      Return ONLY valid JSON. No markdown blocks, no explanations.
+      Schema:
+      {
+        "merchantName": "string",
+        "totalAmount": number,
+        "date": "YYYY-MM-DD",
+        "items": [{"name": "string", "price": number}]
+      }
+    `;
 
     for (const provider of providers) {
-      if (isRateLimited(provider)) {
-        console.log(`${provider} is rate limited, trying next...`);
-        continue;
-      }
+      if (isRateLimited(provider)) continue;
 
       try {
-        const result = await this.generateWithProvider(provider, prompt, imageParts, systemInstruction);
+        console.log(`[ReceiptParser] Attempting with ${provider}...`);
+
+        const rawResponse = await this.generateWithProvider(provider, prompt, imageParts, systemInstruction);
+        const cleaned = cleanAIResponse(rawResponse);
+        const jsonData = JSON.parse(cleaned);
+
+        // Final Zod validation
+        const validated = ReceiptSchema.parse(jsonData);
+
+        // Success: Track stats
+        this.usageStats.totalRequests++;
+        if (provider === 'openai') {
+          this.usageStats.openaiUsed++;
+          this.usageStats.estimatedCost += 0.002;
+        }
         incrementRequestCount(provider);
-        return {
-          text: result,
-          provider,
-          usedFallback: provider !== this.preferredProvider
-        };
+
+        return validated;
       } catch (error) {
-        console.error(`${provider} failed:`, error);
-        lastError = error as Error;
+        console.warn(`[ReceiptParser] ${provider} failed or returned invalid JSON:`, error);
+        lastError = error;
         continue;
       }
     }
 
-    // All providers failed
-    console.error("All AI providers failed:", lastError);
-    throw new Error('All AI providers failed. Please check your API keys and internet connection.');
+    throw new Error(`Service Busy: All AI providers failed. Last error: ${lastError?.message}`);
   }
 
   private async generateWithProvider(
@@ -70,251 +113,74 @@ export class MultiProviderAIService {
     systemInstruction?: string
   ): Promise<string> {
     const config = this.configs[provider];
+    if (!config || !config.apiKey) throw new Error(`Provider ${provider} not configured or API key missing`);
 
-    if (!config.apiKey) {
-      throw new Error(`No API key configured for ${provider}`);
+    if (provider === 'gemini') {
+      const genAI = new GoogleGenerativeAI(config.apiKey);
+      const model = genAI.getGenerativeModel({ model: config.model, systemInstruction });
+      const parts = [{ text: prompt }, ...(imageParts || [])];
+      const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
+      return result.response.text();
     }
 
-    switch (provider) {
-      case 'gemini':
-        return this.generateWithGemini(prompt, imageParts, systemInstruction);
-      case 'minimax':
-        return this.generateWithMinimax(prompt, imageParts, systemInstruction);
-      case 'kimi':
-        return this.generateWithKimi(prompt, imageParts, systemInstruction);
-      case 'glm':
-        return this.generateWithGLM(prompt, imageParts, systemInstruction);
-      default:
-        throw new Error(`Unknown provider: ${provider}`);
-    }
-  }
-
-  private async generateWithGemini(
-    prompt: string,
-    imageParts?: any[],
-    systemInstruction?: string
-  ): Promise<string> {
-    const config = this.configs.gemini;
-    const ai = new GoogleGenAI({ apiKey: config.apiKey });
-
-    const parts: any[] = [{ text: prompt }];
-    if (imageParts) {
-      parts.push(...imageParts);
-    }
-
-    const response = await ai.models.generateContent({
-      model: config.model,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: config.temperature,
-      },
-      contents: [{
-        role: "user",
-        parts: parts,
-      }],
-    });
-
-    const text = response.text || '';
-    if (!text || text.trim().length === 0) {
-      throw new Error('Gemini returned empty response');
-    }
-    return text;
-  }
-
-  private async generateWithMinimax(
-    prompt: string,
-    imageParts?: any[],
-    systemInstruction?: string
-  ): Promise<string> {
-    const config = this.configs.minimax;
-
-    // MiniMax doesn't support images directly in the same way, so we include them in the prompt
-    let fullPrompt = prompt;
-    if (imageParts && imageParts.length > 0) {
-      fullPrompt += '\n\n[Note: Image data is available but MiniMax vision capabilities may be limited. Please analyze based on the extracted text provided above.]';
-    }
-
-    const response = await fetch(config.baseUrl!, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
-          { role: 'user', content: fullPrompt }
-        ],
-        temperature: config.temperature,
-        max_tokens: config.maxTokens
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`MiniMax API error: ${error}`);
-    }
-
-    const data = await response.json();
-    console.log('[MiniMax] Raw response:', JSON.stringify(data).substring(0, 500));
-    const content = data.choices?.[0]?.message?.content || '';
-    console.log(`[MiniMax] Extracted content: ${content.length} chars`);
-    if (!content || content.trim().length === 0) {
-      throw new Error(`MiniMax returned empty response: ${data.base_resp?.status_msg || 'unknown reason'}`);
-    }
-    return content;
-  }
-
-  private async generateWithKimi(
-    prompt: string,
-    imageParts?: any[],
-    systemInstruction?: string
-  ): Promise<string> {
-    const config = this.configs.kimi;
-
-    // Kimi/Moonshot API format
-    const messages: any[] = [];
-
-    if (systemInstruction) {
-      messages.push({ role: 'system', content: systemInstruction });
-    }
-
-    const userMessage: any = { role: 'user', content: prompt };
-
-    // Add images if provided (Kimi supports base64 images)
-    if (imageParts && imageParts.length > 0) {
-      userMessage.content = [
-        { type: 'text', text: prompt },
-        ...imageParts.map((part: any) => ({
-          type: 'image_url',
-          image_url: {
-            url: part.inlineData?.data
-              ? `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
-              : part.fileData?.fileUri
-          }
-        }))
+    if (provider === 'groq' || provider === 'openai') {
+      const messages = [
+        { role: 'system', content: systemInstruction },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            ...(imageParts?.map(p => ({
+              type: 'image_url',
+              image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` }
+            })) || [])
+          ]
+        }
       ];
+
+      const response = await fetch(config.baseUrl!, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          temperature: config.temperature
+        })
+      });
+
+      if (!response.ok) throw new Error(`${provider} API Error: ${response.statusText}`);
+      const data = await response.json();
+      return data.choices[0].message.content;
     }
 
-    messages.push(userMessage);
-
-    const response = await fetch(config.baseUrl!, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: messages,
-        temperature: config.temperature,
-        max_tokens: config.maxTokens
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Kimi API error: ${error}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    if (!content || content.trim().length === 0) {
-      throw new Error('Kimi returned empty response');
-    }
-    return content;
+    throw new Error(`Provider ${provider} not implemented`);
   }
 
-  private async generateWithGLM(
-    prompt: string,
-    imageParts?: any[],
-    systemInstruction?: string
-  ): Promise<string> {
-    const config = this.configs.glm;
-
-    // GLM API format (OpenAI compatible)
-    const messages: any[] = [];
-
-    if (systemInstruction) {
-      messages.push({ role: 'system', content: systemInstruction });
-    }
-
-    const userMessage: any = { role: 'user', content: prompt };
-
-    // Add images if provided (GLM supports vision models)
-    if (imageParts && imageParts.length > 0) {
-      userMessage.content = [
-        { type: 'text', text: prompt },
-        ...imageParts.map((part: any) => ({
-          type: 'image_url',
-          image_url: {
-            url: part.inlineData?.data
-              ? `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
-              : part.fileData?.fileUri
-          }
-        }))
-      ];
-    }
-
-    messages.push(userMessage);
-
-    const response = await fetch(config.baseUrl!, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: messages,
-        temperature: config.temperature,
-        max_tokens: config.maxTokens
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`GLM API error: ${error}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    if (!content || content.trim().length === 0) {
-      throw new Error('GLM returned empty response');
-    }
-    return content;
+  // Dashboard Helpers
+  getUsageStats() {
+    return this.usageStats;
   }
 
-  // Check which providers are available
-  getAvailableProviders(): AIProvider[] {
-    return (['gemini', 'minimax', 'kimi', 'glm'] as AIProvider[]).filter(
-      provider => !!this.configs[provider].apiKey
-    );
+  resetUsageStats() {
+    this.usageStats = { totalRequests: 0, openaiUsed: 0, estimatedCost: 0 };
   }
 
-  // Get provider status
-  getProviderStatus(): Record<AIProvider, { available: boolean; rateLimited: boolean }> {
-    return {
-      gemini: {
-        available: !!this.configs.gemini.apiKey,
-        rateLimited: isRateLimited('gemini')
-      },
-      minimax: {
-        available: !!this.configs.minimax.apiKey,
-        rateLimited: isRateLimited('minimax')
-      },
-      kimi: {
-        available: !!this.configs.kimi.apiKey,
-        rateLimited: isRateLimited('kimi')
-      },
-      glm: {
-        available: !!this.configs.glm.apiKey,
-        rateLimited: isRateLimited('glm')
-      }
-    };
+  // Legacy compatibility
+  async generateContent(prompt: string, imageParts?: any[], systemInstruction?: string): Promise<{ text: string, provider: AIProvider, usedFallback: boolean }> {
+    try {
+      const data = await this.ReceiptParser(prompt, imageParts);
+      return {
+        text: JSON.stringify(data, null, 2),
+        provider: 'gemini',
+        usedFallback: false
+      };
+    } catch (e) {
+      throw e;
+    }
   }
 }
 
-// Export singleton instance
-export const aiService = new MultiProviderAIService('gemini');
+export const aiService = new MultiProviderAIService();

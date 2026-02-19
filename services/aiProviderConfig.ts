@@ -1,4 +1,6 @@
-export type AIProvider = 'gemini' | 'minimax' | 'kimi' | 'glm';
+export type AIProvider = 'gemini' | 'groq' | 'openai';
+
+export type ProviderTier = 1 | 2 | 3;
 
 export interface ProviderConfig {
   name: string;
@@ -7,98 +9,116 @@ export interface ProviderConfig {
   model: string;
   maxTokens?: number;
   temperature?: number;
+  tier: ProviderTier;
+  rateLimitType: 'per_minute' | 'per_day';
+  limit: number;
+  supportsImages: boolean;
 }
 
-export interface ProviderStatus {
-  provider: AIProvider;
-  isActive: boolean;
-  lastError?: string;
-  requestCount: number;
-}
-
-export const PROVIDER_MODELS: Record<AIProvider, string[]> = {
-  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview'],
-  minimax: ['MiniMax-Text-01', 'abab6.5s-chat'],
-  kimi: ['kimi-k2.5-free', 'moonshot-v1-8k', 'moonshot-v1-32k'],
-  glm: ['glm-4-flash', 'glm-4-plus', 'glm-4']
-};
-
-// Default configurations - these will be overridden by environment variables
 export const DEFAULT_PROVIDER_CONFIGS: Record<AIProvider, ProviderConfig> = {
   gemini: {
-    name: 'Google Gemini',
-    apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-    model: 'gemini-3-flash-preview',
-    temperature: 0.1
+    name: 'Google Gemini 1.5 Flash',
+    apiKey: process.env.GEMINI_API_KEY || '',
+    model: 'gemini-1.5-flash',
+    temperature: 0.1,
+    tier: 1,
+    rateLimitType: 'per_minute',
+    limit: 15,
+    supportsImages: true
   },
-  minimax: {
-    name: 'MiniMax',
-    apiKey: process.env.MINIMAX_API_KEY || '',
-    baseUrl: 'https://api.minimaxi.chat/v1/text/chatcompletion_v2',
-    model: 'MiniMax-Text-01',
-    maxTokens: 8192,
-    temperature: 0.1
+  groq: {
+    name: 'Groq Llama 3.2 Vision',
+    apiKey: process.env.GROQ_API_KEY || '',
+    baseUrl: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.2-11b-vision-preview',
+    temperature: 0.1,
+    tier: 2,
+    rateLimitType: 'per_minute',
+    limit: 20,
+    supportsImages: true
   },
-  kimi: {
-    name: 'Moonshot Kimi',
-    apiKey: process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || '',
-    baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
-    model: 'kimi-k2.5-free',
-    maxTokens: 8192,
-    temperature: 0.1
-  },
-  glm: {
-    name: 'ChatGLM',
-    apiKey: process.env.GLM_API_KEY || '',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    model: 'glm-4-flash',
-    maxTokens: 8192,
-    temperature: 0.1
+  openai: {
+    name: 'OpenAI GPT-4o Mini (Backup)',
+    apiKey: process.env.OPENAI_API_KEY || '',
+    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o-mini',
+    temperature: 0.1,
+    tier: 3,
+    rateLimitType: 'per_minute',
+    limit: 100,
+    supportsImages: true
   }
 };
 
-// Priority order for fallback
-export const PROVIDER_PRIORITY: AIProvider[] = ['gemini', 'kimi', 'minimax', 'glm'];
+export const TIER_PRIORITY: Record<ProviderTier, AIProvider[]> = {
+  1: ['gemini'],
+  2: ['groq'],
+  3: ['openai']
+};
+
+export const PROVIDER_PRIORITY: AIProvider[] = ['gemini', 'groq', 'openai'];
 
 // Rate limit tracking
-export const rateLimitTracker = {
+export interface RateLimitInfo {
+  count: number;
+  resetTime: number;
+  dailyCount?: number;
+  dailyResetTime?: number;
+}
+
+export const rateLimitTracker: Record<AIProvider, RateLimitInfo> = {
   gemini: { count: 0, resetTime: Date.now() },
-  minimax: { count: 0, resetTime: Date.now() },
-  kimi: { count: 0, resetTime: Date.now() },
-  glm: { count: 0, resetTime: Date.now() }
+  groq: { count: 0, resetTime: Date.now() },
+  openai: { count: 0, resetTime: Date.now() }
 };
 
 export function isRateLimited(provider: AIProvider): boolean {
+  const config = DEFAULT_PROVIDER_CONFIGS[provider];
   const tracker = rateLimitTracker[provider];
-  const oneMinute = 60 * 1000;
-  
-  // Reset count after 1 minute
-  if (Date.now() - tracker.resetTime > oneMinute) {
+  const now = Date.now();
+
+  if (now - tracker.resetTime > 60000) {
     tracker.count = 0;
-    tracker.resetTime = Date.now();
-    return false;
+    tracker.resetTime = now;
   }
-  
-  // Check limits
-  const limits: Record<AIProvider, number> = {
-    gemini: 15,    // Gemini free tier: ~15 requests per minute
-    minimax: 20,   // MiniMax typical limit
-    kimi: 3,       // Kimi free tier: ~3 requests per minute
-    glm: 10        // GLM free tier: ~10 requests per minute
-  };
-  
-  return tracker.count >= limits[provider];
+
+  return tracker.count >= config.limit;
 }
 
 export function incrementRequestCount(provider: AIProvider): void {
-  rateLimitTracker[provider].count++;
+  const tracker = rateLimitTracker[provider];
+  tracker.count++;
 }
 
-export function getNextAvailableProvider(): AIProvider | null {
-  for (const provider of PROVIDER_PRIORITY) {
-    if (!isRateLimited(provider)) {
-      return provider;
-    }
+export function getProviderStats(provider: AIProvider) {
+  const config = DEFAULT_PROVIDER_CONFIGS[provider];
+  const tracker = rateLimitTracker[provider];
+  const now = Date.now();
+
+  if (now - tracker.resetTime > 60000) {
+    tracker.count = 0;
+    tracker.resetTime = now;
   }
-  return null;
+
+  return {
+    used: tracker.count,
+    limit: config.limit,
+    remaining: Math.max(0, config.limit - tracker.count),
+    isRateLimited: tracker.count >= config.limit,
+    waitTimeSeconds: Math.ceil((60000 - (now - tracker.resetTime)) / 1000)
+  };
+}
+
+export function getTierStats(tier: ProviderTier) {
+  const providers = TIER_PRIORITY[tier];
+  const available = providers.filter(p => !isRateLimited(p) && DEFAULT_PROVIDER_CONFIGS[p].apiKey);
+  return {
+    available: available.length,
+    total: providers.length
+  };
+}
+
+export function formatWaitTime(seconds: number): string {
+  if (seconds <= 0) return 'Now';
+  return `${seconds}s`;
 }

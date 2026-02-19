@@ -81,6 +81,10 @@ export const App = () => {
     const [ocrStatus, setOcrStatus] = useState<string>('');
     const [ocrMethod, setOcrMethod] = useState<'cloud' | null>(null);
 
+    // Manual Input States
+    const [receiptManualText, setReceiptManualText] = useState('');
+    const [formManualText, setFormManualText] = useState('');
+
     const [emailCopied, setEmailCopied] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [reportCopied, setReportCopied] = useState<'nab' | 'eod' | 'analytics' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'generated' | null>(null);
@@ -109,7 +113,7 @@ export const App = () => {
     const [employeeList, setEmployeeList] = useState<Employee[]>([]);
     const [employeeRawText, setEmployeeRawText] = useState(DEFAULT_EMPLOYEE_DATA);
     const [saveEmployeeStatus, setSaveEmployeeStatus] = useState<'idle' | 'saved'>('idle');
-    
+
     // Employee Selection State for Banking Details
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
@@ -285,7 +289,7 @@ export const App = () => {
     const getFilteredEmployees = (query: string) => {
         if (!query || query.trim() === '') return employeeList;
         const lowerQuery = query.toLowerCase();
-        return employeeList.filter(emp => 
+        return employeeList.filter(emp =>
             emp.fullName.toLowerCase().includes(lowerQuery) ||
             emp.firstName.toLowerCase().includes(lowerQuery) ||
             emp.surname.toLowerCase().includes(lowerQuery)
@@ -925,6 +929,8 @@ export const App = () => {
         setIsEditing(false);
         setOcrStatus('');
         setOcrMethod(null);
+        setReceiptManualText('');
+        setFormManualText('');
     };
 
     const handleStartNewAudit = () => {
@@ -1089,8 +1095,8 @@ export const App = () => {
     };
 
     const handleProcess = async () => {
-        if (receiptFiles.length === 0) {
-            setErrorMessage("Please upload at least one receipt.");
+        if (receiptFiles.length === 0 && !receiptManualText) {
+            setErrorMessage("Please upload a receipt or enter manual receipt text.");
             return;
         }
 
@@ -1107,11 +1113,11 @@ export const App = () => {
             // Step 1: Extract text from receipts using Hybrid OCR (Local first, then Cloud fallback)
             setOcrStatus('Initializing OCR...');
             console.log('[Process] Starting Hybrid OCR extraction');
-            
+
             // Filter only image files for OCR
             const imageFiles = receiptFiles.filter(file => file.type.startsWith('image/'));
-            let extractedText = '';
-            
+            let extractedText = receiptManualText ? `[MANUAL RECEIPT INPUT]:\n${receiptManualText}\n\n` : '';
+
             if (imageFiles.length > 0) {
                 const ocrResult = await performHybridOCR(imageFiles, {
                     preferredProvider: selectedAIProvider,
@@ -1120,10 +1126,10 @@ export const App = () => {
                         console.log(`[OCR Status] ${status}`);
                     }
                 });
-                
-                extractedText = ocrResult.text;
+
+                extractedText += ocrResult.text;
                 setOcrMethod(ocrResult.method);
-                
+
                 console.log(`[Process] OCR complete using cloud method`);
             }
 
@@ -1141,9 +1147,15 @@ export const App = () => {
             } : null;
 
             setOcrStatus('Analyzing with AI...');
+
+            // Add manual form text if exists
+            const enhancedExtractedText = formManualText
+                ? `${extractedText}\n\n[MANUAL FORM INPUT]:\n${formManualText}`
+                : extractedText;
+
             // Use selected cloud provider for AI analysis
             const aiProvider = selectedAIProvider;
-            const fullResponse = await analyzeReimbursement(receiptImages, formImage, aiProvider, extractedText);
+            const fullResponse = await analyzeReimbursement(receiptImages, formImage, aiProvider, enhancedExtractedText);
 
             const parseSection = (tagStart: string, tagEnd: string, text: string, sectionName: string) => {
                 const startIdx = text.indexOf(tagStart);
@@ -1481,7 +1493,6 @@ export const App = () => {
                 </header>
 
                 <main className="w-full">
-                    {/* ... (Dashboard and other tabs remain same, showing Database changes here) ... */}
 
                     {/* Row Detail Modal */}
                     {isRowModalOpen && selectedRow && (
@@ -1708,9 +1719,7 @@ export const App = () => {
                         </div>
                     )}
 
-                    {/* ... (Rest of the file remains unchanged from line 1000 onwards in previous version) ... */}
                     {activeTab === 'dashboard' && (
-                        // ... (Dashboard content preserved) ...
                         <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
                             <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
@@ -1733,6 +1742,14 @@ export const App = () => {
                                             multiple={true}
                                             accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.heic,.heif"
                                         />
+                                        <div className="mt-2">
+                                            <textarea
+                                                value={receiptManualText}
+                                                onChange={(e) => setReceiptManualText(e.target.value)}
+                                                placeholder="Or paste receipt text here manually..."
+                                                className="w-full h-24 bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors"
+                                            />
+                                        </div>
                                         <div className="relative">
                                             <div className="absolute inset-0 flex items-center" aria-hidden="true">
                                                 <div className="w-full border-t border-white/5"></div>
@@ -1748,6 +1765,14 @@ export const App = () => {
                                             onFilesChange={setFormFiles}
                                             accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.heic,.heif"
                                         />
+                                        <div className="mt-2">
+                                            <textarea
+                                                value={formManualText}
+                                                onChange={(e) => setFormManualText(e.target.value)}
+                                                placeholder="Or paste form text here manually..."
+                                                className="w-full h-24 bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors"
+                                            />
+                                        </div>
                                         {errorMessage && (
                                             <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
                                                 <AlertCircle className="text-red-400 mt-0.5 flex-shrink-0" size={18} />
@@ -1756,7 +1781,7 @@ export const App = () => {
                                         )}
                                         <button
                                             onClick={handleProcess}
-                                            disabled={processingState === ProcessingState.PROCESSING || receiptFiles.length === 0}
+                                            disabled={processingState === ProcessingState.PROCESSING || (receiptFiles.length === 0 && !receiptManualText)}
                                             className={`w-full group relative flex justify-center items-center gap-3 py-4 px-6 rounded-2xl font-semibold text-white transition-all duration-300 shadow-[0_0_20px_rgba(79,70,229,0.1)]
                         ${processingState === ProcessingState.PROCESSING
                                                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
@@ -1782,7 +1807,7 @@ export const App = () => {
                                         <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Rule Engine" description="Validating policy limits" />
                                         <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Final Decision" description="Email generation" />
                                     </div>
-                                    
+
                                     {/* Processing Status Badge */}
                                     {processingState === ProcessingState.PROCESSING && (
                                         <div className="mt-4 pt-4 border-t border-white/5">
@@ -1816,7 +1841,7 @@ export const App = () => {
                                         </div>
                                         <h2 className="text-xl font-bold text-white">Analyzing Documents...</h2>
                                         <p className="text-slate-400 mt-2 animate-pulse">{ocrStatus || 'Running compliance checks'}</p>
-                                        
+
                                         {/* Processing Indicator */}
                                         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
@@ -1905,95 +1930,96 @@ export const App = () => {
                                                 const searchQuery = employeeSearchQuery.get(idx) || tx.formattedName;
                                                 const showDropdown = showEmployeeDropdown.get(idx) || false;
                                                 const filteredEmployees = getFilteredEmployees(searchQuery);
-                                                
+
                                                 return (
-                                                <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
-                                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                                        <CreditCard size={80} className="text-white" />
-                                                    </div>
-                                                    <div className="relative z-10">
-                                                        <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                                            <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
-                                                            Banking Details {parsedTransactions.length > 1 ? `(${idx + 1}/${parsedTransactions.length})` : '(Manual Transfer)'}
-                                                        </h4>
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            {/* Payee Name with Searchable Dropdown */}
-                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
-                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <div className="flex-1 relative">
-                                                                        <input
-                                                                            type="text"
-                                                                            value={searchQuery}
-                                                                            onChange={(e) => handleEmployeeSearchChange(idx, e.target.value)}
-                                                                            onFocus={() => handleEmployeeSearchFocus(idx)}
-                                                                            onBlur={() => handleEmployeeSearchBlur(idx)}
-                                                                            className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
-                                                                            placeholder="Search employee..."
-                                                                        />
-                                                                        {/* Dropdown */}
-                                                                        {showDropdown && filteredEmployees.length > 0 && (
-                                                                            <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
-                                                                                {filteredEmployees.map((emp, empIdx) => (
-                                                                                    <button
-                                                                                        key={empIdx}
-                                                                                        onClick={() => handleEmployeeSelect(idx, emp)}
-                                                                                        className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
-                                                                                    >
-                                                                                        {emp.fullName}
-                                                                                    </button>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
+                                                    <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
+                                                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                                                            <CreditCard size={80} className="text-white" />
+                                                        </div>
+                                                        <div className="relative z-10">
+                                                            <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                                Banking Details {parsedTransactions.length > 1 ? `(${idx + 1}/${parsedTransactions.length})` : '(Manual Transfer)'}
+                                                            </h4>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                {/* Payee Name with Searchable Dropdown */}
+                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
+                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div className="flex-1 relative">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={searchQuery}
+                                                                                onChange={(e) => handleEmployeeSearchChange(idx, e.target.value)}
+                                                                                onFocus={() => handleEmployeeSearchFocus(idx)}
+                                                                                onBlur={() => handleEmployeeSearchBlur(idx)}
+                                                                                className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
+                                                                                placeholder="Search employee..."
+                                                                            />
+                                                                            {/* Dropdown */}
+                                                                            {showDropdown && filteredEmployees.length > 0 && (
+                                                                                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
+                                                                                    {filteredEmployees.map((emp, empIdx) => (
+                                                                                        <button
+                                                                                            key={empIdx}
+                                                                                            onClick={() => handleEmployeeSelect(idx, emp)}
+                                                                                            className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
+                                                                                        >
+                                                                                            {emp.fullName}
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
+                                                                            {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
+                                                                        </button>
                                                                     </div>
-                                                                    <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
-                                                                        {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
-                                                                    </button>
+                                                                </div>
+                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
+                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <p className="text-emerald-400 font-bold text-lg">{tx.amount.replace(/[^0-9.]/g, '')}</p>
+                                                                        <button onClick={() => handleCopyField(tx.amount.replace(/[^0-9.]/g, ''), 'amount')} className="text-emerald-500 hover:text-white transition-colors">
+                                                                            {copiedField === 'amount' ? <Check size={14} /> : <Copy size={14} />}
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
-                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <p className="text-emerald-400 font-bold text-lg">{tx.amount.replace(/[^0-9.]/g, '')}</p>
-                                                                    <button onClick={() => handleCopyField(tx.amount.replace(/[^0-9.]/g, ''), 'amount')} className="text-emerald-500 hover:text-white transition-colors">
-                                                                        {copiedField === 'amount' ? <Check size={14} /> : <Copy size={14} />}
-                                                                    </button>
+
+                                                            {/* BSB and Account Number Row */}
+                                                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
+                                                                        <button
+                                                                            onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${idx}`)}
+                                                                            className="text-slate-500 hover:text-white transition-colors"
+                                                                            disabled={!selectedEmployee?.bsb}
+                                                                        >
+                                                                            {copiedField === `bsb-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        {/* BSB and Account Number Row */}
-                                                        <div className="grid grid-cols-2 gap-4 mt-4">
-                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
-                                                                    <button 
-                                                                        onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${idx}`)} 
-                                                                        className="text-slate-500 hover:text-white transition-colors"
-                                                                        disabled={!selectedEmployee?.bsb}
-                                                                    >
-                                                                        {copiedField === `bsb-${idx}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
-                                                                    <button 
-                                                                        onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${idx}`)} 
-                                                                        className="text-slate-500 hover:text-white transition-colors"
-                                                                        disabled={!selectedEmployee?.account}
-                                                                    >
-                                                                        {copiedField === `account-${idx}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                    </button>
+                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
+                                                                        <button
+                                                                            onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${idx}`)}
+                                                                            className="text-slate-500 hover:text-white transition-colors"
+                                                                            disabled={!selectedEmployee?.account}
+                                                                        >
+                                                                            {copiedField === `account-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            )})}
+                                                )
+                                            })}
 
                                             <div className="px-8 pt-6 pb-2">
                                                 <label className="block text-xs uppercase tracking-widest font-bold text-slate-500 mb-2">
@@ -2036,7 +2062,6 @@ export const App = () => {
                     {/* ... (Other Tabs like NAB, EOD, Analytics, Settings remain the same) ... */}
                     {activeTab === 'nab_log' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* ... (NAB Log content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <CreditCard className="text-emerald-400" />
@@ -2123,7 +2148,6 @@ export const App = () => {
 
                     {activeTab === 'eod' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* ... (EOD content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <ClipboardList className="text-indigo-400" />
@@ -2385,7 +2409,6 @@ export const App = () => {
 
                     {activeTab === 'settings' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* ... (Settings content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <Users className="text-blue-400" />

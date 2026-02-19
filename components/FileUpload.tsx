@@ -10,6 +10,8 @@ interface FileUploadProps {
   multiple?: boolean;
   accept?: string;
   description?: string;
+  manualText?: string;
+  onManualTextChange?: (text: string) => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({
@@ -18,7 +20,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
   onFilesChange,
   multiple = false,
   accept = "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv",
-  description = "Support for JPG, PDF, Word, Excel"
+  description = "Support for JPG, PDF, Word, Excel",
+  manualText,
+  onManualTextChange
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,12 +62,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
         processedFiles.push(...nonHeicFiles);
       }
       setIsConverting(false);
-      
+
       // Generate previews and update state
       const newFilesWithPreview = processedFiles.map((file: File) => Object.assign(file, {
         preview: URL.createObjectURL(file)
       }));
-      
+
       if (multiple) {
         onFilesChange([...files, ...newFilesWithPreview]);
       } else if (newFilesWithPreview.length > 0) {
@@ -82,12 +86,12 @@ const FileUpload: React.FC<FileUploadProps> = ({
       if (isHeic) {
         try {
           console.log(`Converting HEIC file: ${file.name} (${formatBytes(file.size)})`);
-          
+
           // Check file size - large HEIC files might cause issues
           if (file.size > 50 * 1024 * 1024) {
             console.warn(`Large HEIC file detected: ${file.name}. Conversion may take longer.`);
           }
-          
+
           // Convert to JPEG with better error handling
           const convertedBlob = await heic2any({
             blob: file,
@@ -97,18 +101,18 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
           // Handle both single blob and array of blobs
           const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-          
+
           if (!blob) {
             throw new Error('Conversion returned empty result');
           }
 
           // Create new File with .jpg extension
           const newName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
-          const newFile = new File([blob], newName, { 
+          const newFile = new File([blob], newName, {
             type: 'image/jpeg',
             lastModified: Date.now()
           });
-          
+
           console.log(`Successfully converted: ${newName} (${formatBytes(newFile.size)})`);
           processedFiles.push(newFile);
         } catch (e) {
@@ -311,12 +315,28 @@ const FileUpload: React.FC<FileUploadProps> = ({
               </li>
             ))}
           </ul>
-          <button 
+          <button
             onClick={() => setConversionErrors([])}
             className="mt-2 text-xs text-red-400 hover:text-red-300 underline"
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Manual Text Input Fallback */}
+      {onManualTextChange !== undefined && (
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Manual Text Fallback (Optional)</span>
+            <span className="text-[10px] text-slate-600">If AI is busy/offline</span>
+          </div>
+          <textarea
+            value={manualText || ''}
+            onChange={(e) => onManualTextChange(e.target.value)}
+            placeholder="Paste text from receipt or enter details manually here..."
+            className="w-full h-24 bg-black/20 border border-white/10 rounded-xl p-3 text-xs text-slate-300 focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-600 resize-none custom-scrollbar"
+          />
         </div>
       )}
 
