@@ -1,4 +1,4 @@
-export type AIProvider = 'local' | 'gemini' | 'minimax' | 'kimi' | 'glm';
+export type AIProvider = 'gemini' | 'minimax' | 'kimi' | 'glm';
 
 export interface ProviderConfig {
   name: string;
@@ -17,7 +17,6 @@ export interface ProviderStatus {
 }
 
 export const PROVIDER_MODELS: Record<AIProvider, string[]> = {
-  local: ['tesseract-lstm'], // Local OCR using Tesseract.js LSTM model
   gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview'],
   minimax: ['MiniMax-Text-01', 'abab6.5s-chat'],
   kimi: ['kimi-k2.5-free', 'moonshot-v1-8k', 'moonshot-v1-32k'],
@@ -26,12 +25,6 @@ export const PROVIDER_MODELS: Record<AIProvider, string[]> = {
 
 // Default configurations - these will be overridden by environment variables
 export const DEFAULT_PROVIDER_CONFIGS: Record<AIProvider, ProviderConfig> = {
-  local: {
-    name: 'Local OCR (Tesseract.js)',
-    apiKey: 'local', // No API key needed for local OCR
-    model: 'tesseract-lstm',
-    temperature: 0
-  },
   gemini: {
     name: 'Google Gemini',
     apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
@@ -65,12 +58,10 @@ export const DEFAULT_PROVIDER_CONFIGS: Record<AIProvider, ProviderConfig> = {
 };
 
 // Priority order for fallback
-// 'local' is always tried first for OCR tasks to save API costs
-export const PROVIDER_PRIORITY: AIProvider[] = ['local', 'gemini', 'kimi', 'minimax', 'glm'];
+export const PROVIDER_PRIORITY: AIProvider[] = ['gemini', 'kimi', 'minimax', 'glm'];
 
 // Rate limit tracking
 export const rateLimitTracker = {
-  local: { count: 0, resetTime: Date.now() }, // Local OCR has no rate limits
   gemini: { count: 0, resetTime: Date.now() },
   minimax: { count: 0, resetTime: Date.now() },
   kimi: { count: 0, resetTime: Date.now() },
@@ -90,7 +81,6 @@ export function isRateLimited(provider: AIProvider): boolean {
   
   // Check limits
   const limits: Record<AIProvider, number> = {
-    local: 999999, // Local OCR has no rate limits (effectively unlimited)
     gemini: 15,    // Gemini free tier: ~15 requests per minute
     minimax: 20,   // MiniMax typical limit
     kimi: 3,       // Kimi free tier: ~3 requests per minute

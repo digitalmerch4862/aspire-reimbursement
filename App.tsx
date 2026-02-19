@@ -77,9 +77,9 @@ export const App = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [showSaveModal, setShowSaveModal] = useState(false);
 
-    // OCR Status State
+    // OCR Status State - Cloud only
     const [ocrStatus, setOcrStatus] = useState<string>('');
-    const [ocrMethod, setOcrMethod] = useState<'local' | 'cloud' | null>(null);
+    const [ocrMethod, setOcrMethod] = useState<'cloud' | null>(null);
 
     const [emailCopied, setEmailCopied] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -115,8 +115,8 @@ export const App = () => {
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
     const [showEmployeeDropdown, setShowEmployeeDropdown] = useState<Map<number, boolean>>(new Map());
 
-    // AI Provider State
-    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('local');
+    // AI Provider State - Cloud APIs only (Local OCR removed)
+    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('gemini');
 
     // Mass Edit State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1124,12 +1124,7 @@ export const App = () => {
                 extractedText = ocrResult.text;
                 setOcrMethod(ocrResult.method);
                 
-                console.log(`[Process] OCR complete using ${ocrResult.method} method`);
-                if (ocrResult.method === 'local' && ocrResult.confidence) {
-                    console.log(`[Process] Local OCR confidence: ${ocrResult.confidence.toFixed(1)}%`);
-                } else if (ocrResult.method === 'cloud' && ocrResult.provider) {
-                    console.log(`[Process] Cloud OCR via ${ocrResult.provider}${ocrResult.localResults ? ' (after local failed)' : ''}`);
-                }
+                console.log(`[Process] OCR complete using cloud method`);
             }
 
             // Step 2: Prepare images for AI analysis
@@ -1146,8 +1141,8 @@ export const App = () => {
             } : null;
 
             setOcrStatus('Analyzing with AI...');
-            // If 'local' is selected, use a cloud provider for AI analysis (since 'local' is only for OCR)
-            const aiProvider = selectedAIProvider === 'local' ? 'gemini' : selectedAIProvider;
+            // Use selected cloud provider for AI analysis
+            const aiProvider = selectedAIProvider;
             const fullResponse = await analyzeReimbursement(receiptImages, formImage, aiProvider, extractedText);
 
             const parseSection = (tagStart: string, tagEnd: string, text: string, sectionName: string) => {
@@ -1788,29 +1783,14 @@ export const App = () => {
                                         <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Final Decision" description="Email generation" />
                                     </div>
                                     
-                                    {/* OCR Method Badge */}
-                                    {processingState === ProcessingState.PROCESSING && ocrMethod && (
+                                    {/* Processing Status Badge */}
+                                    {processingState === ProcessingState.PROCESSING && (
                                         <div className="mt-4 pt-4 border-t border-white/5">
-                                            <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
-                                                ocrMethod === 'local' 
-                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                                                    : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                            }`}>
-                                                {ocrMethod === 'local' ? (
-                                                    <>
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                        Using Local OCR (Free)
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                                                        </svg>
-                                                        Using Cloud API
-                                                    </>
-                                                )}
+                                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                                                </svg>
+                                                Using Cloud API
                                             </div>
                                         </div>
                                     )}
@@ -1837,22 +1817,11 @@ export const App = () => {
                                         <h2 className="text-xl font-bold text-white">Analyzing Documents...</h2>
                                         <p className="text-slate-400 mt-2 animate-pulse">{ocrStatus || 'Running compliance checks'}</p>
                                         
-                                        {/* OCR Method Indicator */}
-                                        {ocrMethod && (
-                                            <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-white/5 text-slate-400 border border-white/10">
-                                                {ocrMethod === 'local' ? (
-                                                    <>
-                                                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                                                        Processing locally to save API costs
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-                                                        Using cloud AI for better accuracy
-                                                    </>
-                                                )}
-                                            </div>
-                                        )}
+                                        {/* Processing Indicator */}
+                                        <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                                            Using cloud AI
+                                        </div>
                                     </div>
                                 )}
                                 {results && (

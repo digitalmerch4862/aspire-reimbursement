@@ -22,14 +22,6 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
 }) => {
   const [providers, setProviders] = useState<ProviderInfo[]>([
     {
-      id: 'local',
-      name: 'Local OCR (Hybrid)',
-      description: 'Tesseract.js - Zero API Cost',
-      icon: <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
-      color: 'text-emerald-400',
-      status: 'available'
-    },
-    {
       id: 'gemini',
       name: 'Gemini Flash',
       description: 'Google - Fast & Reliable',
@@ -78,10 +70,6 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
     setProviders(prev => prev.map(p => {
       let hasKey = false;
       switch (p.id) {
-        case 'local':
-          // Local OCR is always available - no API key needed
-          hasKey = true;
-          break;
         case 'gemini':
           hasKey = !!geminiKey;
           break;
@@ -110,7 +98,7 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
           <span className="text-sm font-medium text-white">AI Provider</span>
         </div>
         <span className="text-[10px] text-slate-500 uppercase tracking-wider">
-          Hybrid OCR Enabled
+          Cloud API Only
         </span>
       </div>
       
@@ -156,11 +144,11 @@ export const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({
       </div>
       
       <div className="mt-3 space-y-1">
-        <p className="text-[10px] text-emerald-400 flex items-center gap-1">
+        <p className="text-[10px] text-blue-400 flex items-center gap-1">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
           </svg>
-          Local OCR processes first to save API costs. Falls back to cloud if needed.
+          All processing done via Cloud APIs. Ensure you have valid API keys configured.
         </p>
         <p className="text-[10px] text-slate-500">
           If selected provider is rate-limited, system automatically switches to next available provider.
