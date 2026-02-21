@@ -1,20 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-    Upload, X, FileText, FileSpreadsheet, CheckCircle, Circle, Loader2,
+    Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
     Copy, CreditCard, ClipboardList, Calendar, BarChart3, PieChart, TrendingUp,
     Users, Database, Search, Download, Save, CloudUpload, Trash2
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
-import ProcessingStep from './components/ProcessingStep';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Logo from './components/Logo';
-import { AIProviderSelector } from './components/AIProviderSelector';
-import { analyzeReimbursement } from './services/geminiService';
-import type { AIProvider } from './services/aiProviderConfig';
-import { aiService } from './services/multiProviderAIService';
-import { performHybridOCR, HybridOCRResult } from './services/hybridOCRService';
-import { fileToBase64 } from './utils/fileHelpers';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 import { supabase } from './services/supabaseClient';
 
@@ -63,27 +56,619 @@ const findBestEmployeeMatch = (scannedName: string, employees: Employee[]): Empl
     return null;
 };
 
+const stripUidFallbackMeta = (text: string): string => {
+    return text.replace(/<!--\s*UID_FALLBACKS:.*?-->\s*/gi, '');
+};
+
+const stripClientLocationLine = (text: string): string => {
+    return String(text || '')
+        .replace(/^\*\*Client\s*\/\s*Location:\*\*\s*.*(?:\r?\n|$)/gim, '')
+        .replace(/^Client\s*\/\s*Location:\s*.*(?:\r?\n|$)/gim, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+const stripClientLocationFromElement = (element: HTMLElement): void => {
+    const targets = element.querySelectorAll('p, li, div, span, td, th');
+    targets.forEach((node) => {
+        const text = String(node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (text.startsWith('client / location:')) {
+            node.remove();
+        }
+    });
+};
+
+const isValidNabReference = (value: string | null | undefined): boolean => {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+
+    const invalidValues = [
+        'pending',
+        'nab code is pending',
+        'n/a',
+        'enter nab code',
+        'enter nab reference',
+        '[enter nab code]',
+        '[enter nab reference]'
+    ];
+
+    return !invalidValues.includes(normalized);
+};
+
+const isPendingNabCodeValue = (value: string | null | undefined): boolean => {
+    if (!value) return false;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    return [
+        'pending',
+        'nab code is pending',
+        'enter nab code',
+        'enter nab reference',
+        '[enter nab code]',
+        '[enter nab reference]'
+    ].includes(normalized);
+};
+
+const extractFieldValue = (content: string, patterns: RegExp[]): string => {
+    for (const pattern of patterns) {
+        const match = content.match(pattern);
+        const value = match?.[1]?.replace(/\*\*/g, '').trim();
+        if (value) return value;
+    }
+    return '';
+};
+
+interface NormalizedReceiptRow {
+    receiptNum: string;
+    uniqueId: string;
+    storeName: string;
+    dateTime: string;
+    product: string;
+    category: string;
+    itemAmount: string;
+    receiptTotal: string;
+    notes: string;
+}
+
+interface ManualAuditIssue {
+    level: 'warning' | 'error';
+    message: string;
+}
+
+interface PendingStaffGroup {
+    key: string;
+    staffName: string;
+    records: any[];
+    count: number;
+    latestDate: string;
+    oldestAgeDays: number;
+}
+
+interface GroupPettyCashEntry {
+    staffName: string;
+    amount: number;
+}
+
+interface InputTransactionFingerprint {
+    staffName: string;
+    amount: number;
+    uid: string;
+    storeName: string;
+    rawDate: string;
+    dateKey: string;
+    signatureKey: string;
+}
+
+interface RuleStatusItem {
+    id: string;
+    title: string;
+    detail: string;
+    severity: 'critical' | 'high' | 'medium' | 'info';
+    status: 'pass' | 'warning' | 'blocked';
+}
+
+interface RuleConfig {
+    id: string;
+    title: string;
+    detail: string;
+    severity: 'critical' | 'high' | 'medium' | 'info';
+    enabled: boolean;
+    isBuiltIn: boolean;
+    updatedAt: string;
+}
+
+interface RulePendingAction {
+    type: 'add' | 'edit' | 'delete';
+    ruleId?: string;
+    nextRule?: RuleConfig;
+}
+
+type DuplicateTrafficLight = 'red' | 'yellow' | 'green';
+
+interface DuplicateMatchEvidence {
+    txStaffName: string;
+    txDateKey: string;
+    txAmount: string;
+    txReference: string;
+    historyStaffName: string;
+    historyDateKey: string;
+    historyAmount: string;
+    historyReference: string;
+    historyProcessedAt: string;
+}
+
+interface DuplicateCheckResult {
+    signal: DuplicateTrafficLight;
+    redMatches: DuplicateMatchEvidence[];
+    yellowMatches: DuplicateMatchEvidence[];
+}
+
+interface SaveModalDecision {
+    mode: 'nab' | 'red' | 'yellow';
+    detail: string;
+}
+
+type RequestMode = 'solo' | 'group';
+
+type QuickEditFieldKey =
+    | 'staffMember'
+    | 'clientFullName'
+    | 'clientLocation'
+    | 'address'
+    | 'approvedBy'
+    | 'amount'
+    | 'receiptId'
+    | 'nabCode';
+
+interface QuickEditFieldConfig {
+    key: QuickEditFieldKey;
+    label: string;
+}
+
+interface QuickEditFieldState extends QuickEditFieldConfig {
+    value: string;
+    missing: boolean;
+}
+
+const DELETE_RULE_CONFIRMATION_PHRASE = 'yes i have decided to delete this rule with my own risk';
+
+const getDefaultBuiltInRules = (): RuleConfig[] => {
+    const now = new Date().toISOString();
+    return [
+        { id: 'r1', title: 'Duplicate in Current Upload', detail: 'Checks duplicate receipts in current upload.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r2', title: 'Already Processed Check', detail: 'Checks if receipt appears in processed history.', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r3', title: 'Amount Threshold (> $300)', detail: 'Flags transactions that exceed $300.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r4', title: 'Receipt Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r5', title: 'Required Fields', detail: 'Checks mandatory fields from reimbursement form.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r6', title: 'Subject for Approval', detail: 'Marks if request needs approval based on rule outcomes.', severity: 'info', enabled: true, isBuiltIn: true, updatedAt: now }
+    ];
+};
+
+const dateLikeRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2}|\btime\b|\b\d{1,2}:\d{2}\s*(?:am|pm)?\b)/i;
+
+const isDateLike = (value: string): boolean => dateLikeRegex.test(value || '');
+
+const normalizeMoneyValue = (value: string, fallback = '0.00'): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    const numeric = raw.replace(/[^0-9.\-]/g, '');
+    if (!numeric) return fallback;
+    const parsed = Number(numeric);
+    if (Number.isNaN(parsed)) return fallback;
+    return parsed.toFixed(2);
+};
+
+const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
+    const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+    const extracted: GroupPettyCashEntry[] = [];
+
+    for (const line of lines) {
+        const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
+        if (!match) continue;
+
+        const staffName = match[1].replace(/\s+/g, ' ').trim();
+        const amount = Number(match[2]);
+        if (!staffName || Number.isNaN(amount) || amount <= 0) continue;
+
+        extracted.push({ staffName, amount });
+    }
+
+    return extracted;
+};
+
+const parseDateValue = (value: string): Date | null => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+
+    const direct = new Date(raw);
+    if (!Number.isNaN(direct.getTime())) return direct;
+
+    const slashMatch = raw.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (!slashMatch) return null;
+
+    const day = Number(slashMatch[1]);
+    const month = Number(slashMatch[2]);
+    const yearRaw = Number(slashMatch[3]);
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+    const parsed = new Date(year, month - 1, day);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+};
+
+const toDateKey = (value: string): string => {
+    const parsed = parseDateValue(value);
+    if (!parsed) return String(value || '').trim().toLowerCase();
+    return parsed.toISOString().slice(0, 10);
+};
+
+const normalizeNameKey = (value: string): string => {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+const normalizeReferenceKey = (value: string): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (!isValidNabReference(raw)) return '';
+    return raw.toLowerCase();
+};
+
+const upsertStatusTag = (content: string, status: 'PENDING' | 'PAID'): string => {
+    const statusTag = `<!-- STATUS: ${status} -->`;
+    if (content.includes('<!-- STATUS:')) {
+        return content.replace(/<!--\s*STATUS:\s*(?:PENDING|PAID)\s*-->/gi, statusTag);
+    }
+    return `${content}${content.endsWith('\n') ? '' : '\n\n'}${statusTag}`;
+};
+
+const appendDuplicateAuditMeta = (
+    content: string,
+    payload?: { signal: DuplicateTrafficLight; reason?: string; detail?: string; lookbackDays: number }
+): string => {
+    if (!payload) return content;
+
+    const safeReason = String(payload.reason || '')
+        .replace(/-->/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const safeDetail = String(payload.detail || '')
+        .replace(/-->/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const checkedAt = new Date().toISOString();
+    const meta = `<!-- DUPLICATE_AUDIT: signal=${payload.signal.toUpperCase()}; lookback_days=${payload.lookbackDays}; reason=${safeReason || 'none'}; detail=${safeDetail || 'none'}; checked_at=${checkedAt} -->`;
+    const stripped = content.replace(/\n*<!--\s*DUPLICATE_AUDIT:.*?-->\s*/gi, '\n');
+    return `${stripped.trimEnd()}\n\n${meta}`;
+};
+
+const extractPendingFollowedUpAt = (content: string): string => {
+    const match = String(content || '').match(/<!--\s*PENDING_FOLLOWED_UP_AT:\s*(.*?)\s*-->/i);
+    return match?.[1]?.trim() || '';
+};
+
+const upsertPendingFollowedUpAt = (content: string, isoTimestamp: string): string => {
+    const tag = `<!-- PENDING_FOLLOWED_UP_AT: ${isoTimestamp} -->`;
+    if (/<!--\s*PENDING_FOLLOWED_UP_AT:/i.test(content)) {
+        return content.replace(/<!--\s*PENDING_FOLLOWED_UP_AT:\s*.*?\s*-->/i, tag);
+    }
+    return `${content}${content.endsWith('\n') ? '' : '\n\n'}${tag}`;
+};
+
+const getPendingAgeDays = (record: any): number => {
+    const followedUpAt = extractPendingFollowedUpAt(record?.full_email_content || '');
+    const baseline = followedUpAt || String(record?.created_at || '');
+    const baselineMs = new Date(baseline).getTime();
+    if (Number.isNaN(baselineMs)) return 0;
+    const age = Math.floor((Date.now() - baselineMs) / (24 * 60 * 60 * 1000));
+    return Math.max(0, age);
+};
+
+const getPendingAgingBucket = (ageDays: number): 'fresh' | 'watch' | 'stale' => {
+    if (ageDays >= 8) return 'stale';
+    if (ageDays >= 3) return 'watch';
+    return 'fresh';
+};
+
+const QUICK_EDIT_FIELD_CONFIGS: QuickEditFieldConfig[] = [
+    { key: 'staffMember', label: 'Staff Member' },
+    { key: 'clientFullName', label: "Client's Full Name" },
+    { key: 'clientLocation', label: 'Client / Location' },
+    { key: 'address', label: 'Address' },
+    { key: 'approvedBy', label: 'Approved By' },
+    { key: 'amount', label: 'Amount' },
+    { key: 'receiptId', label: 'Receipt ID' }
+];
+
+const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
+    const base = {
+        staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i],
+        clientFullName: [/\*\*Client(?:'|’)?s\s+Full\s+Name:\*\*\s*(.*?)(?:\n|$)/i],
+        clientLocation: [/\*\*Client\s*\/\s*Location:\*\*\s*(.*?)(?:\n|$)/i],
+        address: [/\*\*Address:\*\*\s*(.*?)(?:\n|$)/i],
+        approvedBy: [/\*\*Approved\s*By:\*\*\s*(.*?)(?:\n|$)/i, /\*\*Approved\s*by:\*\*\s*(.*?)(?:\n|$)/i],
+        amount: [/\*\*Amount:\*\*\s*(.*?)(?:\n|$)/i],
+        receiptId: [/\*\*Receipt\s*ID:\*\*\s*(.*?)(?:\n|$)/i],
+        nabCode: [/\*\*NAB\s*(?:Code|Reference):\*\*\s*(.*?)(?:\n|$)/i]
+    };
+
+    return base[key];
+};
+
+const getQuickEditFieldValue = (content: string, key: QuickEditFieldKey): string => {
+    const patterns = getQuickFieldPatterns(key);
+    for (const pattern of patterns) {
+        const match = content.match(pattern);
+        const value = match?.[1]?.trim();
+        if (value !== undefined) return value;
+    }
+    return '';
+};
+
+const isQuickEditFieldMissing = (key: QuickEditFieldKey, rawValue: string): boolean => {
+    const value = String(rawValue || '').trim();
+    if (!value) return true;
+    if (/^\[.*\]$/.test(value)) return true;
+    if (/^(n\/a|na)$/i.test(value)) return true;
+    if (/^enter\b/i.test(value)) return true;
+    if (key === 'amount' && !/[0-9]/.test(value)) return true;
+    return false;
+};
+
+const applyQuickEditFieldValue = (content: string, key: QuickEditFieldKey, nextRawValue: string): string => {
+    const nextValue = String(nextRawValue || '').trim();
+    if (!nextValue) return content;
+
+    const formattedValue = key === 'amount'
+        ? (nextValue.startsWith('$') ? nextValue : `$${nextValue}`)
+        : nextValue;
+
+    const patterns = getQuickFieldPatterns(key);
+    for (const pattern of patterns) {
+        if (pattern.test(content)) {
+            return content.replace(pattern, (full, captured) => full.replace(captured, formattedValue));
+        }
+    }
+
+    const fallbackLabel = QUICK_EDIT_FIELD_CONFIGS.find(field => field.key === key)?.label || key;
+    return `${content}${content.endsWith('\n') ? '' : '\n'}**${fallbackLabel}:** ${formattedValue}\n`;
+};
+
+const normalizeReceiptRow = (
+    parts: string[],
+    fallbackTotal: string,
+    fallbackStore: string,
+    fallbackUid: string
+): NormalizedReceiptRow | null => {
+    if (!parts.length) return null;
+
+    let normalized: NormalizedReceiptRow;
+
+    if (parts.length >= 9) {
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: parts[1] || '',
+            storeName: parts[2] || '',
+            dateTime: parts[3] || '',
+            product: parts[4] || '',
+            category: parts[5] || 'Uncategorized',
+            itemAmount: parts[6] || 'Included in total',
+            receiptTotal: parts[7] || fallbackTotal,
+            notes: parts[8] || ''
+        };
+    } else if (parts.length >= 8) {
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: parts[1] || fallbackUid,
+            storeName: parts[2] || fallbackStore,
+            dateTime: parts[3] || '',
+            product: parts[4] || '',
+            category: parts[5] || 'Uncategorized',
+            itemAmount: parts[6] || 'Included in total',
+            receiptTotal: parts[7] || fallbackTotal,
+            notes: ''
+        };
+    } else if (parts.length >= 6) {
+        const storeAndTime = parts[1] || '';
+        const dateMatch = storeAndTime.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)?)/i);
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: fallbackUid,
+            storeName: dateMatch ? storeAndTime.replace(dateMatch[1], '').trim() : (storeAndTime || fallbackStore),
+            dateTime: dateMatch ? dateMatch[1].trim() : '',
+            product: parts[2] || '',
+            category: parts[3] || 'Uncategorized',
+            itemAmount: parts[4] || 'Included in total',
+            receiptTotal: parts[5] || fallbackTotal,
+            notes: ''
+        };
+    } else if (parts.length === 5) {
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: fallbackUid,
+            storeName: parts[1] || fallbackStore,
+            dateTime: parts[2] || '',
+            product: parts[3] || '',
+            category: 'Uncategorized',
+            itemAmount: 'Included in total',
+            receiptTotal: parts[4] || fallbackTotal,
+            notes: ''
+        };
+    } else if (parts.length === 4) {
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: fallbackUid,
+            storeName: fallbackStore,
+            dateTime: parts[1] || '',
+            product: parts[2] || '',
+            category: 'Uncategorized',
+            itemAmount: 'Included in total',
+            receiptTotal: parts[3] || fallbackTotal,
+            notes: ''
+        };
+    } else {
+        return null;
+    }
+
+    if (!normalized.receiptNum || /total|grand/i.test(normalized.receiptNum)) return null;
+
+    if (!isDateLike(normalized.dateTime) && isDateLike(normalized.product)) {
+        const swapped = normalized.dateTime;
+        normalized.dateTime = normalized.product;
+        normalized.product = swapped;
+    }
+
+    if (normalized.itemAmount.toLowerCase() !== 'included in total') {
+        normalized.itemAmount = normalizeMoneyValue(normalized.itemAmount, normalizeMoneyValue(normalized.receiptTotal, '0.00'));
+    }
+    normalized.receiptTotal = normalizeMoneyValue(normalized.receiptTotal, normalizeMoneyValue(fallbackTotal, '0.00'));
+
+    if (!normalized.storeName) normalized.storeName = fallbackStore;
+    if (!normalized.uniqueId) normalized.uniqueId = fallbackUid;
+
+    return normalized;
+};
+
+const buildManualAuditIssues = (
+    items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }>,
+    formTotal: number,
+    receiptGrandTotal: number | null,
+    clientName: string,
+    address: string,
+    staffMember: string,
+    approvedBy: string
+): ManualAuditIssue[] => {
+    const issues: ManualAuditIssue[] = [];
+
+    if (!clientName) issues.push({ level: 'warning', message: "Missing 'Client's Full Name' in Reimbursement Form." });
+    if (!address) issues.push({ level: 'warning', message: "Missing 'Address' in Reimbursement Form." });
+    if (!staffMember) issues.push({ level: 'warning', message: "Missing 'Staff member to reimburse' in Reimbursement Form." });
+    if (!approvedBy) issues.push({ level: 'warning', message: "Missing 'Approved by' in Reimbursement Form." });
+
+    if (items.length === 0) {
+        issues.push({ level: 'error', message: 'No valid receipt rows found. Check table format before continuing.' });
+        return issues;
+    }
+
+    const duplicateUidMap = new Map<string, Array<{ rowNum: number; receiptNum: string; product: string; amount: string }>>();
+    const duplicateReceiptKeyMap = new Map<string, Array<{ rowNum: number; receiptNum: string; product: string; amount: string }>>();
+
+    items.forEach((item, idx) => {
+        const rowNum = idx + 1;
+        const uid = (item.uniqueId || '').trim().toLowerCase();
+        const receiptNum = (item.receiptNum || '').trim();
+        const product = (item.product || '').trim().toLowerCase();
+        const amount = normalizeMoneyValue(item.receiptTotal || item.amount, '0.00');
+
+        if (uid && uid !== '-' && uid !== 'n/a') {
+            duplicateUidMap.set(uid, [
+                ...(duplicateUidMap.get(uid) || []),
+                { rowNum, receiptNum, product, amount }
+            ]);
+        }
+
+        const key = [
+            (item.storeName || '').trim().toLowerCase(),
+            (item.dateTime || '').trim().toLowerCase(),
+            amount
+        ].join('|');
+
+        if (key !== '||0.00') {
+            duplicateReceiptKeyMap.set(key, [
+                ...(duplicateReceiptKeyMap.get(key) || []),
+                { rowNum, receiptNum, product, amount }
+            ]);
+        }
+
+        if (!item.product || item.product.trim() === '' || item.product === '-') {
+            issues.push({ level: 'warning', message: `Row ${rowNum}: missing Product (Per Item).` });
+        }
+
+        if (!item.dateTime || item.dateTime.trim() === '' || item.dateTime === '-') {
+            issues.push({ level: 'warning', message: `Row ${rowNum}: missing Date & Time.` });
+        }
+
+        const totalNum = Number(normalizeMoneyValue(item.receiptTotal || item.amount, '0.00'));
+        if (Number.isNaN(totalNum) || totalNum <= 0) {
+            issues.push({ level: 'warning', message: `Row ${rowNum}: invalid Receipt Total.` });
+        }
+    });
+
+    duplicateUidMap.forEach((entries) => {
+        if (entries.length > 1) {
+            const rowNums = entries.map(e => e.rowNum);
+            const receiptNums = new Set(entries.map(e => e.receiptNum || ''));
+            const sameLineItems = new Set(entries.map(e => `${e.product}|${e.amount}`));
+            const isLikelyRealDuplicate = receiptNums.size > 1 || sameLineItems.size < entries.length;
+
+            if (isLikelyRealDuplicate) {
+                issues.push({ level: 'warning', message: `Possible double entry: same Unique ID / Fallback in rows ${rowNums.join(', ')}.` });
+            }
+        }
+    });
+
+    duplicateReceiptKeyMap.forEach((entries) => {
+        if (entries.length > 1) {
+            const rowNums = entries.map(e => e.rowNum);
+            const productAmountPairs = new Set(entries.map(e => `${e.product}|${e.amount}`));
+            const isLikelyRealDuplicate = productAmountPairs.size < entries.length;
+
+            if (isLikelyRealDuplicate) {
+                issues.push({ level: 'warning', message: `Possible duplicate receipt (same Store + Date/Time + Total) in rows ${rowNums.join(', ')}.` });
+            }
+        }
+    });
+
+    if (receiptGrandTotal !== null && formTotal > 0) {
+        const diff = Math.abs(formTotal - receiptGrandTotal);
+        if (diff > 0.01) {
+            issues.push({
+                level: 'warning',
+                message: `Total mismatch: Form Total $${formTotal.toFixed(2)} vs Receipt GRAND TOTAL $${receiptGrandTotal.toFixed(2)}.`
+            });
+        }
+    }
+
+    return issues;
+};
+
 export const App = () => {
+    const DUPLICATE_LOOKBACK_DAYS = 30;
+
     const [receiptFiles, setReceiptFiles] = useState<FileWithPreview[]>([]);
     const [formFiles, setFormFiles] = useState<FileWithPreview[]>([]);
     const [processingState, setProcessingState] = useState<ProcessingState>(ProcessingState.IDLE);
     const [results, setResults] = useState<ProcessingResult | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-    const [isEditing, setIsEditing] = useState(false);
+const [isEditing, setIsEditing] = useState(false);
     const [editableContent, setEditableContent] = useState('');
 
     const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error' | 'duplicate'>('idle');
     const [isSaving, setIsSaving] = useState(false);
     const [showSaveModal, setShowSaveModal] = useState(false);
+    const [saveModalDecision, setSaveModalDecision] = useState<SaveModalDecision | null>(null);
+    const [reviewerOverrideReason, setReviewerOverrideReason] = useState('');
+    const [quickEditDrafts, setQuickEditDrafts] = useState<Partial<Record<QuickEditFieldKey, string>>>({});
+    const [pendingApprovalStaffGroup, setPendingApprovalStaffGroup] = useState<PendingStaffGroup | null>(null);
+    const [pendingApprovalNabCode, setPendingApprovalNabCode] = useState('');
+    const [isApprovingPending, setIsApprovingPending] = useState(false);
+    const [followUpingGroupKey, setFollowUpingGroupKey] = useState<string | null>(null);
+    const [manualAuditIssues, setManualAuditIssues] = useState<ManualAuditIssue[]>([]);
+    const [showManualAuditModal, setShowManualAuditModal] = useState(false);
+    const bypassManualAuditRef = useRef(false);
 
-    // OCR Status State - Cloud only
+    // Processing status state
     const [ocrStatus, setOcrStatus] = useState<string>('');
-    const [ocrMethod, setOcrMethod] = useState<'cloud' | null>(null);
 
     // Manual Input States
-    const [receiptManualText, setReceiptManualText] = useState('');
-    const [formManualText, setFormManualText] = useState('');
+    const [reimbursementFormText, setReimbursementFormText] = useState('');
+    const [receiptDetailsText, setReceiptDetailsText] = useState('');
+    const [requestMode, setRequestMode] = useState<RequestMode>('solo');
+    const reimbursementFormRef = useRef<HTMLTextAreaElement | null>(null);
 
     const [emailCopied, setEmailCopied] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -113,14 +698,23 @@ export const App = () => {
     const [employeeList, setEmployeeList] = useState<Employee[]>([]);
     const [employeeRawText, setEmployeeRawText] = useState(DEFAULT_EMPLOYEE_DATA);
     const [saveEmployeeStatus, setSaveEmployeeStatus] = useState<'idle' | 'saved'>('idle');
-
+    
     // Employee Selection State for Banking Details
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
     const [showEmployeeDropdown, setShowEmployeeDropdown] = useState<Map<number, boolean>>(new Map());
 
-    // AI Provider State - Cloud APIs only (Local OCR removed)
-    const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('gemini');
+    // Rules Management
+    const [rulesConfig, setRulesConfig] = useState<RuleConfig[]>(getDefaultBuiltInRules());
+    const [newRuleTitle, setNewRuleTitle] = useState('');
+    const [newRuleDetail, setNewRuleDetail] = useState('');
+    const [newRuleSeverity, setNewRuleSeverity] = useState<'critical' | 'high' | 'medium' | 'info'>('medium');
+    const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+    const [editingRuleDraft, setEditingRuleDraft] = useState<RuleConfig | null>(null);
+    const [pendingRuleAction, setPendingRuleAction] = useState<RulePendingAction | null>(null);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [showRestoreRulesModal, setShowRestoreRulesModal] = useState(false);
+    const [selectedRestoreRuleIds, setSelectedRestoreRuleIds] = useState<Set<string>>(new Set());
 
     // Mass Edit State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -156,6 +750,33 @@ export const App = () => {
             setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
         }
 
+        // Load Rules Config
+        const storedRulesConfig = localStorage.getItem('aspire_rules_config');
+        if (storedRulesConfig) {
+            try {
+                const parsed = JSON.parse(storedRulesConfig);
+                if (Array.isArray(parsed)) {
+                    const normalized = parsed
+                        .filter((r: any) => r && typeof r.id === 'string' && typeof r.title === 'string' && typeof r.detail === 'string')
+                        .map((r: any) => ({
+                            id: r.id,
+                            title: r.title,
+                            detail: r.detail,
+                            severity: (['critical', 'high', 'medium', 'info'].includes(r.severity) ? r.severity : 'medium') as RuleConfig['severity'],
+                            enabled: Boolean(r.enabled),
+                            isBuiltIn: Boolean(r.isBuiltIn),
+                            updatedAt: r.updatedAt || new Date().toISOString()
+                        })) as RuleConfig[];
+
+                    const existingIds = new Set(normalized.map((r: RuleConfig) => r.id));
+                    const defaults = getDefaultBuiltInRules().filter(rule => !existingIds.has(rule.id));
+                    setRulesConfig([...normalized, ...defaults]);
+                }
+            } catch (error) {
+                console.warn('Failed to parse stored rules config:', error);
+            }
+        }
+
         // Initial fetch
         fetchHistory();
 
@@ -167,6 +788,123 @@ export const App = () => {
         setEmployeeList(parseEmployeeData(employeeRawText));
         setSaveEmployeeStatus('saved');
         setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+    };
+
+    const persistRulesConfig = (nextRules: RuleConfig[]) => {
+        setRulesConfig(nextRules);
+        localStorage.setItem('aspire_rules_config', JSON.stringify(nextRules));
+    };
+
+    const handleRequestAddRule = () => {
+        const title = newRuleTitle.trim();
+        const detail = newRuleDetail.trim();
+        if (!title || !detail) return;
+
+        const newRule: RuleConfig = {
+            id: `custom-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            title,
+            detail,
+            severity: newRuleSeverity,
+            enabled: true,
+            isBuiltIn: false,
+            updatedAt: new Date().toISOString()
+        };
+        setPendingRuleAction({ type: 'add', nextRule: newRule });
+    };
+
+    const handleStartEditRule = (rule: RuleConfig) => {
+        setEditingRuleId(rule.id);
+        setEditingRuleDraft({ ...rule });
+    };
+
+    const handleRequestSaveRuleEdit = () => {
+        if (!editingRuleId || !editingRuleDraft) return;
+        if (!editingRuleDraft.title.trim() || !editingRuleDraft.detail.trim()) return;
+        setPendingRuleAction({
+            type: 'edit',
+            ruleId: editingRuleId,
+            nextRule: {
+                ...editingRuleDraft,
+                title: editingRuleDraft.title.trim(),
+                detail: editingRuleDraft.detail.trim(),
+                updatedAt: new Date().toISOString()
+            }
+        });
+    };
+
+    const handleRequestDeleteRule = (ruleId: string) => {
+        setDeleteConfirmText('');
+        setPendingRuleAction({ type: 'delete', ruleId });
+    };
+
+    const handleConfirmRuleAction = () => {
+        if (!pendingRuleAction) return;
+
+        if (pendingRuleAction.type === 'add' && pendingRuleAction.nextRule) {
+            const nextRules = [pendingRuleAction.nextRule, ...rulesConfig];
+            persistRulesConfig(nextRules);
+            setNewRuleTitle('');
+            setNewRuleDetail('');
+            setNewRuleSeverity('medium');
+        }
+
+        if (pendingRuleAction.type === 'edit' && pendingRuleAction.ruleId && pendingRuleAction.nextRule) {
+            const nextRules = rulesConfig.map(rule => rule.id === pendingRuleAction.ruleId ? pendingRuleAction.nextRule! : rule);
+            persistRulesConfig(nextRules);
+            setEditingRuleId(null);
+            setEditingRuleDraft(null);
+        }
+
+        if (pendingRuleAction.type === 'delete' && pendingRuleAction.ruleId) {
+            if (deleteConfirmText !== DELETE_RULE_CONFIRMATION_PHRASE) return;
+            const nextRules = rulesConfig.filter(rule => rule.id !== pendingRuleAction.ruleId);
+            persistRulesConfig(nextRules);
+            if (editingRuleId === pendingRuleAction.ruleId) {
+                setEditingRuleId(null);
+                setEditingRuleDraft(null);
+            }
+        }
+
+        setPendingRuleAction(null);
+        setDeleteConfirmText('');
+    };
+
+    const handleToggleRuleEnabled = (ruleId: string) => {
+        const nextRules = rulesConfig.map(rule => {
+            if (rule.id !== ruleId) return rule;
+            return {
+                ...rule,
+                enabled: !rule.enabled,
+                updatedAt: new Date().toISOString()
+            };
+        });
+        persistRulesConfig(nextRules);
+    };
+
+    const missingBuiltInRules = useMemo(() => {
+        const currentIds = new Set(rulesConfig.map(rule => rule.id));
+        return getDefaultBuiltInRules().filter(rule => !currentIds.has(rule.id));
+    }, [rulesConfig]);
+
+    const toggleRestoreRuleSelection = (ruleId: string) => {
+        setSelectedRestoreRuleIds(prev => {
+            const next = new Set(prev);
+            if (next.has(ruleId)) {
+                next.delete(ruleId);
+            } else {
+                next.add(ruleId);
+            }
+            return next;
+        });
+    };
+
+    const handleRestoreSelectedRules = () => {
+        const defaults = getDefaultBuiltInRules().filter(rule => selectedRestoreRuleIds.has(rule.id));
+        if (defaults.length === 0) return;
+        const nextRules = [...rulesConfig, ...defaults.map(rule => ({ ...rule, updatedAt: new Date().toISOString() }))];
+        persistRulesConfig(nextRules);
+        setSelectedRestoreRuleIds(new Set());
+        setShowRestoreRulesModal(false);
     };
 
     // Helper to parse extracting transactions from the email content (Dynamic for Batch and Single)
@@ -202,7 +940,7 @@ export const App = () => {
         // Find NAB code
         const nabMatch = part.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
         let currentNabRef = nabMatch ? nabMatch[1].trim() : '';
-        if (currentNabRef === 'PENDING') currentNabRef = ''; // Clear pending for input value
+        if (!isValidNabReference(currentNabRef)) currentNabRef = ''; // Clear placeholders/pending for input value
 
         // Find Receipt ID (if exists)
         const receiptMatch = part.match(/\*\*Receipt ID:\*\*\s*(.*)/) || part.match(/Receipt ID:\s*(.*)/);
@@ -226,6 +964,53 @@ export const App = () => {
     };
 
     const parsedTransactions = getParsedTransactions();
+
+    const activeEmailContent = isEditing ? editableContent : (results?.phase4 || '');
+
+    const quickEditFields = useMemo<QuickEditFieldState[]>(() => {
+        if (!activeEmailContent) return [];
+        return QUICK_EDIT_FIELD_CONFIGS.map((field) => {
+            const value = getQuickEditFieldValue(activeEmailContent, field.key);
+            return {
+                ...field,
+                value,
+                missing: isQuickEditFieldMissing(field.key, value)
+            };
+        });
+    }, [activeEmailContent]);
+
+    const missingQuickEditFields = useMemo(
+        () => quickEditFields.filter(field => field.missing),
+        [quickEditFields]
+    );
+
+    const handleQuickEditDraftChange = (key: QuickEditFieldKey, value: string) => {
+        setQuickEditDrafts(prev => ({ ...prev, [key]: value }));
+    };
+
+    const handleApplyMissingFieldEdits = () => {
+        if (!activeEmailContent || missingQuickEditFields.length === 0) return;
+
+        let nextContent = activeEmailContent;
+        missingQuickEditFields.forEach((field) => {
+            const draft = String(quickEditDrafts[field.key] ?? field.value ?? '').trim();
+            if (!draft) return;
+            nextContent = applyQuickEditFieldValue(nextContent, field.key, draft);
+        });
+
+        if (nextContent === activeEmailContent) return;
+
+        if (isEditing) {
+            setEditableContent(nextContent);
+        } else {
+            setResults(prev => (prev ? { ...prev, phase4: nextContent } : prev));
+        }
+        setSaveStatus('idle');
+    };
+
+    const handleResetMissingFieldDrafts = () => {
+        setQuickEditDrafts({});
+    };
 
     const handleTransactionNabChange = (index: number, newVal: string) => {
         const content = isEditing ? editableContent : results?.phase4;
@@ -289,7 +1074,7 @@ export const App = () => {
     const getFilteredEmployees = (query: string) => {
         if (!query || query.trim() === '') return employeeList;
         const lowerQuery = query.toLowerCase();
-        return employeeList.filter(emp =>
+        return employeeList.filter(emp => 
             emp.fullName.toLowerCase().includes(lowerQuery) ||
             emp.firstName.toLowerCase().includes(lowerQuery) ||
             emp.surname.toLowerCase().includes(lowerQuery)
@@ -324,6 +1109,11 @@ export const App = () => {
             const receiptIdMatch = content.match(/\*\*Receipt ID:\*\*\s*(.*?)(?:\n|$)/);
             let receiptId = receiptIdMatch ? receiptIdMatch[1].trim() : 'N/A';
             if (receiptId === 'N/A' && record.nab_code) receiptId = record.nab_code; // Fallback only if needed
+            const uidMetaMatch = content.match(/<!--\s*UID_FALLBACKS:(.*?)-->/i);
+            const uidFallbacks = uidMetaMatch
+                ? uidMetaMatch[1].split('||').map((v: string) => v.trim()).filter((v: string) => v.length > 0)
+                : [];
+            let uidIdx = 0;
             const timestamp = new Date(record.created_at).toLocaleString();
             const rawDate = new Date(record.created_at);
 
@@ -336,25 +1126,28 @@ export const App = () => {
                 totalAmount = totalAmount.replace('(Based on Receipts/Form Audit)', '').trim();
             }
 
-            // Improved Client/Location Extraction
-            // 1. Look for specific field
-            let ypName = 'N/A';
-            const ypMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/);
-            if (ypMatch) {
-                ypName = ypMatch[1].trim();
-            }
+            const addressValue = extractFieldValue(content, [
+                /(?:\*\*\s*Address\s*:\s*\*\*|Address\s*:)\s*(.*?)(?:\n|$)/i
+            ]);
+            const clientFullNameValue = extractFieldValue(content, [
+                /(?:\*\*\s*Client(?:'|’)?s?\s+Full\s+Name\s*:\s*\*\*|Client(?:'|’)?s?\s+Full\s+Name\s*:)\s*(.*?)(?:\n|$)/i
+            ]);
+            const clientLocationValue = extractFieldValue(content, [
+                /(?:\*\*\s*Client\s*\/\s*Location\s*:\s*\*\*|Client\s*\/\s*Location\s*:)\s*(.*?)(?:\n|$)/i
+            ]);
+
+            const locationFirstPart = clientLocationValue.includes('/')
+                ? clientLocationValue.split('/')[0].trim()
+                : clientLocationValue;
+
+            // Mapping rules:
+            // - Client / Location column: Address -> Client / Location
+            // - YP NAME column: Client's Full Name -> first part of Client / Location
+            const ypName = addressValue || clientLocationValue || '-';
+            const youngPersonName = clientFullNameValue || locationFirstPart || '-';
 
             const dateProcessed = new Date(record.created_at).toLocaleDateString();
             const nabRefDisplay = record.nab_code || 'PENDING';
-
-            // Extract Young Person Name from "Name / Location" string
-            let youngPersonName = ypName;
-            if (ypName && ypName !== 'N/A' && ypName.includes('/')) {
-                const parts = ypName.split('/');
-                if (parts.length > 0) {
-                    youngPersonName = parts[0].trim();
-                }
-            }
 
             // 2. Extract Table Rows
             const lines = content.split('\n');
@@ -374,30 +1167,36 @@ export const App = () => {
                 if (foundTable && line.startsWith('|')) {
                     const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
 
-                    if (cols.length >= 5) {
-                        tableRowsFound = true;
-                        const storeCol = cols[1];
-                        const dateMatch = storeCol.match(/(\d{2}\/\d{2}\/\d{2,4})/);
-                        const receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
+                    const fallbackUid = uidFallbacks[uidIdx] || receiptId;
+                    const normalized = normalizeReceiptRow(cols, String(totalAmount || '0.00'), 'Unknown Store', fallbackUid);
+                    if (!normalized) continue;
 
-                        allRows.push({
-                            id: `${internalId}-${i}`, // Unique key for React using DB ID
-                            uid: receiptId, // Display Receipt ID/Reference in UID column
-                            internalId: internalId,
-                            timestamp,
-                            rawDate,
-                            ypName: ypName,
-                            youngPersonName: youngPersonName,
-                            staffName,
-                            product: cols[2], // Product Name
-                            expenseType: cols[3], // Category
-                            receiptDate,
-                            amount: cols[4], // Item Amount
-                            totalAmount: totalAmount, // Grand Total (Uses Form Total)
-                            dateProcessed,
-                            nabCode: nabRefDisplay // Display Bank Ref in Nab Code column
-                        });
-                    }
+                    tableRowsFound = true;
+                    uidIdx += 1;
+
+                    const dateMatch = normalized.dateTime.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+                    const receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
+                    const amountForDb = normalized.itemAmount.toLowerCase() === 'included in total'
+                        ? normalized.receiptTotal
+                        : normalized.itemAmount;
+
+                    allRows.push({
+                        id: `${internalId}-${i}`, // Unique key for React using DB ID
+                        uid: normalized.uniqueId || fallbackUid,
+                        internalId: internalId,
+                        timestamp,
+                        rawDate,
+                        ypName: ypName,
+                        youngPersonName: youngPersonName,
+                        staffName,
+                        product: normalized.product,
+                        expenseType: normalized.category,
+                        receiptDate,
+                        amount: amountForDb,
+                        totalAmount: normalized.receiptTotal,
+                        dateProcessed,
+                        nabCode: nabRefDisplay // Display Bank Ref in Nab Code column
+                    });
                 }
                 if (foundTable && line === '') {
                     foundTable = false;
@@ -407,7 +1206,7 @@ export const App = () => {
             if (!tableRowsFound) {
                 allRows.push({
                     id: `${internalId}-summary`,
-                    uid: receiptId,
+                    uid: uidFallbacks[0] || receiptId,
                     internalId: internalId,
                     timestamp,
                     rawDate,
@@ -440,6 +1239,334 @@ export const App = () => {
             (row.nabCode || '').toLowerCase().includes(lowerSearch)
         );
     }, [databaseRows, searchTerm]);
+
+    const currentInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
+        const formText = reimbursementFormText.trim();
+        const receiptText = receiptDetailsText.trim();
+        if (!formText && !receiptText) return [];
+
+        const allText = `${formText}\n${receiptText}`;
+        const groupEntries = parseGroupPettyCashEntries(allText);
+        if (requestMode === 'group' && groupEntries.length >= 2) {
+            return groupEntries.map((entry) => ({
+                staffName: entry.staffName,
+                amount: Number(entry.amount.toFixed(2)),
+                uid: '',
+                storeName: 'group petty cash',
+                rawDate: '',
+                dateKey: '',
+                signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
+            }));
+        }
+
+        const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
+        const fallbackStaff = staffMatch ? staffMatch[1].trim() : 'Unknown';
+        const lines = allText.split('\n');
+        const parsed: InputTransactionFingerprint[] = [];
+
+        for (const line of lines) {
+            if (!line.trim().startsWith('|') || line.includes('---') || line.includes('Receipt #') || line.includes('GRAND TOTAL') || line.includes('Unique ID')) {
+                continue;
+            }
+
+            const parts = line.split('|').map(p => p.trim()).filter(Boolean);
+            const normalized = normalizeReceiptRow(parts, '0.00', '', '');
+            if (!normalized) continue;
+
+            const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+            const dateKey = toDateKey(normalized.dateTime || '');
+            const signatureKey = [
+                (normalized.storeName || '').trim().toLowerCase(),
+                dateKey,
+                normalizeMoneyValue(String(amount), '0.00')
+            ].join('|');
+
+            parsed.push({
+                staffName: fallbackStaff,
+                amount,
+                uid: (normalized.uniqueId || '').trim().toLowerCase(),
+                storeName: (normalized.storeName || '').trim(),
+                rawDate: normalized.dateTime || '',
+                dateKey,
+                signatureKey
+            });
+        }
+
+        if (parsed.length > 0) return parsed;
+
+        const amountMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i) ||
+            formText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i) ||
+            receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
+        const fallbackAmount = amountMatch ? Number((amountMatch[1] || '0').replace(/,/g, '')) : 0;
+
+        return [{
+            staffName: fallbackStaff,
+            amount: Number.isNaN(fallbackAmount) ? 0 : fallbackAmount,
+            uid: '',
+            storeName: '',
+            rawDate: '',
+            dateKey: '',
+            signatureKey: `fallback|${normalizeMoneyValue(String(fallbackAmount || 0), '0.00')}`
+        }];
+    }, [reimbursementFormText, receiptDetailsText, requestMode]);
+
+    const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
+        if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
+            return { signal: 'green', redMatches: [], yellowMatches: [] };
+        }
+
+        const nowMs = Date.now();
+        const lookbackMs = DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+        const historyRows = databaseRows.filter((row: any) => {
+            const rawDate = row.rawDate instanceof Date ? row.rawDate : new Date(row.rawDate || row.dateProcessed || '');
+            const ts = rawDate.getTime();
+            if (Number.isNaN(ts)) return false;
+            return (nowMs - ts) <= lookbackMs;
+        });
+
+        if (historyRows.length === 0) {
+            return { signal: 'green', redMatches: [], yellowMatches: [] };
+        }
+
+        const redMatches: DuplicateMatchEvidence[] = [];
+        const yellowMatches: DuplicateMatchEvidence[] = [];
+
+        currentInputTransactions.forEach((tx) => {
+            const txStaff = normalizeNameKey(tx.staffName);
+            const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
+            const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
+            const txReference = normalizeReferenceKey(tx.uid);
+
+            if (!txStaff || !txAmount) return;
+
+            historyRows.forEach((row: any) => {
+                const historyStaff = normalizeNameKey(String(row.staffName || ''));
+                const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
+                const historyAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+                const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
+
+                if (!historyStaff) return;
+
+                const nameMatch = txStaff === historyStaff;
+                const amountMatch = txAmount === historyAmount;
+                const dateComparable = !!txDateKey && !!historyDateKey;
+                const dateMatch = dateComparable ? txDateKey === historyDateKey : false;
+                const baseMatch = nameMatch && amountMatch && (dateComparable ? dateMatch : true);
+
+                if (!baseMatch) return;
+
+                const evidence: DuplicateMatchEvidence = {
+                    txStaffName: tx.staffName,
+                    txDateKey: txDateKey || '-',
+                    txAmount,
+                    txReference: txReference || '-',
+                    historyStaffName: String(row.staffName || '-'),
+                    historyDateKey: historyDateKey || '-',
+                    historyAmount,
+                    historyReference: historyReference || '-',
+                    historyProcessedAt: String(row.dateProcessed || '-')
+                };
+
+                if (txReference && historyReference && txReference === historyReference) {
+                    redMatches.push(evidence);
+                    return;
+                }
+
+                if (dateComparable) {
+                    yellowMatches.push(evidence);
+                }
+            });
+        });
+
+        if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
+        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
+        return { signal: 'green', redMatches, yellowMatches };
+    }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
+
+    const rulesStatusItems = useMemo<RuleStatusItem[]>(() => {
+        const formText = reimbursementFormText.trim();
+        const receiptText = receiptDetailsText.trim();
+        const hasInput = !!(formText || receiptText);
+
+        if (!hasInput) {
+            return [{
+                id: 'ready',
+                title: 'Awaiting Input',
+                detail: 'Paste reimbursement form or receipt details to start rule checks.',
+                severity: 'info',
+                status: 'pass'
+            }];
+        }
+
+        const historyByUid = new Map<string, any[]>();
+        const historyBySignature = new Map<string, any[]>();
+
+        databaseRows.forEach((row: any) => {
+            const uid = String(row.uid || '').trim().toLowerCase();
+            if (uid && uid !== 'n/a' && uid !== '-') {
+                historyByUid.set(uid, [...(historyByUid.get(uid) || []), row]);
+            }
+
+            const rowDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
+            const rowAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+            const signatureKey = [
+                '',
+                rowDateKey,
+                rowAmount
+            ].join('|');
+            historyBySignature.set(signatureKey, [...(historyBySignature.get(signatureKey) || []), row]);
+        });
+
+        const uidMap = new Map<string, number>();
+        const signatureMap = new Map<string, number>();
+        currentInputTransactions.forEach((tx) => {
+            if (tx.uid && tx.uid !== '-' && tx.uid !== 'n/a') {
+                uidMap.set(tx.uid, (uidMap.get(tx.uid) || 0) + 1);
+            }
+            if (tx.signatureKey) {
+                signatureMap.set(tx.signatureKey, (signatureMap.get(tx.signatureKey) || 0) + 1);
+            }
+        });
+
+        const duplicateUidCurrent = Array.from(uidMap.entries()).filter(([, count]) => count > 1);
+        const duplicateSignatureCurrent = Array.from(signatureMap.entries()).filter(([, count]) => count > 1);
+
+        const historyUidMatches = currentInputTransactions
+            .filter(tx => tx.uid && historyByUid.has(tx.uid))
+            .flatMap(tx => historyByUid.get(tx.uid) || []);
+        const historySignatureMatches = currentInputTransactions
+            .map(tx => {
+                const signatureKey = ['', tx.dateKey, normalizeMoneyValue(String(tx.amount), '0.00')].join('|');
+                return historyBySignature.get(signatureKey) || [];
+            })
+            .flat();
+
+        const overLimitCount = currentInputTransactions.filter(tx => tx.amount > 300).length;
+        const agedCount = currentInputTransactions.filter(tx => {
+            if (!tx.rawDate) return false;
+            const parsedDate = parseDateValue(tx.rawDate);
+            if (!parsedDate) return false;
+            const ageMs = Date.now() - parsedDate.getTime();
+            const days = ageMs / (1000 * 60 * 60 * 24);
+            return days > 30;
+        }).length;
+
+        const clientMatch = formText.match(/Client(?:'|’)?s?\s*full\s*name\s*:\s*(.+)/i);
+        const addressMatch = formText.match(/Address:\s*(.+)/i);
+        const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
+        const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
+        const missingFields = [
+            !clientMatch ? 'Client name' : '',
+            !addressMatch ? 'Address' : '',
+            !staffMatch && currentInputTransactions.length <= 1 ? 'Staff member' : '',
+            !approvedMatch ? 'Approved by' : ''
+        ].filter(Boolean);
+
+        const firstHistoryMatch = historyUidMatches[0] || historySignatureMatches[0];
+
+        const activeRules = rulesConfig.filter(rule => rule.enabled);
+        const getRuleMeta = (id: string, fallbackTitle: string, fallbackSeverity: RuleStatusItem['severity']) => {
+            const rule = activeRules.find(r => r.id === id);
+            if (!rule) return null;
+            return {
+                title: rule.title || fallbackTitle,
+                severity: rule.severity || fallbackSeverity
+            };
+        };
+
+        const items: RuleStatusItem[] = [];
+
+        const rule1 = getRuleMeta('r1', 'Duplicate in Current Upload', 'high');
+        if (rule1) {
+            items.push({
+                id: 'r1',
+                title: rule1.title,
+                detail: duplicateUidCurrent.length > 0 || duplicateSignatureCurrent.length > 0
+                    ? `Potential duplicate rows found (${duplicateUidCurrent.length + duplicateSignatureCurrent.length}).`
+                    : 'No duplicate receipt patterns in the current upload.',
+                severity: rule1.severity,
+                status: duplicateUidCurrent.length > 0 || duplicateSignatureCurrent.length > 0 ? 'blocked' : 'pass'
+            });
+        }
+
+        const rule2 = getRuleMeta('r2', 'Already Processed Check', 'critical');
+        if (rule2) {
+            items.push({
+                id: 'r2',
+                title: rule2.title,
+                detail: firstHistoryMatch
+                    ? `Matched previous record. Date Processed: ${firstHistoryMatch.dateProcessed || '-'} | NAB Code: ${firstHistoryMatch.nabCode || '-'}`
+                    : 'No matching processed receipts found in history.',
+                severity: rule2.severity,
+                status: firstHistoryMatch ? 'blocked' : 'pass'
+            });
+        }
+
+        const rule3 = getRuleMeta('r3', 'Amount Threshold (> $300)', 'medium');
+        if (rule3) {
+            items.push({
+                id: 'r3',
+                title: rule3.title,
+                detail: overLimitCount > 0
+                    ? `${overLimitCount} transaction(s) exceed $300 and require approval.`
+                    : 'All transactions are within $300 threshold.',
+                severity: rule3.severity,
+                status: overLimitCount > 0 ? 'warning' : 'pass'
+            });
+        }
+
+        const rule4 = getRuleMeta('r4', 'Receipt Age (> 30 days)', 'medium');
+        if (rule4) {
+            items.push({
+                id: 'r4',
+                title: rule4.title,
+                detail: agedCount > 0
+                    ? `${agedCount} receipt(s) appear older than 30 days from purchase date.`
+                    : 'No receipts older than 30 days detected.',
+                severity: rule4.severity,
+                status: agedCount > 0 ? 'warning' : 'pass'
+            });
+        }
+
+        const rule5 = getRuleMeta('r5', 'Required Fields', 'high');
+        if (rule5) {
+            items.push({
+                id: 'r5',
+                title: rule5.title,
+                detail: missingFields.length > 0
+                    ? `Missing: ${missingFields.join(', ')}.`
+                    : 'Required form fields are complete.',
+                severity: rule5.severity,
+                status: missingFields.length > 0 ? 'blocked' : 'pass'
+            });
+        }
+
+        const hasEscalation = items.some(item => item.status === 'blocked' || item.status === 'warning');
+        const rule6 = getRuleMeta('r6', 'Subject for Approval', 'info');
+        if (rule6) {
+            items.push({
+                id: 'r6',
+                title: rule6.title,
+                detail: hasEscalation
+                    ? 'Yes. Route this request for approval before final payment.'
+                    : 'No. Request can proceed with normal workflow.',
+                severity: rule6.severity,
+                status: hasEscalation ? 'warning' : 'pass'
+            });
+        }
+
+        activeRules.filter(rule => !rule.isBuiltIn).forEach((rule) => {
+            items.push({
+                id: `custom-${rule.id}`,
+                title: rule.title,
+                detail: rule.detail,
+                severity: rule.severity,
+                status: 'warning'
+            });
+        });
+
+        return items;
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -601,7 +1728,7 @@ export const App = () => {
         }
 
         // 4. Update NAB Code in Text Blob
-        // Regex: Look for "NAB Code:" or "NAB Reference:"
+        // Regex: Look for "NAB Code:"
         if (newContent.match(/NAB (?:Code|Reference):/)) {
             newContent = newContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/, `$1${editedRowData.nabCode}$3`);
         } else {
@@ -842,11 +1969,11 @@ export const App = () => {
         const topStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
         const topLoc = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
 
-        let report = `[📋 CLICK TO COPY REPORT]\n\n`;
+        let report = `[≡ƒôï CLICK TO COPY REPORT]\n\n`;
         report += `# ${reportTitle}\n`;
         report += `**Date Range:** ${startDate.toLocaleDateString()} - ${now.toLocaleDateString()}\n\n`;
 
-        report += `## 📊 EXECUTIVE SUMMARY\n`;
+        report += `## ≡ƒôè EXECUTIVE SUMMARY\n`;
         report += `| Metric | Value |\n`;
         report += `| :--- | :--- |\n`;
         report += `| **Total Spend** | **$${totalSpend.toFixed(2)}** |\n`;
@@ -854,7 +1981,7 @@ export const App = () => {
         report += `| **Pending Categorization** | ${pendingCount} |\n`;
         report += `| **Highest Single Item** | $${maxItem.amount.toFixed(2)} (${maxItem.product}) |\n\n`;
 
-        report += `## 🏆 TOP SPENDERS (STAFF)\n`;
+        report += `## ≡ƒÅå TOP SPENDERS (STAFF)\n`;
         report += `| Rank | Staff Member | Total Amount |\n`;
         report += `| :--- | :--- | :--- |\n`;
         topStaff.forEach((s, i) => {
@@ -862,7 +1989,7 @@ export const App = () => {
         });
         report += `\n`;
 
-        report += `## 📍 SPENDING BY YP\n`;
+        report += `## ≡ƒôì SPENDING BY YP\n`;
         report += `| Rank | YP Name | Total Amount |\n`;
         report += `| :--- | :--- | :--- |\n`;
         topLoc.forEach((l, i) => {
@@ -928,20 +2055,32 @@ export const App = () => {
         setSaveStatus('idle');
         setIsEditing(false);
         setOcrStatus('');
-        setOcrMethod(null);
-        setReceiptManualText('');
-        setFormManualText('');
+        setReimbursementFormText('');
+        setReceiptDetailsText('');
+        setRequestMode('solo');
+    };
+
+    const scrollToReimbursementForm = () => {
+        setActiveTab('dashboard');
+        setTimeout(() => {
+            reimbursementFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            reimbursementFormRef.current?.focus();
+        }, 80);
     };
 
     const handleStartNewAudit = () => {
         resetAll();
         fetchHistory();
+        scrollToReimbursementForm();
     };
 
-    const handleCopyEmail = async () => {
+const handleCopyEmail = async () => {
         if (!results?.phase4) return;
+        
+        let contentToCopy = stripClientLocationLine(stripUidFallbackMeta(isEditing ? editableContent : results.phase4));
+        
         if (isEditing) {
-            navigator.clipboard.writeText(editableContent);
+            navigator.clipboard.writeText(contentToCopy);
             setEmailCopied(true);
             setTimeout(() => setEmailCopied(false), 2000);
             return;
@@ -949,8 +2088,11 @@ export const App = () => {
         const emailElement = document.getElementById('email-output-content');
         if (emailElement) {
             try {
-                const blobHtml = new Blob([emailElement.innerHTML], { type: 'text/html' });
-                const blobText = new Blob([emailElement.innerText], { type: 'text/plain' });
+                const sanitizedElement = emailElement.cloneNode(true) as HTMLElement;
+                stripClientLocationFromElement(sanitizedElement);
+
+                const blobHtml = new Blob([sanitizedElement.innerHTML], { type: 'text/html' });
+                const blobText = new Blob([stripClientLocationLine(sanitizedElement.innerText)], { type: 'text/plain' });
                 const data = [new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })];
                 await navigator.clipboard.write(data);
                 setEmailCopied(true);
@@ -960,7 +2102,7 @@ export const App = () => {
                 console.warn("ClipboardItem API failed", e);
             }
         }
-        navigator.clipboard.writeText(results.phase4);
+        navigator.clipboard.writeText(contentToCopy);
         setEmailCopied(true);
         setTimeout(() => setEmailCopied(false), 2000);
     };
@@ -989,6 +2131,7 @@ export const App = () => {
     const handleSaveToCloud = async (contentOverride?: string) => {
         const contentToSave = contentOverride || (isEditing ? editableContent : results?.phase4);
         if (!contentToSave) return;
+        const isPendingSave = contentToSave.includes('<!-- STATUS: PENDING -->');
 
         setIsSaving(true);
         setSaveStatus('idle');
@@ -1005,10 +2148,13 @@ export const App = () => {
                     const nabMatch = block.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
 
                     const staffName = staffNameLine;
-                    const amount = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
+                    const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
+                    const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
                     let uniqueReceiptId = nabMatch ? nabMatch[1].trim() : null;
 
-                    if (!uniqueReceiptId || uniqueReceiptId === 'PENDING') {
+                    if (isPendingSave) {
+                        uniqueReceiptId = 'Nab code is pending';
+                    } else if (!isValidNabReference(uniqueReceiptId)) {
                         uniqueReceiptId = `BATCH-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
                     }
 
@@ -1027,11 +2173,14 @@ export const App = () => {
                 const nabMatch = contentToSave.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
 
                 const staffName = staffNameMatch ? staffNameMatch[1].trim() : 'Unknown';
-                const amount = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
+                const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
+                const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
 
-                let uniqueReceiptId = nabMatch && nabMatch[1].trim() !== 'PENDING' ? nabMatch[1].trim() : (receiptIdMatch ? receiptIdMatch[1].trim() : null);
+                let uniqueReceiptId = nabMatch && isValidNabReference(nabMatch[1].trim()) ? nabMatch[1].trim() : (receiptIdMatch ? receiptIdMatch[1].trim() : null);
 
-                if (!uniqueReceiptId && (contentToSave.toLowerCase().includes('discrepancy') || contentToSave.toLowerCase().includes('mismatch') || contentToSave.includes('STATUS: PENDING'))) {
+                if (isPendingSave) {
+                    uniqueReceiptId = 'Nab code is pending';
+                } else if (!uniqueReceiptId && (contentToSave.toLowerCase().includes('discrepancy') || contentToSave.toLowerCase().includes('mismatch') || contentToSave.includes('STATUS: PENDING'))) {
                     uniqueReceiptId = `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                 }
 
@@ -1070,6 +2219,8 @@ export const App = () => {
 
             setSaveStatus('success');
             fetchHistory();
+            resetAll();
+            scrollToReimbursementForm();
 
         } catch (error) {
             console.error("Supabase Save Error:", error);
@@ -1079,24 +2230,190 @@ export const App = () => {
         }
     };
 
-    const confirmSave = (status: 'PENDING' | 'PAID') => {
-        const tag = status === 'PENDING' ? '\n\n<!-- STATUS: PENDING -->' : '\n\n<!-- STATUS: PAID -->';
-        const baseContent = isEditing ? editableContent : results?.phase4 || '';
-        const finalContent = baseContent.includes('<!-- STATUS:') ? baseContent : baseContent + tag;
-        handleSaveToCloud(finalContent);
+    const closeSaveModal = () => {
         setShowSaveModal(false);
+        setSaveModalDecision(null);
+        setReviewerOverrideReason('');
+    };
+
+    const confirmSave = (
+        status: 'PENDING' | 'PAID',
+        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
+    ) => {
+        const baseContent = isEditing ? editableContent : results?.phase4 || '';
+        const withStatus = upsertStatusTag(baseContent, status);
+        const finalContent = appendDuplicateAuditMeta(withStatus, options?.duplicateSignal ? {
+            signal: options.duplicateSignal,
+            reason: options.reviewerReason,
+            detail: options.detail,
+            lookbackDays: DUPLICATE_LOOKBACK_DAYS
+        } : undefined);
+
+        handleSaveToCloud(finalContent);
+        closeSaveModal();
+    };
+
+    const openPendingApprovalModal = (staffGroup: PendingStaffGroup) => {
+        setPendingApprovalStaffGroup(staffGroup);
+        setPendingApprovalNabCode('');
+    };
+
+    const closePendingApprovalModal = () => {
+        setPendingApprovalStaffGroup(null);
+        setPendingApprovalNabCode('');
+    };
+
+    const handleApprovePendingRecord = async () => {
+        if (!pendingApprovalStaffGroup) return;
+        const approvedNabCode = pendingApprovalNabCode.trim();
+        if (!approvedNabCode) return;
+
+        setIsApprovingPending(true);
+        try {
+            const updatedRecords = pendingApprovalStaffGroup.records.map((record: any) => {
+                let updatedContent = record.full_email_content || '';
+
+                if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
+                    updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
+                } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
+                    updatedContent += '\n\n<!-- STATUS: PAID -->';
+                }
+
+                if (updatedContent.match(/NAB (?:Code|Reference):/i)) {
+                    updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
+                } else {
+                    updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
+                }
+
+                return {
+                    id: record.id,
+                    nab_code: approvedNabCode,
+                    full_email_content: updatedContent
+                };
+            });
+
+            await Promise.all(updatedRecords.map(async (record) => {
+                const { error } = await supabase
+                    .from('audit_logs')
+                    .update({
+                        nab_code: record.nab_code,
+                        full_email_content: record.full_email_content
+                    })
+                    .eq('id', record.id);
+
+                if (error) throw error;
+            }));
+
+            const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
+                updatedRecords.map(record => [record.id, record])
+            );
+            setHistoryData(prev => prev.map(item => {
+                const updated = updatesById.get(item.id);
+                if (!updated) return item;
+                return {
+                    ...item,
+                    nab_code: updated.nab_code,
+                    full_email_content: updated.full_email_content
+                };
+            }));
+
+            closePendingApprovalModal();
+        } catch (error) {
+            console.error('Failed to approve pending record:', error);
+            alert('Failed to approve pending record. Please try again.');
+        } finally {
+            setIsApprovingPending(false);
+        }
+    };
+
+    const handleMarkPendingGroupFollowedUp = async (group: PendingStaffGroup) => {
+        if (!group || group.records.length === 0) return;
+        setFollowUpingGroupKey(group.key);
+
+        try {
+            const followedUpAt = new Date().toISOString();
+            const updates = group.records.map((record: any) => ({
+                id: record.id,
+                full_email_content: upsertPendingFollowedUpAt(String(record.full_email_content || ''), followedUpAt)
+            }));
+
+            await Promise.all(updates.map(async (record) => {
+                const { error } = await supabase
+                    .from('audit_logs')
+                    .update({ full_email_content: record.full_email_content })
+                    .eq('id', record.id);
+
+                if (error) throw error;
+            }));
+
+            const updatesById = new Map<any, { id: any; full_email_content: string }>(
+                updates.map(update => [update.id, update])
+            );
+
+            setHistoryData(prev => prev.map(item => {
+                const updated = updatesById.get(item.id);
+                if (!updated) return item;
+                return {
+                    ...item,
+                    full_email_content: updated.full_email_content
+                };
+            }));
+        } catch (error) {
+            console.error('Failed to mark pending follow-up:', error);
+            alert('Failed to update follow-up timestamp. Please try again.');
+        } finally {
+            setFollowUpingGroupKey(null);
+        }
     };
 
     const handleSmartSave = () => {
         const hasTransactions = parsedTransactions.length > 0;
-        const allHaveRef = parsedTransactions.every(tx => !!tx.currentNabRef && tx.currentNabRef.trim() !== '' && tx.currentNabRef !== 'PENDING');
+        const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
+        setSaveStatus('idle');
+
+        if (duplicateCheckResult.signal === 'red') {
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} exact duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            setSaveStatus('duplicate');
+            setSaveModalDecision({ mode: 'red', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (duplicateCheckResult.signal === 'yellow') {
+            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) (same Name + Date + Amount) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            setSaveModalDecision({ mode: 'yellow', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (hasTransactions && !allHaveRef) {
+            setSaveModalDecision({ mode: 'nab', detail: 'NAB Code is incomplete or placeholder (e.g. Enter NAB Code).' });
+            setShowSaveModal(true);
+            return;
+        }
+
         const status = (hasTransactions && allHaveRef) ? 'PAID' : 'PENDING';
-        confirmSave(status);
+        confirmSave(status, {
+            duplicateSignal: 'green',
+            detail: `No duplicate patterns detected within ${DUPLICATE_LOOKBACK_DAYS}-day lookback.`
+        });
+    };
+
+    const handleApproveManualAudit = () => {
+        setShowManualAuditModal(false);
+        bypassManualAuditRef.current = true;
+        handleProcess();
+    };
+
+    const handleCancelManualAudit = () => {
+        setShowManualAuditModal(false);
+        setProcessingState(ProcessingState.IDLE);
+        setOcrStatus('Needs review');
     };
 
     const handleProcess = async () => {
-        if (receiptFiles.length === 0 && !receiptManualText) {
-            setErrorMessage("Please upload a receipt or enter manual receipt text.");
+        if (!reimbursementFormText.trim() && !receiptDetailsText.trim()) {
+            setErrorMessage("Please paste Reimbursement Form or Receipt Details first.");
             return;
         }
 
@@ -1105,100 +2422,354 @@ export const App = () => {
         setResults(null);
         setEmailCopied(false);
         setSaveStatus('idle');
+        setManualAuditIssues([]);
+        setShowManualAuditModal(false);
         setIsEditing(false);
         setOcrStatus('');
-        setOcrMethod(null);
 
         try {
-            // Step 1: Extract text from receipts using Hybrid OCR (Local first, then Cloud fallback)
-            setOcrStatus('Initializing OCR...');
-            console.log('[Process] Starting Hybrid OCR extraction');
+            setOcrStatus('Processing...');
 
-            // Filter only image files for OCR
-            const imageFiles = receiptFiles.filter(file => file.type.startsWith('image/'));
-            let extractedText = receiptManualText ? `[MANUAL RECEIPT INPUT]:\n${receiptManualText}\n\n` : '';
+            const formText = reimbursementFormText.trim();
+            const receiptText = receiptDetailsText.trim();
 
-            if (imageFiles.length > 0) {
-                const ocrResult = await performHybridOCR(imageFiles, {
-                    preferredProvider: selectedAIProvider,
-                    onStatusChange: (status) => {
-                        setOcrStatus(status);
-                        console.log(`[OCR Status] ${status}`);
-                    }
+            let phase1 = '';
+            let phase2 = '';
+            let phase3 = '';
+            let phase4 = '';
+            let totalAmount = 0;
+            let receiptGrandTotal: number | null = null;
+
+            // Parse key-value pairs from Reimbursement Form
+            const clientMatch = formText.match(/Client(?:'|’)?s?\s*full\s*name\s*:\s*(.+)/i);
+            const addressMatch = formText.match(/Address:\s*(.+)/i);
+            const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
+            const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
+            
+            // Key-value parsing for Reimbursement Form
+            const particularMatch = formText.match(/Particular:\s*(.+)/i);
+            const datePurchasedMatch = formText.match(/Date\s*Purchased:\s*(.+)/i);
+            const amountMatch = formText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i);
+            const onChargeMatch = formText.match(/On\s*Charge\s*Y\/N:\s*(.+)/i);
+            
+            const clientName = clientMatch ? clientMatch[1].trim() : '';
+            const address = addressMatch ? addressMatch[1].trim() : '';
+            const staffMember = staffMatch ? staffMatch[1].trim() : '';
+            const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
+            
+            // Get total amount from either box
+            const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
+            const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
+            totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
+                          receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
+            receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
+
+            // Parse table from Receipt Details or Reimbursement Form
+            const allText = formText + '\n' + receiptText;
+            const lines = allText.split('\n');
+            const items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }> = [];
+            const groupPettyCashEntries = parseGroupPettyCashEntries(allText);
+            const isGroupPettyCashRequest = requestMode === 'group';
+
+            if (isGroupPettyCashRequest && groupPettyCashEntries.length < 2) {
+                setErrorMessage('Group Mode requires at least 2 staff entries (e.g., Name - 25.50).');
+                setProcessingState(ProcessingState.IDLE);
+                setOcrStatus('Needs review');
+                return;
+            }
+            
+            for (const line of lines) {
+                if (line.trim().startsWith('|') && !line.includes('---') && 
+                    !line.includes('Receipt #') && !line.includes('GRAND TOTAL') && 
+                    !line.includes('Unique ID') && !line.includes('Store Name')) {
+                    
+                    const parts = line.split('|').map(p => p.trim()).filter(p => p);
+                    
+                    const normalized = normalizeReceiptRow(parts, String(totalAmount || '0.00'), '', '');
+                    if (!normalized) continue;
+
+                    items.push({
+                        ...normalized,
+                        amount: normalized.receiptTotal,
+                        onCharge: ''
+                    });
+                }
+            }
+
+            // If no items from table, use key-value from form
+            if (items.length === 0 && particularMatch) {
+                items.push({
+                    receiptNum: '1',
+                    uniqueId: '',
+                    storeName: particularMatch[1].trim(),
+                    dateTime: datePurchasedMatch ? datePurchasedMatch[1].trim() : '',
+                    product: '',
+                    category: 'Other',
+                    itemAmount: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
+                    receiptTotal: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
+                    notes: '',
+                    amount: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
+                    onCharge: onChargeMatch ? onChargeMatch[1].trim() : 'N'
                 });
-
-                extractedText += ocrResult.text;
-                setOcrMethod(ocrResult.method);
-
-                console.log(`[Process] OCR complete using cloud method`);
             }
 
-            // Step 2: Prepare images for AI analysis
-            const receiptImages = await Promise.all(receiptFiles.map(async (file) => ({
-                mimeType: file.type || 'application/octet-stream',
-                data: await fileToBase64(file),
-                name: file.name
-            })));
-
-            const formImage = formFiles.length > 0 ? {
-                mimeType: formFiles[0].type || 'application/octet-stream',
-                data: await fileToBase64(formFiles[0]),
-                name: formFiles[0].name
-            } : null;
-
-            setOcrStatus('Analyzing with AI...');
-
-            // Add manual form text if exists
-            const enhancedExtractedText = formManualText
-                ? `${extractedText}\n\n[MANUAL FORM INPUT]:\n${formManualText}`
-                : extractedText;
-
-            // Use selected cloud provider for AI analysis
-            const aiProvider = selectedAIProvider;
-            const fullResponse = await analyzeReimbursement(receiptImages, formImage, aiProvider, enhancedExtractedText);
-
-            const parseSection = (tagStart: string, tagEnd: string, text: string, sectionName: string) => {
-                const startIdx = text.indexOf(tagStart);
-                const endIdx = text.indexOf(tagEnd);
-                if (startIdx === -1 || endIdx === -1) {
-                    console.warn(`[Parse] Missing tags for ${sectionName}, using fallback`);
-                    return `[${sectionName}]: AI response did not contain expected format.\n\nFull Response:\n${text.substring(0, 1000)}...`;
-                }
-                return text.substring(startIdx + tagStart.length, endIdx).trim();
-            };
-
-            if (!fullResponse || fullResponse.trim().length === 0) {
-                throw new Error("No response from AI - the response was empty");
+            if (isGroupPettyCashRequest) {
+                totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
             }
 
-            console.log(`[Process] Got AI response: ${fullResponse.length} characters`);
-            console.log(`[Process] Response preview: ${fullResponse.substring(0, 200)}...`);
+            const issues = isGroupPettyCashRequest
+                ? []
+                : buildManualAuditIssues(
+                    items,
+                    totalAmount,
+                    receiptGrandTotal,
+                    clientName,
+                    address,
+                    staffMember,
+                    approvedBy
+                );
 
-            let phase1 = parseSection('<<<PHASE_1_START>>>', '<<<PHASE_1_END>>>', fullResponse, 'Receipt Analysis');
-            const phase2 = parseSection('<<<PHASE_2_START>>>', '<<<PHASE_2_END>>>', fullResponse, 'Data Standardization');
-            const phase3 = parseSection('<<<PHASE_3_START>>>', '<<<PHASE_3_END>>>', fullResponse, 'Audit Results');
-            let phase4 = parseSection('<<<PHASE_4_START>>>', '<<<PHASE_4_END>>>', fullResponse, 'Email Output');
+            if (issues.length > 0 && !bypassManualAuditRef.current) {
+                setManualAuditIssues(issues);
+                setShowManualAuditModal(true);
+                setProcessingState(ProcessingState.IDLE);
+                setOcrStatus('Needs approval');
+                return;
+            }
+            bypassManualAuditRef.current = false;
 
-            const staffNameMatch = phase4.match(/\*\*Staff Member:\*\*\s*(.*)/);
-            if (staffNameMatch) {
-                const originalName = staffNameMatch[1].trim();
-                const matchedEmployee = findBestEmployeeMatch(originalName, employeeList);
-                if (matchedEmployee) {
-                    phase4 = phase4.replace(originalName, matchedEmployee.fullName);
-                    if (phase1.includes(originalName)) {
-                        phase1 = phase1.replace(originalName, matchedEmployee.fullName);
-                    }
-                }
+            // Determine which format is being used
+            const hasFormData = /Client(?:'|’)?s?\s*full\s*name\s*:/i.test(formText)
+                || /Staff\s*member/i.test(formText)
+                || /Particular/i.test(formText);
+            const hasReceiptTable = receiptText.includes('Receipt #') || receiptText.includes('GRAND TOTAL') || items.length > 0;
+
+            if (isGroupPettyCashRequest) {
+                const summaryLines = groupPettyCashEntries
+                    .map((entry, idx) => `${idx + 1}. ${entry.staffName} - $${entry.amount.toFixed(2)}`)
+                    .join('\n');
+
+                const staffBlocks = groupPettyCashEntries
+                    .map((entry, idx) => `**Staff Member:** ${entry.staffName}\n**Amount:** $${entry.amount.toFixed(2)}\n**Receipt ID:** GROUP-${Date.now()}-${idx + 1}\n**NAB Code:** Enter NAB Code`)
+                    .join('\n\n');
+
+                phase1 = `<<<PHASE_1_START>>>
+## Group Petty Cash Request Detected
+
+${summaryLines}
+
+**Total Amount:** $${totalAmount.toFixed(2)}
+
+**Source:** Manual Input (No AI/API Used)
+<<<PHASE_1_END>>>`;
+
+                phase2 = `<<<PHASE_2_START>>>
+## Data Standardization
+
+Request Type: Group Petty Cash
+Transaction Count: ${groupPettyCashEntries.length}
+Total Amount: $${totalAmount.toFixed(2)}
+
+${summaryLines}
+<<<PHASE_2_END>>>`;
+
+                phase3 = `<<<PHASE_3_START>>>
+Group petty cash request recognized. Separate NAB slot required per staff member.
+<<<PHASE_3_END>>>`;
+
+                phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your group petty cash reimbursement request has been prepared for processing.
+
+${staffBlocks}
+
+**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+`;
+            } else if (hasFormData && hasReceiptTable) {
+
+                phase1 = `<<<PHASE_1_START>>>
+## Reimbursement Form Analysis
+
+**Client's Full Name:** ${clientName}
+**Address:** ${address}
+**Staff Member to Reimburse:** ${staffMember}
+**Approved by:** ${approvedBy}
+
+**Items:**
+${items.map((item, i) => `${i + 1}. ${item.storeName || item.product} - ${item.dateTime} - $${item.amount} (${item.category})`).join('\n')}
+
+**Total Amount:** $${totalAmount.toFixed(2)}
+
+**Source:** Manual Input (No AI/API Used)
+<<<PHASE_1_END>>>`;
+
+                phase2 = `<<<PHASE_2_START>>>
+## Data Standardization
+
+**Client's Full Name:** ${clientName}
+**Address:** ${address}
+**Staff Member to Reimburse:** ${staffMember}
+**Approved by:** ${approvedBy}
+
+**Total Amount:** $${totalAmount.toFixed(2)}
+
+**Items Summary:**
+${items.map((item, i) => `${i + 1}. ${item.storeName || item.product}: $${item.amount}`).join('\n')}
+<<<PHASE_2_END>>>`;
+
+                phase3 = `<<<PHASE_3_START>>>
+${issues.length > 0
+                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
+                    : 'All manual validation checks passed.'}
+<<<PHASE_3_END>>>`;
+
+                phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed today.
+
+**Staff Member:** ${staffMember || '[Enter Staff Name]'}
+**Client's Full Name:** ${clientName || '[Enter Client Name]'}
+**Address:** ${address}
+**Approved By:** ${approvedBy || '[Enter Approver]'}
+**Amount:** $${totalAmount.toFixed(2)}
+**Receipt ID:** ${'RCPT-MANUAL-' + Math.random().toString(36).substr(2, 4).toUpperCase()}
+**NAB Code:** Enter NAB Code
+<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
+
+**Summary of Expenses:**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+
+**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+`;
+
+            } else if (hasFormData) {
+
+                phase1 = `<<<PHASE_1_START>>>
+## Reimbursement Form Analysis
+
+**Client's Full Name:** ${clientName}
+**Address:** ${address}
+**Staff Member to Reimburse:** ${staffMember}
+**Approved by:** ${approvedBy}
+
+**Items:**
+${items.map((item, i) => `${i + 1}. ${item.storeName || item.product} - ${item.dateTime} - $${item.amount}`).join('\n')}
+
+**Total Amount:** $${totalAmount.toFixed(2)}
+
+**Source:** Manual Input (No AI/API Used)
+<<<PHASE_1_END>>>`;
+
+                phase2 = `<<<PHASE_2_START>>>
+## Data Standardization
+
+**Client's Full Name:** ${clientName}
+**Address:** ${address}
+**Staff Member to Reimburse:** ${staffMember}
+**Approved by:** ${approvedBy}
+
+**Total Amount:** $${totalAmount.toFixed(2)}
+<<<PHASE_2_END>>>`;
+
+                phase3 = `<<<PHASE_3_START>>>
+${issues.length > 0
+                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
+                    : 'All manual validation checks passed.'}
+<<<PHASE_3_END>>>`;
+
+                phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed today.
+
+**Staff Member:** ${staffMember || '[Enter Staff Name]'}
+**Client's Full Name:** ${clientName || '[Enter Client Name]'}
+**Address:** ${address}
+**Approved By:** ${approvedBy || '[Enter Approver]'}
+**Amount:** $${totalAmount.toFixed(2)}
+**Receipt ID:** ${'RCPT-MANUAL-' + Math.random().toString(36).substr(2, 4).toUpperCase()}
+**NAB Code:** Enter NAB Code
+<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
+
+**Summary of Expenses:**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+
+**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+`;
+
+            } else {
+                // Generic fallback - just show the raw text
+                const combined = [formText, receiptText].filter(t => t).join('\n\n---\n\n');
+                
+                phase1 = `<<<PHASE_1_START>>>
+## Manual Input
+
+${combined}
+
+**Source:** Manual Input (No AI/API Used)
+<<<PHASE_1_END>>>`;
+
+                phase2 = `<<<PHASE_2_START>>>
+## Data Standardization
+
+Please review the input data above.
+<<<PHASE_2_END>>>`;
+
+                phase3 = `<<<PHASE_3_START>>>
+${issues.length > 0
+                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
+                    : 'Manual validation skipped due to limited input.'}
+<<<PHASE_3_END>>>`;
+
+                phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed today.
+
+**Staff Member:** [Enter Staff Name]
+**Client's Full Name:** ${clientName || '[Enter Client Name]'}
+**Address:** ${address || '[Enter Address]'}
+**Approved By:** [Enter Approver Name]
+**Amount:** [Enter Amount]
+**Receipt ID:** RCPT-MANUAL-${Math.random().toString(36).substr(2, 4).toUpperCase()}
+**NAB Code:** Enter NAB Code
+<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
+
+Please review the details below and confirm if everything is correct.
+
+${combined}
+
+**Summary of Expenses:**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+
+---
+*Processed using manual input (no AI/API)*
+`;
             }
 
             setResults({ phase1, phase2, phase3, phase4 });
             setProcessingState(ProcessingState.COMPLETE);
+            setOcrStatus('Complete');
         } catch (err: any) {
+            bypassManualAuditRef.current = false;
             console.error(err);
-            let msg = err.message || "An unexpected error occurred during processing.";
-            if (msg.includes('400')) msg = "Error 400: The AI could not process the file. Please ensure you are uploading valid Images, PDFs, Word Docs, or Excel files.";
-            setErrorMessage(msg);
-            setProcessingState(ProcessingState.ERROR);
+            setErrorMessage(err.message || "An unexpected error occurred.");
+            setProcessingState(ProcessingState.IDLE);
         }
     };
 
@@ -1242,11 +2813,11 @@ export const App = () => {
             const clientName = clientMatch ? clientMatch[1].trim() : 'N/A';
             let nabRef = r.nab_code;
 
-            if (!nabRef || nabRef === 'PENDING' || (typeof nabRef === 'string' && (nabRef.startsWith('DISC-') || nabRef.startsWith('BATCH-')))) {
+            if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && (nabRef.startsWith('DISC-') || nabRef.startsWith('BATCH-')))) {
                 if (nabRefMatch) nabRef = nabRefMatch[1].trim();
             }
 
-            if (!nabRef || nabRef === 'PENDING' || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
+            if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
                 nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
             }
 
@@ -1283,7 +2854,9 @@ export const App = () => {
         currentTime.setHours(6, 59, 0, 0);
 
         const scheduled = records.map(record => {
-            const activity = record.isDiscrepancy ? 'Pending' : 'Reimbursement';
+            const hasValidNabCode = isValidNabReference(record.nabRef);
+            const activity = hasValidNabCode ? 'Reimbursement' : 'Pending';
+
             const startTime = new Date(currentTime);
             startTime.setMinutes(startTime.getMinutes() + 1);
 
@@ -1302,12 +2875,15 @@ export const App = () => {
             const timeEndStr = endTime.toLocaleTimeString('en-GB', { hour12: false });
 
             let status = '';
-            if (record.isDiscrepancy) {
-                const reason = record.discrepancyReason ? record.discrepancyReason.replace('Mismatch: ', '') : 'Pending';
-                status = `Rematch (${reason})`;
+            if (activity === 'Pending') {
+                const reason = String(record.discrepancyReason || '').trim();
+                if (reason && reason !== 'Discrepancy / Pending') {
+                    status = `Rematch (${reason.replace('Mismatch: ', '')})`;
+                } else {
+                    status = 'For Approval';
+                }
             } else {
-                const refSuffix = (record.nabRef && record.nabRef !== 'PENDING' && record.nabRef !== 'N/A') ? ` [${record.nabRef}]` : '';
-                status = `Paid to Nab${refSuffix}`;
+                status = `Paid to Nab [${record.nabRef}]`;
             }
 
             return {
@@ -1353,15 +2929,84 @@ export const App = () => {
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }, [allProcessedRecords]);
 
-    const pendingRecords = useMemo(() => {
+    const pendingApprovalRecords = useMemo(() => {
         return allProcessedRecords
-            .filter(r => r.isDiscrepancy && !dismissedIds.includes(r.id))
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            .filter(r => {
+                if (dismissedIds.includes(r.id)) return false;
+                const content = r.full_email_content || '';
+                return content.includes('<!-- STATUS: PENDING -->') || isPendingNabCodeValue(r.nab_code);
+            })
+            .map((record: any) => {
+                const pendingAgeDays = getPendingAgeDays(record);
+                return {
+                    ...record,
+                    pendingAgeDays,
+                    pendingAgingBucket: getPendingAgingBucket(pendingAgeDays)
+                };
+            })
+            .sort((a, b) => b.pendingAgeDays - a.pendingAgeDays || new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }, [allProcessedRecords, dismissedIds]);
 
+    const pendingApprovalStaffGroups = useMemo<PendingStaffGroup[]>(() => {
+        const grouped = new Map<string, PendingStaffGroup>();
+
+        pendingApprovalRecords.forEach((record: any) => {
+            const rawStaffName = String(record.staff_name || '').trim();
+            const staffName = rawStaffName || 'Unknown';
+            const key = staffName.toLowerCase();
+            const currentDate = String(record.date || '-');
+
+            if (!grouped.has(key)) {
+                grouped.set(key, {
+                    key,
+                    staffName,
+                    records: [record],
+                    count: 1,
+                    latestDate: currentDate,
+                    oldestAgeDays: record.pendingAgeDays || 0
+                });
+                return;
+            }
+
+            const existing = grouped.get(key)!;
+            existing.records.push(record);
+            existing.count += 1;
+            existing.oldestAgeDays = Math.max(existing.oldestAgeDays, record.pendingAgeDays || 0);
+
+            const currentTimestamp = new Date(record.created_at || 0).getTime();
+            const existingTimestamp = new Date(existing.records[0]?.created_at || 0).getTime();
+            if (currentTimestamp > existingTimestamp) {
+                existing.latestDate = currentDate;
+            }
+        });
+
+        return Array.from(grouped.values()).sort((a, b) => b.oldestAgeDays - a.oldestAgeDays || b.count - a.count || a.staffName.localeCompare(b.staffName));
+    }, [pendingApprovalRecords]);
+
+    const pendingAgingSummary = useMemo(() => {
+        return pendingApprovalRecords.reduce(
+            (acc, record: any) => {
+                const bucket = getPendingAgingBucket(record.pendingAgeDays || 0);
+                if (bucket === 'stale') acc.stale += 1;
+                else if (bucket === 'watch') acc.watch += 1;
+                else acc.fresh += 1;
+                return acc;
+            },
+            { fresh: 0, watch: 0, stale: 0 }
+        );
+    }, [pendingApprovalRecords]);
+
     const eodData = generateEODSchedule(todaysProcessedRecords);
-    const reimbursementCount = todaysProcessedRecords.filter(r => !r.isDiscrepancy).length;
-    const pendingCountToday = todaysProcessedRecords.filter(r => r.isDiscrepancy).length;
+    const accomplishedNabCount = useMemo(() => {
+        const uniqueNabCodes = new Set<string>();
+        todaysProcessedRecords.forEach((record: any) => {
+            const nabRef = String(record.nabRef || '').trim();
+            if (!isValidNabReference(nabRef)) return;
+            uniqueNabCodes.add(nabRef.toUpperCase());
+        });
+        return uniqueNabCodes.size;
+    }, [todaysProcessedRecords]);
+    const pendingCountToday = todaysProcessedRecords.filter(r => !isValidNabReference(r.nabRef)).length;
     const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && r.nabRef !== 'PENDING' && r.nabRef !== '');
     const totalAmount = nabReportData.reduce((sum, r) => sum + parseFloat(String(r.amount).replace(/[^0-9.-]+/g, "")), 0);
 
@@ -1369,7 +3014,7 @@ export const App = () => {
         if (isSaving) return <><RefreshCw size={12} className="animate-spin" /> Saving...</>;
         if (saveStatus === 'success') return <><RefreshCw size={12} strokeWidth={2.5} /> Start New Audit</>;
         if (saveStatus === 'error') return <><CloudUpload size={12} strokeWidth={2.5} /> Retry Save</>;
-        if (saveStatus === 'duplicate') return <><CloudUpload size={12} strokeWidth={2.5} /> Duplicate!</>;
+        if (saveStatus === 'duplicate') return <><AlertCircle size={12} strokeWidth={2.5} /> Duplicate Found</>;
         if (results?.phase4.toLowerCase().includes('discrepancy')) {
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save Record</>;
         }
@@ -1493,6 +3138,7 @@ export const App = () => {
                 </header>
 
                 <main className="w-full">
+                    {/* ... (Dashboard and other tabs remain same, showing Database changes here) ... */}
 
                     {/* Row Detail Modal */}
                     {isRowModalOpen && selectedRow && (
@@ -1599,7 +3245,7 @@ export const App = () => {
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between flex-shrink-0">
                                 <div className="flex items-center gap-3">
                                     <Database className="text-emerald-400" />
-                                    <h2 className="text-xl font-semibold text-white">Reimbursement Database (All Records)</h2>
+                                    <h2 className="text-xl font-semibold text-white">Expense Log</h2>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <div className="relative">
@@ -1660,17 +3306,16 @@ export const App = () => {
                                                             className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500/50"
                                                         />
                                                     </th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[120px]">UID</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Time Stamp</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Nab Code</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[120px] bg-white/5">Total Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Client / Location</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">YP NAME</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Client's Full Name</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Staff Name</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Type of expense</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Product</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[100px]">Receipt Date</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px]">Amount</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px] bg-white/5">Total Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[120px]">Date Processed</th>
                                                 </tr>
                                             </thead>
@@ -1697,9 +3342,9 @@ export const App = () => {
                                                                 className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500/50 pointer-events-none"
                                                             />
                                                         </td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.uid}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.timestamp}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.nabCode}</td>
+                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200 bg-white/5">{row.totalAmount}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.ypName}>{row.ypName}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.youngPersonName}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase">{row.staffName}</td>
@@ -1707,7 +3352,6 @@ export const App = () => {
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{row.product}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.receiptDate}</td>
                                                         <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{row.amount}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200 bg-white/5">{row.totalAmount}</td>
                                                         <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{row.dateProcessed}</td>
                                                     </tr>
                                                 ))}
@@ -1719,58 +3363,88 @@ export const App = () => {
                         </div>
                     )}
 
+                    {/* ... (Rest of the file remains unchanged from line 1000 onwards in previous version) ... */}
                     {activeTab === 'dashboard' && (
+                        // ... (Dashboard content preserved) ...
                         <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
                             <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
                                 <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden relative group">
                                     <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-                                    <div className="px-6 py-6 border-b border-white/5 flex justify-between items-center">
-                                        <h2 className="text-lg font-semibold text-white tracking-tight">Documents</h2>
-                                        {results && (
-                                            <button onClick={resetAll} className="text-slate-500 hover:text-white transition-colors bg-white/5 p-2 rounded-full hover:bg-white/10" title="Reset">
-                                                <RefreshCw size={16} />
+                                    <div className="px-6 py-5 border-b border-white/5 space-y-4">
+                                        <div className="flex justify-between items-center gap-3">
+                                            <h2 className={`text-lg font-semibold tracking-tight ${requestMode === 'solo' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                                                {requestMode === 'solo' ? 'Solo Mode' : 'Group Mode'}
+                                            </h2>
+                                            {results && (
+                                                <button onClick={resetAll} className="text-slate-500 hover:text-white transition-colors bg-white/5 p-2 rounded-full hover:bg-white/10" title="Reset">
+                                                    <RefreshCw size={16} />
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 rounded-xl bg-black/25 border border-white/10 p-1">
+                                            <button
+                                                onClick={() => setRequestMode('solo')}
+                                                className={`relative overflow-hidden rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 ${requestMode === 'solo'
+                                                        ? 'text-emerald-100 bg-emerald-500/25 border border-emerald-400/40 shadow-[0_0_20px_rgba(16,185,129,0.45)] animate-pulse'
+                                                        : 'text-slate-400 bg-transparent border border-transparent hover:text-slate-200 hover:bg-white/5'
+                                                    }`}
+                                            >
+                                                Solo
                                             </button>
-                                        )}
+                                            <button
+                                                onClick={() => setRequestMode('group')}
+                                                className={`relative overflow-hidden rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 ${requestMode === 'group'
+                                                        ? 'text-amber-100 bg-amber-500/25 border border-amber-400/40 shadow-[0_0_20px_rgba(245,158,11,0.45)] animate-pulse'
+                                                        : 'text-slate-400 bg-transparent border border-transparent hover:text-slate-200 hover:bg-white/5'
+                                                    }`}
+                                            >
+                                                Group
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="p-6 space-y-8">
-                                        <FileUpload
-                                            label="1. Receipt Images"
-                                            description="Screenshots, Images, PDF, Word, Excel"
-                                            files={receiptFiles}
-                                            onFilesChange={setReceiptFiles}
-                                            multiple={true}
-                                            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.heic,.heif"
-                                        />
-                                        <div className="mt-2">
+                                    <div className="p-6 space-y-6">
+                                        <div className="space-y-4">
+                                            <h3 className="text-sm font-medium text-slate-400">Reimbursement Form</h3>
                                             <textarea
-                                                value={receiptManualText}
-                                                onChange={(e) => setReceiptManualText(e.target.value)}
-                                                placeholder="Or paste receipt text here manually..."
-                                                className="w-full h-24 bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors"
+                                                ref={reimbursementFormRef}
+                                                value={reimbursementFormText}
+                                                onChange={(e) => setReimbursementFormText(e.target.value)}
+                                                placeholder={`Client's full name: Dylan Crane
+Address: 3A Acre Street, Oran Park
+Staff member to reimburse: Isaac Thompson
+Approved by: Isaac Thompson
+
+Particular | Date Purchased | Amount | On Charge Y/N
+Pocket Money | 15.2.25 | $20 | N
+Takeout | 12.2.26 | $19.45 | N
+
+Total Amount: $39.45`}
+                                                className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
                                             />
                                         </div>
+
                                         <div className="relative">
                                             <div className="absolute inset-0 flex items-center" aria-hidden="true">
                                                 <div className="w-full border-t border-white/5"></div>
                                             </div>
                                             <div className="relative flex justify-center">
-                                                <span className="bg-[#1c1e24] px-2 text-xs text-slate-500 uppercase tracking-widest">Optional</span>
+                                                <span className="bg-[#1c1e24] px-2 text-xs text-slate-500 uppercase tracking-widest">And/Or</span>
                                             </div>
                                         </div>
-                                        <FileUpload
-                                            label="2. Reimbursement Form"
-                                            description="Form Image, PDF, Word, Excel"
-                                            files={formFiles}
-                                            onFilesChange={setFormFiles}
-                                            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.heic,.heif"
-                                        />
-                                        <div className="mt-2">
+
+                                        <div className="space-y-4">
+                                            <h3 className="text-sm font-medium text-slate-400">Receipt Details</h3>
                                             <textarea
-                                                value={formManualText}
-                                                onChange={(e) => setFormManualText(e.target.value)}
-                                                placeholder="Or paste form text here manually..."
-                                                className="w-full h-24 bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors"
+                                                value={receiptDetailsText}
+                                                onChange={(e) => setReceiptDetailsText(e.target.value)}
+                                                placeholder={`Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes
+1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Hills 1% Milk 3L | Groceries | Included in total | $6.00 | Walang visible OR number
+1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Bread Loaf 650g | Groceries | Included in total | $6.00 | Same receipt as above
+2 | 126302897245 | (Handwritten - not clear) | 31/01/2026 | Cool & Creamy - Lolly | Takeaway | $90.00 | $90.00 | Matches Incentive entry
+
+GRAND TOTAL: $39.45`}
+                                                className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
                                             />
                                         </div>
                                         {errorMessage && (
@@ -1781,7 +3455,7 @@ export const App = () => {
                                         )}
                                         <button
                                             onClick={handleProcess}
-                                            disabled={processingState === ProcessingState.PROCESSING || (receiptFiles.length === 0 && !receiptManualText)}
+                                            disabled={processingState === ProcessingState.PROCESSING || (!reimbursementFormText.trim() && !receiptDetailsText.trim())}
                                             className={`w-full group relative flex justify-center items-center gap-3 py-4 px-6 rounded-2xl font-semibold text-white transition-all duration-300 shadow-[0_0_20px_rgba(79,70,229,0.1)]
                         ${processingState === ProcessingState.PROCESSING
                                                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
@@ -1800,14 +3474,40 @@ export const App = () => {
                                     </div>
                                 </div>
                                 <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
-                                    <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Process Status</h3>
-                                    <div className="space-y-6 pl-2">
-                                        <ProcessingStep status={processingState === ProcessingState.IDLE ? 'idle' : 'complete'} title="Upload" description="Receipts & Forms received" />
-                                        <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'processing' : results ? 'complete' : 'idle'} title="AI Extraction" description={ocrStatus || "Analyzing receipt data"} />
-                                        <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Rule Engine" description="Validating policy limits" />
-                                        <ProcessingStep status={processingState === ProcessingState.PROCESSING ? 'idle' : results ? 'complete' : 'idle'} title="Final Decision" description="Email generation" />
-                                    </div>
+                                    <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
+                                    <div className="space-y-3 pl-1">
+                                        {rulesStatusItems.map((rule) => {
+                                            const isBlocked = rule.status === 'blocked';
+                                            const isWarning = rule.status === 'warning';
+                                            const badgeClass = isBlocked
+                                                ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                                : isWarning
+                                                    ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
+                                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 
+                                            return (
+                                                <div key={rule.id} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
+                                                    <div className="flex items-start gap-2">
+                                                        {isBlocked ? (
+                                                            <AlertCircle size={15} className="text-red-400 mt-0.5" />
+                                                        ) : isWarning ? (
+                                                            <AlertCircle size={15} className="text-amber-400 mt-0.5" />
+                                                        ) : (
+                                                            <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
+                                                        )}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
+                                                                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass}`}>{rule.status}</span>
+                                                            </div>
+                                                            <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    
                                     {/* Processing Status Badge */}
                                     {processingState === ProcessingState.PROCESSING && (
                                         <div className="mt-4 pt-4 border-t border-white/5">
@@ -1829,7 +3529,7 @@ export const App = () => {
                                             <LayoutDashboard size={40} className="text-slate-600" />
                                         </div>
                                         <h2 className="text-2xl font-bold text-white mb-2">Audit Dashboard</h2>
-                                        <p className="max-w-sm mx-auto text-slate-400">Upload documents on the left panel to begin the AI-powered auditing process.</p>
+                                        <p className="max-w-sm mx-auto text-slate-400">Upload documents on the left panel to begin the auditing process.</p>
                                     </div>
                                 )}
                                 {!results && processingState === ProcessingState.PROCESSING && (
@@ -1841,77 +3541,27 @@ export const App = () => {
                                         </div>
                                         <h2 className="text-xl font-bold text-white">Analyzing Documents...</h2>
                                         <p className="text-slate-400 mt-2 animate-pulse">{ocrStatus || 'Running compliance checks'}</p>
-
+                                        
                                         {/* Processing Indicator */}
                                         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-                                            Using cloud AI
+                                            Running validation checks
                                         </div>
                                     </div>
                                 )}
                                 {results && (
                                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-full content-start">
-                                        <div className="bg-[#1c1e24]/80 backdrop-blur-xl rounded-[32px] border border-white/5 overflow-hidden shadow-lg hover:border-white/10 transition-colors">
-                                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-2 h-8 bg-indigo-400 rounded-full shadow-[0_0_10px_rgba(129,140,248,0.5)]"></div>
-                                                    <h3 className="font-semibold text-white text-lg">Receipt Analysis</h3>
-                                                </div>
-                                                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded-md border border-indigo-500/20 uppercase tracking-wider font-bold">Phase 1</span>
-                                            </div>
-                                            <div className="p-6 max-h-[400px] overflow-y-auto custom-scrollbar">
-                                                <MarkdownRenderer content={results.phase1} />
-                                            </div>
-                                        </div>
-                                        <div className="bg-[#1c1e24]/80 backdrop-blur-xl rounded-[32px] border border-white/5 overflow-hidden shadow-lg hover:border-white/10 transition-colors">
-                                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-2 h-8 bg-blue-400 rounded-full shadow-[0_0_10px_rgba(96,165,250,0.5)]"></div>
-                                                    <h3 className="font-semibold text-white text-lg">Standardization</h3>
-                                                </div>
-                                                <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md border border-blue-500/20 uppercase tracking-wider font-bold">Phase 2</span>
-                                            </div>
-                                            <div className="p-6 bg-[#111216] font-mono text-xs text-slate-300 overflow-x-auto">
-                                                <pre className="whitespace-pre-wrap">{results.phase2.replace(/```pgsql/g, '').replace(/```sql/g, '').replace(/```/g, '').trim()}</pre>
-                                            </div>
-                                        </div>
-                                        <div className="bg-[#1c1e24]/80 backdrop-blur-xl rounded-[32px] border border-white/5 overflow-hidden shadow-lg hover:border-white/10 transition-colors xl:col-span-2">
-                                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-2 h-8 bg-purple-400 rounded-full shadow-[0_0_10px_rgba(192,132,252,0.5)]"></div>
-                                                    <h3 className="font-semibold text-white text-lg">Audit Rules Engine</h3>
-                                                </div>
-                                                <span className="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-1 rounded-md border border-purple-500/20 uppercase tracking-wider font-bold">Phase 3</span>
-                                            </div>
-                                            <div className="p-6">
-                                                <MarkdownRenderer content={results.phase3} />
-                                            </div>
-                                        </div>
                                         <div className="bg-indigo-500/5 backdrop-blur-xl rounded-[32px] border border-indigo-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.3)] xl:col-span-2 relative">
                                             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[80px] pointer-events-none"></div>
                                             <div className="px-6 py-4 border-b border-indigo-500/10 flex items-center justify-between bg-indigo-500/10">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-2 h-8 bg-indigo-400 rounded-full shadow-[0_0_15px_rgba(129,140,248,0.8)]"></div>
-                                                    <h3 className="font-bold text-white text-lg flex items-center gap-2">
+<h3 className="font-bold text-white text-lg flex items-center gap-2">
                                                         <CheckCircle size={24} className="text-lime-400" />
                                                         Final Decision & Email
                                                     </h3>
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    {!isEditing ? (
-                                                        <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold bg-white/10 text-white hover:bg-white/20 transition-all shadow-lg">
-                                                            <Edit2 size={12} strokeWidth={2.5} /> Override / Edit
-                                                        </button>
-                                                    ) : (
-                                                        <>
-                                                            <button onClick={handleCancelEdit} className="flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-all shadow-lg">
-                                                                <X size={12} strokeWidth={3} /> Cancel
-                                                            </button>
-                                                            <button onClick={handleSaveEdit} className="flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold bg-emerald-500 text-white hover:bg-emerald-600 transition-all shadow-lg">
-                                                                <Check size={12} strokeWidth={3} /> Save Changes
-                                                            </button>
-                                                        </>
-                                                    )}
                                                     <button
                                                         onClick={saveStatus === 'success' ? handleStartNewAudit : handleSmartSave}
                                                         disabled={isSaving || isEditing}
@@ -1930,131 +3580,224 @@ export const App = () => {
                                                 const searchQuery = employeeSearchQuery.get(idx) || tx.formattedName;
                                                 const showDropdown = showEmployeeDropdown.get(idx) || false;
                                                 const filteredEmployees = getFilteredEmployees(searchQuery);
-
+                                                
                                                 return (
-                                                    <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
-                                                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                                            <CreditCard size={80} className="text-white" />
-                                                        </div>
-                                                        <div className="relative z-10">
-                                                            <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
-                                                                Banking Details {parsedTransactions.length > 1 ? `(${idx + 1}/${parsedTransactions.length})` : '(Manual Transfer)'}
-                                                            </h4>
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                                {/* Payee Name with Searchable Dropdown */}
-                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
-                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <div className="flex-1 relative">
-                                                                            <input
-                                                                                type="text"
-                                                                                value={searchQuery}
-                                                                                onChange={(e) => handleEmployeeSearchChange(idx, e.target.value)}
-                                                                                onFocus={() => handleEmployeeSearchFocus(idx)}
-                                                                                onBlur={() => handleEmployeeSearchBlur(idx)}
-                                                                                className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
-                                                                                placeholder="Search employee..."
-                                                                            />
-                                                                            {/* Dropdown */}
-                                                                            {showDropdown && filteredEmployees.length > 0 && (
-                                                                                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
-                                                                                    {filteredEmployees.map((emp, empIdx) => (
-                                                                                        <button
-                                                                                            key={empIdx}
-                                                                                            onClick={() => handleEmployeeSelect(idx, emp)}
-                                                                                            className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
-                                                                                        >
-                                                                                            {emp.fullName}
-                                                                                        </button>
-                                                                                    ))}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                        <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
-                                                                            {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
-                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <p className="text-emerald-400 font-bold text-lg">{tx.amount.replace(/[^0-9.]/g, '')}</p>
-                                                                        <button onClick={() => handleCopyField(tx.amount.replace(/[^0-9.]/g, ''), 'amount')} className="text-emerald-500 hover:text-white transition-colors">
-                                                                            {copiedField === 'amount' ? <Check size={14} /> : <Copy size={14} />}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-
-                                                            {/* BSB and Account Number Row */}
-                                                            <div className="grid grid-cols-2 gap-4 mt-4">
-                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
-                                                                        <button
-                                                                            onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${idx}`)}
-                                                                            className="text-slate-500 hover:text-white transition-colors"
-                                                                            disabled={!selectedEmployee?.bsb}
-                                                                        >
-                                                                            {copiedField === `bsb-${idx}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
-                                                                    <div className="flex justify-between items-center">
-                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
-                                                                        <button
-                                                                            onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${idx}`)}
-                                                                            className="text-slate-500 hover:text-white transition-colors"
-                                                                            disabled={!selectedEmployee?.account}
-                                                                        >
-                                                                            {copiedField === `account-${idx}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
+                                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                                                        <CreditCard size={80} className="text-white" />
                                                     </div>
-                                                )
-                                            })}
+                                                    <div className="relative z-10">
+                                                        <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                            <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                            Banking Details ({idx + 1}/{parsedTransactions.length})
+                                                        </h4>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {/* Payee Name with Searchable Dropdown */}
+                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
+                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <div className="flex-1 relative">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={searchQuery}
+                                                                            onChange={(e) => handleEmployeeSearchChange(idx, e.target.value)}
+                                                                            onFocus={() => handleEmployeeSearchFocus(idx)}
+                                                                            onBlur={() => handleEmployeeSearchBlur(idx)}
+                                                                            className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
+                                                                            placeholder="Search employee..."
+                                                                        />
+                                                                        {/* Dropdown */}
+                                                                        {showDropdown && filteredEmployees.length > 0 && (
+                                                                            <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
+                                                                                {filteredEmployees.map((emp, empIdx) => (
+                                                                                    <button
+                                                                                        key={empIdx}
+                                                                                        onClick={() => handleEmployeeSelect(idx, emp)}
+                                                                                        className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
+                                                                                    >
+                                                                                        {emp.fullName}
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
+                                                                        {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
+                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <p className="text-emerald-400 font-bold text-lg">{tx.amount.replace(/[^0-9.]/g, '')}</p>
+                                                                    <button onClick={() => handleCopyField(tx.amount.replace(/[^0-9.]/g, ''), 'amount')} className="text-emerald-500 hover:text-white transition-colors">
+                                                                        {copiedField === 'amount' ? <Check size={14} /> : <Copy size={14} />}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {/* BSB and Account Number Row */}
+                                                        <div className="grid grid-cols-2 gap-4 mt-4">
+                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
+                                                                    <button 
+                                                                        onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${idx}`)} 
+                                                                        className="text-slate-500 hover:text-white transition-colors"
+                                                                        disabled={!selectedEmployee?.bsb}
+                                                                    >
+                                                                        {copiedField === `bsb-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
+                                                                    <button 
+                                                                        onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${idx}`)} 
+                                                                        className="text-slate-500 hover:text-white transition-colors"
+                                                                        disabled={!selectedEmployee?.account}
+                                                                    >
+                                                                        {copiedField === `account-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
 
-                                            <div className="px-8 pt-6 pb-2">
-                                                <label className="block text-xs uppercase tracking-widest font-bold text-slate-500 mb-2">
-                                                    Step 5: Enter Bank/NAB Reference(s)
-                                                </label>
-                                                <div className="space-y-3">
-                                                    {parsedTransactions.length === 0 ? (
-                                                        <p className="text-sm text-slate-500 italic">No transactions detected or pending analysis...</p>
-                                                    ) : parsedTransactions.map((tx, idx) => (
-                                                        <div key={idx} className="relative">
-                                                            <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" size={16} />
+                                                        <div className="mt-4 bg-black/20 rounded-xl p-3 border border-indigo-500/25">
+                                                            <p className="text-[10px] uppercase text-indigo-300 font-bold mb-1">NAB Code</p>
                                                             <input
                                                                 type="text"
-                                                                value={tx.currentNabRef}
+                                                                value={tx.currentNabRef || ''}
                                                                 onChange={(e) => handleTransactionNabChange(idx, e.target.value)}
-                                                                placeholder={`Reference for ${tx.formattedName} ($${tx.amount})...`}
-                                                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-600"
+                                                                placeholder="Enter NAB Code"
+                                                                className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
                                                             />
                                                         </div>
-                                                    ))}
+                                                    </div>
                                                 </div>
-                                                <p className="text-[10px] text-slate-500 mt-2">Paying via bank transfer? Enter the reference code(s) above to update the email automatically.</p>
-                                            </div>
-                                            <div className="p-8">
+                                            )})}
+<div className="p-8 space-y-5">
+                                                {missingQuickEditFields.length > 0 && (
+                                                    <div className="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-5">
+                                                        <div className="flex items-start justify-between gap-3 mb-4">
+                                                            <div>
+                                                                <p className="text-xs uppercase tracking-wider font-bold text-amber-300">Missing Fields Quick Edit</p>
+                                                                <p className="text-sm text-amber-100/90">Fill the missing fields below, then apply to update the email content instantly.</p>
+                                                            </div>
+                                                            <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 border border-amber-300/40 text-amber-100">
+                                                                {missingQuickEditFields.length} Missing
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                            {missingQuickEditFields.map((field) => (
+                                                                <div key={field.key} className="bg-black/25 border border-white/10 rounded-xl px-3 py-2.5">
+                                                                    <label className="text-[10px] uppercase tracking-wider text-amber-200 font-bold block mb-1">{field.label}</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={quickEditDrafts[field.key] ?? field.value}
+                                                                        onChange={(e) => handleQuickEditDraftChange(field.key, e.target.value)}
+                                                                        placeholder={`Enter ${field.label}`}
+                                                                        className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                                                                    />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        <div className="mt-4 flex justify-end gap-2">
+                                                            <button
+                                                                onClick={handleResetMissingFieldDrafts}
+                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-200 bg-white/10 hover:bg-white/20 transition-colors"
+                                                            >
+                                                                Reset
+                                                            </button>
+                                                            <button
+                                                                onClick={handleApplyMissingFieldEdits}
+                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider text-black bg-amber-400 hover:bg-amber-300 transition-colors"
+                                                            >
+                                                                Apply Changes
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 <div className="bg-transparent rounded-xl p-8 text-white">
                                                     {isEditing ? (
                                                         <textarea value={editableContent} onChange={(e) => setEditableContent(e.target.value)} className="w-full h-[400px] p-4 font-mono text-sm border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 text-white resize-none" placeholder="Edit email content here..." />
                                                     ) : (
-                                                        <MarkdownRenderer content={results.phase4} id="email-output-content" theme="dark" />
+                                                        <MarkdownRenderer 
+                                                            content={stripUidFallbackMeta(results.phase4)} 
+                                                            id="email-output-content" 
+                                                            theme="dark" 
+                                                        />
                                                     )}
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 )}
+
+                                <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-amber-500/20 shadow-xl overflow-hidden">
+                                    <div className="px-6 py-5 border-b border-amber-500/20 flex items-center justify-between bg-amber-500/10">
+                                        <div className="flex items-center gap-3">
+                                            <AlertCircle className="text-amber-300" size={20} />
+                                            <div>
+                                                <h3 className="text-white font-semibold">Pending</h3>
+                                                <p className="text-xs text-amber-200/80">Need NAB code before moving to paid records. Aging resets when you mark Followed Up.</p>
+                                            </div>
+                                        </div>
+                                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                                            {pendingApprovalStaffGroups.length} Pending
+                                        </span>
+                                    </div>
+
+                                    <div className="px-6 py-3 border-b border-white/10 bg-black/20 text-xs text-slate-300 flex flex-wrap items-center gap-3">
+                                        <span className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-200">0-2d: {pendingAgingSummary.fresh}</span>
+                                        <span className="px-2 py-1 rounded-full bg-amber-500/15 border border-amber-400/25 text-amber-200">3-7d: {pendingAgingSummary.watch}</span>
+                                        <span className="px-2 py-1 rounded-full bg-red-500/15 border border-red-400/25 text-red-200">8+d: {pendingAgingSummary.stale}</span>
+                                    </div>
+
+                                    <div className="p-6 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
+                                        {pendingApprovalStaffGroups.length > 0 ? pendingApprovalStaffGroups.map((group) => (
+                                            <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
+                                                    <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
+                                                    <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
+                                                    <span className={`inline-flex text-[11px] px-2 py-1 rounded-full border ${group.oldestAgeDays >= 8
+                                                            ? 'bg-red-500/15 text-red-200 border-red-400/25'
+                                                            : group.oldestAgeDays >= 3
+                                                                ? 'bg-amber-500/15 text-amber-200 border-amber-400/25'
+                                                                : 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25'
+                                                        }`}>
+                                                        Oldest pending: {group.oldestAgeDays} day{group.oldestAgeDays === 1 ? '' : 's'}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => handleMarkPendingGroupFollowedUp(group)}
+                                                        disabled={followUpingGroupKey === group.key}
+                                                        className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {followUpingGroupKey === group.key ? 'Updating...' : 'Followed Up'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => openPendingApprovalModal(group)}
+                                                        className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors"
+                                                    >
+                                                        Approve
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )) : (
+                                            <div className="text-center py-8 text-slate-400 text-sm">No pending records right now.</div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -2062,6 +3805,7 @@ export const App = () => {
                     {/* ... (Other Tabs like NAB, EOD, Analytics, Settings remain the same) ... */}
                     {activeTab === 'nab_log' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {/* ... (NAB Log content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <CreditCard className="text-emerald-400" />
@@ -2148,6 +3892,7 @@ export const App = () => {
 
                     {activeTab === 'eod' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {/* ... (EOD content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <ClipboardList className="text-indigo-400" />
@@ -2156,8 +3901,8 @@ export const App = () => {
                                 <div className="flex items-center gap-4">
                                     <div className="flex gap-4 mr-4 text-sm">
                                         <div className="flex flex-col items-end">
-                                            <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Processed</span>
-                                            <span className="text-emerald-400 font-mono font-bold">{reimbursementCount}</span>
+                                            <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Accomplished (NAB)</span>
+                                            <span className="text-emerald-400 font-mono font-bold">{accomplishedNabCount}</span>
                                         </div>
                                         <div className="flex flex-col items-end">
                                             <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Pending</span>
@@ -2409,6 +4154,7 @@ export const App = () => {
 
                     {activeTab === 'settings' && (
                         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {/* ... (Settings content preserved) ... */}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <Users className="text-blue-400" />
@@ -2417,17 +4163,6 @@ export const App = () => {
                             </div>
 
                             <div className="p-8 space-y-8">
-                                {/* AI Provider Selection */}
-                                <AIProviderSelector
-                                    selectedProvider={selectedAIProvider}
-                                    onProviderChange={(provider) => {
-                                        setSelectedAIProvider(provider);
-                                        aiService.setPreferredProvider(provider);
-                                    }}
-                                />
-
-                                <div className="h-px bg-white/5"></div>
-
                                 {/* Employee Database Section */}
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
@@ -2463,6 +4198,162 @@ export const App = () => {
                                             className="w-full h-64 bg-transparent border-none text-slate-300 font-mono text-xs p-4 focus:ring-0 resize-y"
                                             spellCheck={false}
                                         />
+                                    </div>
+                                </div>
+
+                                <div className="h-px bg-white/5"></div>
+
+                                {/* Rules Section */}
+                                <div className="space-y-4">
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                        <div>
+                                            <h3 className="text-lg font-medium text-white">Feature Rules</h3>
+                                            <p className="text-sm text-slate-400">Manage built-in and custom rules used by the Rules Status panel.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                setSelectedRestoreRuleIds(new Set());
+                                                setShowRestoreRulesModal(true);
+                                            }}
+                                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                                        >
+                                            Restore Rules
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-black/30 rounded-xl border border-white/10 p-4 space-y-3">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500 font-bold">Add Custom Rule</p>
+                                        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                                            <input
+                                                type="text"
+                                                value={newRuleTitle}
+                                                onChange={(e) => setNewRuleTitle(e.target.value)}
+                                                placeholder="Rule title"
+                                                className="md:col-span-2 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500/50 outline-none"
+                                            />
+                                            <input
+                                                type="text"
+                                                value={newRuleDetail}
+                                                onChange={(e) => setNewRuleDetail(e.target.value)}
+                                                placeholder="Rule detail"
+                                                className="md:col-span-2 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500/50 outline-none"
+                                            />
+                                            <select
+                                                value={newRuleSeverity}
+                                                onChange={(e) => setNewRuleSeverity(e.target.value as RuleConfig['severity'])}
+                                                className="bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500/50 outline-none"
+                                            >
+                                                <option value="critical">critical</option>
+                                                <option value="high">high</option>
+                                                <option value="medium">medium</option>
+                                                <option value="info">info</option>
+                                            </select>
+                                        </div>
+                                        <button
+                                            onClick={handleRequestAddRule}
+                                            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-colors"
+                                        >
+                                            Add Rule
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                                        {rulesConfig.length === 0 && (
+                                            <p className="text-xs text-slate-500">No rules configured.</p>
+                                        )}
+
+                                        {rulesConfig.map((rule) => {
+                                            const severityChip = rule.severity === 'critical'
+                                                ? 'bg-red-500/20 text-red-300 border-red-500/30'
+                                                : rule.severity === 'high'
+                                                    ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
+                                                    : rule.severity === 'medium'
+                                                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/30'
+                                                        : 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+
+                                            const isEditingRule = editingRuleId === rule.id && editingRuleDraft;
+
+                                            return (
+                                                <div key={rule.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                                                    {isEditingRule ? (
+                                                        <div className="space-y-2">
+                                                            <input
+                                                                type="text"
+                                                                value={editingRuleDraft.title}
+                                                                onChange={(e) => setEditingRuleDraft({ ...editingRuleDraft, title: e.target.value })}
+                                                                className="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-indigo-500/50 outline-none"
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                value={editingRuleDraft.detail}
+                                                                onChange={(e) => setEditingRuleDraft({ ...editingRuleDraft, detail: e.target.value })}
+                                                                className="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-indigo-500/50 outline-none"
+                                                            />
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <select
+                                                                    value={editingRuleDraft.severity}
+                                                                    onChange={(e) => setEditingRuleDraft({ ...editingRuleDraft, severity: e.target.value as RuleConfig['severity'] })}
+                                                                    className="bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white outline-none"
+                                                                >
+                                                                    <option value="critical">critical</option>
+                                                                    <option value="high">high</option>
+                                                                    <option value="medium">medium</option>
+                                                                    <option value="info">info</option>
+                                                                </select>
+                                                                <button
+                                                                    onClick={handleRequestSaveRuleEdit}
+                                                                    className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider"
+                                                                >
+                                                                    Save
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setEditingRuleId(null);
+                                                                        setEditingRuleDraft(null);
+                                                                    }}
+                                                                    className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-2">
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div>
+                                                                    <p className="text-sm text-slate-100 font-semibold">{rule.title} {rule.isBuiltIn ? <span className="text-[10px] text-slate-500">(Built-in)</span> : null}</p>
+                                                                    <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
+                                                                </div>
+                                                                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${severityChip}`}>{rule.severity}</span>
+                                                            </div>
+                                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                                <p className="text-[10px] text-slate-500">Last modified: {new Date(rule.updatedAt).toLocaleString()}</p>
+                                                                <div className="flex items-center gap-2">
+                                                                    <button
+                                                                        onClick={() => handleToggleRuleEnabled(rule.id)}
+                                                                        className={`px-2.5 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider ${rule.enabled ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                                                                    >
+                                                                        {rule.enabled ? 'Enabled' : 'Disabled'}
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleStartEditRule(rule)}
+                                                                        className="px-2.5 py-1.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-[10px] font-bold uppercase tracking-wider"
+                                                                    >
+                                                                        Edit
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleRequestDeleteRule(rule.id)}
+                                                                        className="px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-300 text-[10px] font-bold uppercase tracking-wider"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 
@@ -2519,6 +4410,314 @@ export const App = () => {
                         </div>
                     )}
 
+                    {showRestoreRulesModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-2xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-white/5 flex items-center justify-between">
+                                    <h3 className="text-white font-bold">Restore Rules</h3>
+                                    <button
+                                        onClick={() => {
+                                            setShowRestoreRulesModal(false);
+                                            setSelectedRestoreRuleIds(new Set());
+                                        }}
+                                        className="text-slate-400 hover:text-white"
+                                    >
+                                        <X size={18} />
+                                    </button>
+                                </div>
+                                <div className="p-6 space-y-4">
+                                    {missingBuiltInRules.length === 0 ? (
+                                        <p className="text-sm text-slate-400">No deleted built-in rules available to restore.</p>
+                                    ) : (
+                                        <>
+                                            <p className="text-sm text-slate-300">Select which built-in rules you want to restore.</p>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setSelectedRestoreRuleIds(new Set(missingBuiltInRules.map(rule => rule.id)))}
+                                                    className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider"
+                                                >
+                                                    Select All
+                                                </button>
+                                                <button
+                                                    onClick={() => setSelectedRestoreRuleIds(new Set())}
+                                                    className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider"
+                                                >
+                                                    Clear All
+                                                </button>
+                                            </div>
+                                            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                                                {missingBuiltInRules.map(rule => (
+                                                    <label key={rule.id} className="flex items-start gap-3 p-3 rounded-lg bg-black/20 border border-white/10 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedRestoreRuleIds.has(rule.id)}
+                                                            onChange={() => toggleRestoreRuleSelection(rule.id)}
+                                                            className="mt-1"
+                                                        />
+                                                        <div>
+                                                            <p className="text-sm text-white font-medium">{rule.title}</p>
+                                                            <p className="text-xs text-slate-400">{rule.detail}</p>
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setShowRestoreRulesModal(false);
+                                            setSelectedRestoreRuleIds(new Set());
+                                        }}
+                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleRestoreSelectedRules}
+                                        disabled={selectedRestoreRuleIds.size === 0 || missingBuiltInRules.length === 0}
+                                        className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Restore Selected Rules ({selectedRestoreRuleIds.size})
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {pendingRuleAction && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-white/5 flex items-center gap-3">
+                                    <HelpCircle className="text-indigo-300" size={20} />
+                                    <div>
+                                        <h3 className="text-white font-bold">
+                                            {pendingRuleAction.type === 'add' ? 'Confirm Add Rule' : pendingRuleAction.type === 'edit' ? 'Confirm Edit Rule' : 'Confirm Delete Rule'}
+                                        </h3>
+                                        <p className="text-xs text-slate-300">
+                                            {pendingRuleAction.type === 'add' && 'This will add the new rule to your rule engine.'}
+                                            {pendingRuleAction.type === 'edit' && 'This will update the selected rule.'}
+                                            {pendingRuleAction.type === 'delete' && 'Deleting a rule may reduce fraud checks. Continue only if you accept the risk.'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 space-y-3">
+                                    {pendingRuleAction.type === 'delete' && (
+                                        <>
+                                            <p className="text-xs text-amber-300">Type this exact sentence to delete:</p>
+                                            <p className="text-xs text-slate-200 font-mono bg-black/20 border border-white/10 rounded p-2">{DELETE_RULE_CONFIRMATION_PHRASE}</p>
+                                            <input
+                                                type="text"
+                                                value={deleteConfirmText}
+                                                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                                placeholder="Type exact sentence"
+                                                className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-red-500/60"
+                                            />
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setPendingRuleAction(null);
+                                            setDeleteConfirmText('');
+                                        }}
+                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleConfirmRuleAction}
+                                        disabled={pendingRuleAction.type === 'delete' && deleteConfirmText !== DELETE_RULE_CONFIRMATION_PHRASE}
+                                        className={`px-4 py-2 rounded-lg font-semibold transition-colors ${pendingRuleAction.type === 'delete' ? 'bg-red-500 text-white hover:bg-red-400' : 'bg-emerald-500 text-black hover:bg-emerald-400'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    >
+                                        {pendingRuleAction.type === 'delete' ? 'Delete Rule' : 'Confirm'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Save Status Modal */}
+                    {showSaveModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${saveModalDecision?.mode === 'red' ? 'bg-red-500/10' : saveModalDecision?.mode === 'yellow' ? 'bg-amber-500/10' : 'bg-white/5'}`}>
+                                    {saveModalDecision?.mode === 'red' ? (
+                                        <AlertCircle className="text-red-300" size={20} />
+                                    ) : saveModalDecision?.mode === 'yellow' ? (
+                                        <AlertCircle className="text-amber-300" size={20} />
+                                    ) : (
+                                        <HelpCircle className="text-indigo-300" size={20} />
+                                    )}
+                                    <div>
+                                        <h3 className="text-white font-bold">
+                                            {saveModalDecision?.mode === 'red' && 'Possible Double Payment'}
+                                            {saveModalDecision?.mode === 'yellow' && 'Potential Duplicate Needs Review'}
+                                            {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
+                                        </h3>
+                                        <p className="text-xs text-slate-300">
+                                            {saveModalDecision?.detail || 'NAB Code is incomplete or placeholder (e.g. Enter NAB Code).'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="px-6 py-5 text-sm text-slate-300 space-y-3">
+                                    {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') && (
+                                        <>
+                                            <p className="text-slate-200">
+                                                {saveModalDecision.mode === 'red'
+                                                    ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
+                                                    : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
+                                            </p>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Reviewer reason (required)</label>
+                                                <textarea
+                                                    value={reviewerOverrideReason}
+                                                    onChange={(e) => setReviewerOverrideReason(e.target.value)}
+                                                    rows={3}
+                                                    placeholder="Explain why this should be saved as pending"
+                                                    className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                    {(!saveModalDecision || saveModalDecision.mode === 'nab') && (
+                                        <p className="text-center">Save this entry as</p>
+                                    )}
+                                </div>
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={closeSaveModal}
+                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') ? (
+                                        <button
+                                            onClick={() => confirmSave('PENDING', {
+                                                duplicateSignal: saveModalDecision.mode,
+                                                reviewerReason: reviewerOverrideReason,
+                                                detail: saveModalDecision.detail
+                                            })}
+                                            disabled={!reviewerOverrideReason.trim()}
+                                            className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Save as PENDING
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                onClick={() => confirmSave('PENDING', { duplicateSignal: 'green', detail: 'Saved as pending due to incomplete NAB reference.' })}
+                                                className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
+                                            >
+                                                Save as PENDING
+                                            </button>
+                                            <button
+                                                onClick={() => confirmSave('PAID', { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' })}
+                                                className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors"
+                                            >
+                                                Save as PAID
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {pendingApprovalStaffGroup && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-lg rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-emerald-500/10 flex items-center gap-3">
+                                    <CheckCircle className="text-emerald-300" size={20} />
+                                    <div>
+                                        <h3 className="text-white font-bold">Approve Pending Record</h3>
+                                        <p className="text-xs text-slate-300">Required ang NAB code bago ma-approve.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 space-y-3">
+                                    <div>
+                                        <p className="text-xs text-slate-400 mb-1">Staff</p>
+                                        <p className="text-sm text-white font-semibold uppercase">{pendingApprovalStaffGroup.staffName || 'Unknown'}</p>
+                                        <p className="text-xs text-slate-400 mt-1">Entries to approve: {pendingApprovalStaffGroup.count}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-1">NAB Code</label>
+                                        <input
+                                            type="text"
+                                            value={pendingApprovalNabCode}
+                                            onChange={(e) => setPendingApprovalNabCode(e.target.value)}
+                                            placeholder="Enter NAB Code"
+                                            className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/60"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={closePendingApprovalModal}
+                                        disabled={isApprovingPending}
+                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleApprovePendingRecord}
+                                        disabled={isApprovingPending || !pendingApprovalNabCode.trim()}
+                                        className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isApprovingPending ? 'Approving...' : 'Confirm Approval'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Manual Validation Approval Modal */}
+                    {showManualAuditModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-2xl rounded-[28px] border border-amber-500/30 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-amber-500/10 flex items-center gap-3">
+                                    <AlertCircle className="text-amber-300" size={20} />
+                                    <div>
+                                        <h3 className="text-white font-bold">Manual Rule Check Needs Approval</h3>
+                                        <p className="text-xs text-amber-200/90">May nakita akong issues. Review then approve para mag-continue.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 max-h-[55vh] overflow-y-auto space-y-3">
+                                    {manualAuditIssues.map((issue, idx) => (
+                                        <div key={idx} className={`rounded-xl border p-3 ${issue.level === 'error' ? 'border-red-500/30 bg-red-500/10' : 'border-amber-500/30 bg-amber-500/10'}`}>
+                                            <p className={`text-sm ${issue.level === 'error' ? 'text-red-200' : 'text-amber-100'}`}>
+                                                <span className="font-bold uppercase mr-2">{issue.level}</span>
+                                                {issue.message}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={handleCancelManualAudit}
+                                        className="px-5 py-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        Ayusin Muna
+                                    </button>
+                                    <button
+                                        onClick={handleApproveManualAudit}
+                                        className="px-5 py-2.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
+                                    >
+                                        Approve & Continue
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Mass Edit Modal */}
                     {isMassEditModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -2544,12 +4743,6 @@ export const App = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* UID */}
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">UID (Receipt ID)</label>
-                                            <input type="text" value={massEditData.uid} onChange={(e) => setMassEditData({ ...massEditData, uid: e.target.value })} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-700" placeholder="(Keep Original)" />
-                                        </div>
-
                                         {/* Time Stamp */}
                                         <div className="space-y-2">
                                             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Time Stamp (Date)</label>
