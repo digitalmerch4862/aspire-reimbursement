@@ -9,7 +9,7 @@ import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Logo from './components/Logo';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
-import { supabase } from './services/supabaseClient';
+import { hasSupabaseEnv, supabase } from './services/supabaseClient';
 
 // Default Data for Employee List
 const DEFAULT_EMPLOYEE_DATA = `First Names	Surname	Concatenate	BSB	Account
@@ -58,6 +58,27 @@ const findBestEmployeeMatch = (scannedName: string, employees: Employee[]): Empl
 
 const stripUidFallbackMeta = (text: string): string => {
     return text.replace(/<!--\s*UID_FALLBACKS:.*?-->\s*/gi, '');
+};
+
+const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
+
+const loadLocalAuditLogs = (): any[] => {
+    try {
+        const raw = localStorage.getItem(LOCAL_AUDIT_LOGS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const saveLocalAuditLogs = (records: any[]): void => {
+    try {
+        localStorage.setItem(LOCAL_AUDIT_LOGS_KEY, JSON.stringify(records));
+    } catch (error) {
+        console.warn('Failed to save local audit logs', error);
+    }
 };
 
 const stripClientLocationLine = (text: string): string => {
@@ -1084,6 +1105,16 @@ const [isEditing, setIsEditing] = useState(false);
     const fetchHistory = async () => {
         setLoadingHistory(true);
         try {
+            if (!hasSupabaseEnv) {
+                const localRows = loadLocalAuditLogs().sort((a, b) => {
+                    const aTs = new Date(a.created_at || 0).getTime();
+                    const bTs = new Date(b.created_at || 0).getTime();
+                    return bTs - aTs;
+                });
+                setHistoryData(localRows);
+                return;
+            }
+
             // Use 'audit_logs' as originally designed, not 'reimbursements'
             const { data, error } = await supabase
                 .from('audit_logs')
@@ -1643,6 +1674,14 @@ const [isEditing, setIsEditing] = useState(false);
         if (!selectedRow) return;
         if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
             try {
+                if (!hasSupabaseEnv) {
+                    const next = historyData.filter(item => item.id !== selectedRow.internalId);
+                    setHistoryData(next);
+                    saveLocalAuditLogs(next);
+                    handleRowModalClose();
+                    return;
+                }
+
                 // Delete from Supabase
                 const { error } = await supabase
                     .from('audit_logs')
@@ -1678,6 +1717,14 @@ const [isEditing, setIsEditing] = useState(false);
         if (confirm(`Are you sure you want to delete ${internalIdsToDelete.size} records? This action cannot be undone.`)) {
             try {
                 const idsArray = Array.from(internalIdsToDelete);
+
+                if (!hasSupabaseEnv) {
+                    const next = historyData.filter(item => !internalIdsToDelete.has(item.id));
+                    setHistoryData(next);
+                    saveLocalAuditLogs(next);
+                    setSelectedIds(new Set());
+                    return;
+                }
 
                 // Delete from Supabase using internalId
                 const { error } = await supabase
@@ -1750,6 +1797,12 @@ const [isEditing, setIsEditing] = useState(false);
         });
         setHistoryData(updatedHistory);
 
+        if (!hasSupabaseEnv) {
+            saveLocalAuditLogs(updatedHistory);
+            handleRowModalClose();
+            return;
+        }
+
         // Persist to Supabase
         try {
             const { error } = await supabase
@@ -1783,6 +1836,84 @@ const [isEditing, setIsEditing] = useState(false);
         const uniqueIdsSet = new Set(uniqueInternalIds);
 
         try {
+            if (!hasSupabaseEnv) {
+                const updateMap = new Map<any, any>();
+
+                Array.from(uniqueIdsSet).forEach((internalId) => {
+                    const originalRecord = historyData.find(r => r.id === internalId);
+                    if (!originalRecord) return;
+
+                    let newContent = originalRecord.full_email_content || "";
+                    const nextRecord: any = { ...originalRecord };
+
+                    if (massEditData.staffName) {
+                        nextRecord.staff_name = massEditData.staffName;
+                        newContent = newContent.replace(/(\*\*Staff Member:\*\*\s*)(.*?)(\n|$)/, `$1${massEditData.staffName}$3`);
+                    }
+
+                    if (massEditData.totalAmount) {
+                        const cleanAmount = massEditData.totalAmount.replace(/[^0-9.]/g, '');
+                        nextRecord.amount = parseFloat(cleanAmount);
+                        newContent = newContent.replace(/(\*\*Amount:\*\*\s*\$?)(.*?)(\n|$)/, `$1$${cleanAmount}$3`);
+                    }
+
+                    if (massEditData.nabCode) {
+                        nextRecord.nab_code = massEditData.nabCode;
+                        if (newContent.match(/NAB (?:Code|Reference):/)) {
+                            newContent = newContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/, `$1${massEditData.nabCode}$3`);
+                        } else {
+                            newContent += `\n**NAB Code:** ${massEditData.nabCode}`;
+                        }
+                    }
+
+                    if (massEditData.ypName) {
+                        if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
+                            newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${massEditData.ypName}$3`);
+                        } else {
+                            newContent += `\n**Client / Location:** ${massEditData.ypName}`;
+                        }
+                    }
+
+                    if (massEditData.uid) {
+                        if (newContent.match(/\*\*Receipt ID:\*\*/)) {
+                            newContent = newContent.replace(/(\*\*Receipt ID:\*\*\s*)(.*?)(\n|$)/, `$1${massEditData.uid}$3`);
+                        } else {
+                            newContent += `\n**Receipt ID:** ${massEditData.uid}`;
+                        }
+                    }
+
+                    if (massEditData.timestamp) {
+                        const newDate = new Date(massEditData.timestamp);
+                        if (!isNaN(newDate.getTime())) {
+                            nextRecord.created_at = newDate.toISOString();
+                        }
+                    }
+
+                    nextRecord.full_email_content = newContent;
+                    updateMap.set(internalId, nextRecord);
+                });
+
+                const nextHistory = historyData.map(item => updateMap.get(item.id) || item);
+                setHistoryData(nextHistory);
+                saveLocalAuditLogs(nextHistory);
+
+                alert("Mass edit saved successfully!");
+                setSelectedIds(new Set());
+                setIsMassEditModalOpen(false);
+                setMassEditData({
+                    uid: '',
+                    timestamp: '',
+                    nabCode: '',
+                    ypName: '',
+                    youngPersonName: '',
+                    staffName: '',
+                    expenseType: '',
+                    totalAmount: '',
+                    dateProcessed: ''
+                });
+                return;
+            }
+
             await Promise.all(Array.from(uniqueIdsSet).map(async (internalId) => {
                 const originalRecord = historyData.find(r => r.id === internalId);
                 if (!originalRecord) return;
@@ -2191,6 +2322,21 @@ const handleCopyEmail = async () => {
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 });
+            }
+
+            if (!hasSupabaseEnv) {
+                const now = Date.now();
+                const localPayloads = payloads.map((payload, idx) => ({
+                    ...payload,
+                    id: `local-${now}-${idx}-${Math.floor(Math.random() * 1000)}`
+                }));
+                const merged = [...localPayloads, ...loadLocalAuditLogs()];
+                saveLocalAuditLogs(merged);
+                setHistoryData(merged);
+                setSaveStatus('success');
+                resetAll();
+                scrollToReimbursementForm();
+                return;
             }
 
             let errorResult = await supabase.from('audit_logs').insert(payloads);
