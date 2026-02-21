@@ -345,6 +345,59 @@ const normalizeReferenceKey = (value: string): string => {
     return raw.toLowerCase();
 };
 
+const WEEKDAY_RESET_HOUR = 6;
+
+const isWeekday = (date: Date): boolean => {
+    const day = date.getDay();
+    return day >= 1 && day <= 5;
+};
+
+const getMostRecentWeekdayReset = (now: Date): Date => {
+    const cursor = new Date(now);
+    cursor.setHours(WEEKDAY_RESET_HOUR, 0, 0, 0);
+
+    if (isWeekday(now) && now.getTime() >= cursor.getTime()) {
+        return cursor;
+    }
+
+    for (let i = 0; i < 7; i += 1) {
+        cursor.setDate(cursor.getDate() - 1);
+        cursor.setHours(WEEKDAY_RESET_HOUR, 0, 0, 0);
+        if (isWeekday(cursor)) {
+            return cursor;
+        }
+    }
+
+    return cursor;
+};
+
+const getNextWeekdayReset = (now: Date): Date => {
+    const cursor = new Date(now);
+    cursor.setHours(WEEKDAY_RESET_HOUR, 0, 0, 0);
+
+    if (isWeekday(now) && now.getTime() < cursor.getTime()) {
+        return cursor;
+    }
+
+    for (let i = 0; i < 7; i += 1) {
+        cursor.setDate(cursor.getDate() + 1);
+        cursor.setHours(WEEKDAY_RESET_HOUR, 0, 0, 0);
+        if (isWeekday(cursor)) {
+            return cursor;
+        }
+    }
+
+    return cursor;
+};
+
+const isWithinWeekdayResetWindow = (createdAt: string | Date, now: Date): boolean => {
+    const createdMs = new Date(createdAt).getTime();
+    if (Number.isNaN(createdMs)) return false;
+    const windowStart = getMostRecentWeekdayReset(now).getTime();
+    const windowEnd = getNextWeekdayReset(now).getTime();
+    return createdMs >= windowStart && createdMs < windowEnd;
+};
+
 const upsertStatusTag = (content: string, status: 'PENDING' | 'PAID'): string => {
     const statusTag = `<!-- STATUS: ${status} -->`;
     if (content.includes('<!-- STATUS:')) {
@@ -709,6 +762,7 @@ const [isEditing, setIsEditing] = useState(false);
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'database' | 'nab_log' | 'eod' | 'analytics' | 'settings'>('dashboard');
     const [loadingSplash, setLoadingSplash] = useState(true);
+    const [nowTick, setNowTick] = useState(() => Date.now());
 
     // Analytics Report State
     const [generatedReport, setGeneratedReport] = useState<string | null>(null);
@@ -814,6 +868,13 @@ const [isEditing, setIsEditing] = useState(false);
         fetchHistory();
 
         return () => clearTimeout(timer);
+    }, []);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setNowTick(Date.now());
+        }, 30000);
+        return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
@@ -3074,8 +3135,7 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                 created_at: r.created_at,
                 id: r.id,
                 staff_name: r.staff_name || 'Unknown',
-                amount: String(r.amount || '0.00').replace('(Based on Receipts/Form Audit)', '').replace(/\*/g, '').trim(),
-                isToday: new Date(r.created_at).toDateString() === new Date().toDateString()
+                amount: String(r.amount || '0.00').replace('(Based on Receipts/Form Audit)', '').replace(/\*/g, '').trim()
             };
         });
     };
@@ -3155,10 +3215,11 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
     const allProcessedRecords = useMemo<any[]>(() => processRecords(historyData), [historyData]);
 
     const todaysProcessedRecords = useMemo<any[]>(() => {
+        const now = new Date(nowTick);
         return allProcessedRecords
-            .filter(r => r.isToday)
+            .filter(r => isWithinWeekdayResetWindow(r.created_at, now))
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }, [allProcessedRecords]);
+    }, [allProcessedRecords, nowTick]);
 
     const pendingApprovalRecords = useMemo(() => {
         return allProcessedRecords
@@ -4056,7 +4117,10 @@ GRAND TOTAL: $39.45`}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <CreditCard className="text-emerald-400" />
-                                    <h2 className="text-xl font-semibold text-white">NAB Banking Log (Today)</h2>
+                                    <div>
+                                        <h2 className="text-xl font-semibold text-white">NAB Banking Log (Current Cycle)</h2>
+                                        <p className="text-[11px] text-slate-400">Auto-clears every weekday at 6:00 AM.</p>
+                                    </div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => handleCopyTable('nab-log-table', 'nab')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'nab' ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
@@ -4122,7 +4186,7 @@ GRAND TOTAL: $39.45`}
                                             ))}
                                             {nabReportData.length === 0 && (
                                                 <tr>
-                                                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontStyle: 'italic' }}>No banking records found for today.</td>
+                                                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontStyle: 'italic' }}>No banking records in the current cycle.</td>
                                                 </tr>
                                             )}
                                             <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
@@ -4143,7 +4207,10 @@ GRAND TOTAL: $39.45`}
                             <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <ClipboardList className="text-indigo-400" />
-                                    <h2 className="text-xl font-semibold text-white">End of Day Schedule</h2>
+                                    <div>
+                                        <h2 className="text-xl font-semibold text-white">End of Day Schedule</h2>
+                                        <p className="text-[11px] text-slate-400">Cycle resets every weekday at 6:00 AM.</p>
+                                    </div>
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <div className="flex gap-4 mr-4 text-sm">
@@ -4193,7 +4260,7 @@ GRAND TOTAL: $39.45`}
                                                 </tr>
                                             ))}
                                             {todaysProcessedRecords.length === 0 && (
-                                                <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No activity recorded for today.</td></tr>
+                                                <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No activity recorded in the current cycle.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
