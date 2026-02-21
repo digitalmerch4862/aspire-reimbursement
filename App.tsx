@@ -174,8 +174,10 @@ interface GroupPettyCashEntry {
 interface InputTransactionFingerprint {
     staffName: string;
     amount: number;
+    totalAmount: number;
     uid: string;
     storeName: string;
+    product: string;
     rawDate: string;
     dateKey: string;
     signatureKey: string;
@@ -209,13 +211,20 @@ type DuplicateTrafficLight = 'red' | 'yellow' | 'green';
 
 interface DuplicateMatchEvidence {
     txStaffName: string;
+    txStoreName: string;
+    txProduct: string;
     txDateKey: string;
     txAmount: string;
+    txTotalAmount: string;
     txReference: string;
     historyStaffName: string;
+    historyStoreName: string;
+    historyProduct: string;
     historyDateKey: string;
     historyAmount: string;
+    historyTotalAmount: string;
     historyReference: string;
+    historyNabCode: string;
     historyProcessedAt: string;
 }
 
@@ -334,6 +343,14 @@ const normalizeNameKey = (value: string): string => {
     return String(value || '')
         .toLowerCase()
         .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+const normalizeTextKey = (value: string): string => {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 };
@@ -1426,8 +1443,10 @@ const [isEditing, setIsEditing] = useState(false);
             return groupEntries.map((entry) => ({
                 staffName: entry.staffName,
                 amount: Number(entry.amount.toFixed(2)),
+                totalAmount: Number(entry.amount.toFixed(2)),
                 uid: '',
                 storeName: 'group petty cash',
+                product: 'group petty cash',
                 rawDate: '',
                 dateKey: '',
                 signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
@@ -1449,18 +1468,23 @@ const [isEditing, setIsEditing] = useState(false);
             if (!normalized) continue;
 
             const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+            const totalAmount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
             const dateKey = toDateKey(normalized.dateTime || '');
+            const productKey = normalizeTextKey(normalized.product || '');
             const signatureKey = [
-                (normalized.storeName || '').trim().toLowerCase(),
+                normalizeTextKey(normalized.storeName || ''),
+                productKey,
                 dateKey,
-                normalizeMoneyValue(String(amount), '0.00')
+                normalizeMoneyValue(String(totalAmount), '0.00')
             ].join('|');
 
             parsed.push({
                 staffName: fallbackStaff,
                 amount,
+                totalAmount,
                 uid: (normalized.uniqueId || '').trim().toLowerCase(),
                 storeName: (normalized.storeName || '').trim(),
+                product: (normalized.product || '').trim(),
                 rawDate: normalized.dateTime || '',
                 dateKey,
                 signatureKey
@@ -1477,8 +1501,10 @@ const [isEditing, setIsEditing] = useState(false);
         return [{
             staffName: fallbackStaff,
             amount: Number.isNaN(fallbackAmount) ? 0 : fallbackAmount,
+            totalAmount: Number.isNaN(fallbackAmount) ? 0 : fallbackAmount,
             uid: '',
             storeName: '',
+            product: '',
             rawDate: '',
             dateKey: '',
             signatureKey: `fallback|${normalizeMoneyValue(String(fallbackAmount || 0), '0.00')}`
@@ -1508,53 +1534,60 @@ const [isEditing, setIsEditing] = useState(false);
 
         currentInputTransactions.forEach((tx) => {
             const txStaff = normalizeNameKey(tx.staffName);
+            const txStoreKey = normalizeTextKey(tx.storeName);
+            const txProductKey = normalizeTextKey(tx.product);
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
+            const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
             const txReference = normalizeReferenceKey(tx.uid);
 
-            if (!txStaff || !txAmount) return;
+            if (!txStoreKey || !txProductKey || !txDateKey || !txTotalAmount) return;
 
             historyRows.forEach((row: any) => {
                 const historyStaff = normalizeNameKey(String(row.staffName || ''));
+                const historyStoreKey = normalizeTextKey(String(row.storeName || ''));
+                const historyProductKey = normalizeTextKey(String(row.product || ''));
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
                 const historyAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+                const historyTotalAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
+                const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
+                const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
 
                 if (!historyStaff) return;
 
-                const nameMatch = txStaff === historyStaff;
-                const amountMatch = txAmount === historyAmount;
-                const dateComparable = !!txDateKey && !!historyDateKey;
-                const dateMatch = dateComparable ? txDateKey === historyDateKey : false;
-                const baseMatch = nameMatch && amountMatch && (dateComparable ? dateMatch : true);
+                const storeMatch = txStoreKey === historyStoreKey;
+                const productMatch = txProductKey === historyProductKey;
+                const dateMatch = txDateKey === historyDateKey;
+                const totalAmountMatch = txTotalAmount === historyTotalAmount;
+                const baseMatch = storeMatch && productMatch && dateMatch && totalAmountMatch;
 
                 if (!baseMatch) return;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
+                    txStoreName: tx.storeName || '-',
+                    txProduct: tx.product || '-',
                     txDateKey: txDateKey || '-',
                     txAmount,
+                    txTotalAmount,
                     txReference: txReference || '-',
                     historyStaffName: String(row.staffName || '-'),
+                    historyStoreName: String(row.storeName || '-'),
+                    historyProduct: String(row.product || '-'),
                     historyDateKey: historyDateKey || '-',
                     historyAmount,
+                    historyTotalAmount,
                     historyReference: historyReference || '-',
+                    historyNabCode,
                     historyProcessedAt: String(row.dateProcessed || '-')
                 };
 
-                if (txReference && historyReference && txReference === historyReference) {
-                    redMatches.push(evidence);
-                    return;
-                }
-
-                if (dateComparable) {
-                    yellowMatches.push(evidence);
-                }
+                redMatches.push(evidence);
             });
         });
 
         if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
-        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
@@ -1584,8 +1617,11 @@ const [isEditing, setIsEditing] = useState(false);
 
             const rowDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
             const rowAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+            const rowStore = normalizeTextKey(String(row.storeName || ''));
+            const rowProduct = normalizeTextKey(String(row.product || ''));
             const signatureKey = [
-                '',
+                rowStore,
+                rowProduct,
                 rowDateKey,
                 rowAmount
             ].join('|');
@@ -1610,10 +1646,7 @@ const [isEditing, setIsEditing] = useState(false);
             .filter(tx => tx.uid && historyByUid.has(tx.uid))
             .flatMap(tx => historyByUid.get(tx.uid) || []);
         const historySignatureMatches = currentInputTransactions
-            .map(tx => {
-                const signatureKey = ['', tx.dateKey, normalizeMoneyValue(String(tx.amount), '0.00')].join('|');
-                return historyBySignature.get(signatureKey) || [];
-            })
+            .map(tx => historyBySignature.get(tx.signatureKey) || [])
             .flat();
 
         const overLimitCount = currentInputTransactions.filter(tx => tx.amount > 300).length;
@@ -2664,7 +2697,7 @@ const handleCopyEmail = async () => {
         setSaveStatus('idle');
 
         if (duplicateCheckResult.signal === 'red') {
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} exact duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Date Purchased + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
             setSaveStatus('duplicate');
             setSaveModalDecision({ mode: 'red', detail });
             setShowSaveModal(true);
@@ -2672,7 +2705,7 @@ const handleCopyEmail = async () => {
         }
 
         if (duplicateCheckResult.signal === 'yellow') {
-            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) (same Name + Date + Amount) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -3311,6 +3344,41 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save Record</>;
         }
         return <><CloudUpload size={12} strokeWidth={2.5} /> Save & Pay</>;
+    };
+
+    const duplicateMatchesForModal = useMemo<DuplicateMatchEvidence[]>(() => {
+        const matches = saveModalDecision?.mode === 'red'
+            ? duplicateCheckResult.redMatches
+            : saveModalDecision?.mode === 'yellow'
+                ? duplicateCheckResult.yellowMatches
+                : [];
+
+        const unique = new Map<string, DuplicateMatchEvidence>();
+        matches.forEach((match) => {
+            const dedupeKey = [
+                normalizeTextKey(match.historyStoreName),
+                normalizeTextKey(match.historyProduct),
+                match.historyDateKey,
+                match.historyTotalAmount,
+                match.historyNabCode
+            ].join('|');
+            if (!unique.has(dedupeKey)) {
+                unique.set(dedupeKey, match);
+            }
+        });
+        return Array.from(unique.values()).slice(0, 6);
+    }, [saveModalDecision, duplicateCheckResult]);
+
+    const duplicateNabCodesForModal = useMemo<string[]>(() => {
+        const codes = duplicateMatchesForModal
+            .map(match => String(match.historyNabCode || '').trim())
+            .filter(code => isValidNabReference(code));
+        return Array.from(new Set(codes.map(code => code.toUpperCase())));
+    }, [duplicateMatchesForModal]);
+
+    const handleCopyDuplicateNabCodes = () => {
+        if (duplicateNabCodesForModal.length === 0) return;
+        handleCopyField(duplicateNabCodesForModal.join('\n'), 'dup-nab-all');
     };
 
     const handleCopyGeneratedReport = async () => {
@@ -4886,6 +4954,48 @@ GRAND TOTAL: $39.45`}
                                                     ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
                                                     : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
+                                            <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="text-xs font-semibold text-red-200 uppercase tracking-wider">Matched NAB Code(s)</p>
+                                                    {duplicateNabCodesForModal.length > 1 && (
+                                                        <button
+                                                            onClick={handleCopyDuplicateNabCodes}
+                                                            className="text-[11px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center gap-1"
+                                                        >
+                                                            {copiedField === 'dup-nab-all' ? <Check size={12} /> : <Copy size={12} />}
+                                                            Copy All
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {duplicateNabCodesForModal.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {duplicateNabCodesForModal.map((code, idx) => (
+                                                            <button
+                                                                key={`${code}-${idx}`}
+                                                                onClick={() => handleCopyField(code, `dup-nab-${idx}`)}
+                                                                className="px-2 py-1 rounded-md border border-white/15 bg-black/30 text-xs text-white font-mono hover:bg-white/10 flex items-center gap-1"
+                                                            >
+                                                                <span>{code}</span>
+                                                                {copiedField === `dup-nab-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs text-slate-300">No valid NAB code found on matched history.</p>
+                                                )}
+                                            </div>
+                                            {duplicateMatchesForModal.length > 0 && (
+                                                <div className="space-y-2">
+                                                    {duplicateMatchesForModal.map((match, idx) => (
+                                                        <div key={`${match.historyDateKey}-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2 text-xs text-slate-300">
+                                                            <p><span className="text-slate-400">Store:</span> <span className="text-white">{match.historyStoreName}</span></p>
+                                                            <p><span className="text-slate-400">Product:</span> <span className="text-white">{match.historyProduct}</span></p>
+                                                            <p><span className="text-slate-400">Date Purchased:</span> <span className="text-white">{match.historyDateKey}</span></p>
+                                                            <p><span className="text-slate-400">Total Amount:</span> <span className="text-white">${match.historyTotalAmount}</span></p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">Reviewer reason (required)</label>
                                                 <textarea
