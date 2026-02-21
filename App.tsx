@@ -230,6 +230,13 @@ interface SaveModalDecision {
     detail: string;
 }
 
+interface SaveToastState {
+    visible: boolean;
+    nabCode: string;
+    amount: string;
+    recordCount: number;
+}
+
 type RequestMode = 'solo' | 'group';
 
 type QuickEditFieldKey =
@@ -676,6 +683,8 @@ const [isEditing, setIsEditing] = useState(false);
     const [showSaveModal, setShowSaveModal] = useState(false);
     const [saveModalDecision, setSaveModalDecision] = useState<SaveModalDecision | null>(null);
     const [reviewerOverrideReason, setReviewerOverrideReason] = useState('');
+    const [saveToast, setSaveToast] = useState<SaveToastState>({ visible: false, nabCode: '-', amount: '0.00', recordCount: 0 });
+    const saveToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [quickEditDrafts, setQuickEditDrafts] = useState<Partial<Record<QuickEditFieldKey, string>>>({});
     const [pendingApprovalStaffGroup, setPendingApprovalStaffGroup] = useState<PendingStaffGroup | null>(null);
     const [pendingApprovalNabCode, setPendingApprovalNabCode] = useState('');
@@ -806,6 +815,77 @@ const [isEditing, setIsEditing] = useState(false);
 
         return () => clearTimeout(timer);
     }, []);
+
+    useEffect(() => {
+        return () => {
+            if (saveToastTimeoutRef.current) {
+                clearTimeout(saveToastTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    const playToastCloseTechSound = () => {
+        try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const now = ctx.currentTime;
+
+            const osc1 = ctx.createOscillator();
+            const osc2 = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc1.type = 'triangle';
+            osc2.type = 'sine';
+
+            osc1.frequency.setValueAtTime(920, now);
+            osc1.frequency.exponentialRampToValueAtTime(640, now + 0.12);
+            osc2.frequency.setValueAtTime(1840, now);
+            osc2.frequency.exponentialRampToValueAtTime(1280, now + 0.12);
+
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.05, now + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc1.start(now);
+            osc2.start(now + 0.01);
+            osc1.stop(now + 0.14);
+            osc2.stop(now + 0.14);
+
+            setTimeout(() => {
+                void ctx.close();
+            }, 220);
+        } catch {
+            // Ignore audio errors and keep UX non-blocking.
+        }
+    };
+
+    const showSavedToast = (payloads: Array<{ nab_code?: string | null; amount?: number }>) => {
+        const first = payloads[0];
+        const normalizedAmount = Number(first?.amount || 0);
+        const amountDisplay = Number.isFinite(normalizedAmount) ? normalizedAmount.toFixed(2) : '0.00';
+        const nabCodeDisplay = String(first?.nab_code || 'N/A').trim() || 'N/A';
+
+        if (saveToastTimeoutRef.current) {
+            clearTimeout(saveToastTimeoutRef.current);
+        }
+
+        setSaveToast({
+            visible: true,
+            nabCode: nabCodeDisplay,
+            amount: amountDisplay,
+            recordCount: payloads.length
+        });
+
+        saveToastTimeoutRef.current = setTimeout(() => {
+            setSaveToast(prev => ({ ...prev, visible: false }));
+            playToastCloseTechSound();
+        }, 2000);
+    };
 
     const handleSaveEmployeeList = () => {
         localStorage.setItem('aspire_employee_list', employeeRawText);
@@ -2337,6 +2417,7 @@ const handleCopyEmail = async () => {
                 saveLocalAuditLogs(merged);
                 setHistoryData(merged);
                 setSaveStatus('success');
+                showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
                 resetAll();
                 scrollToReimbursementForm();
                 return;
@@ -2367,6 +2448,7 @@ const handleCopyEmail = async () => {
             if (errorResult.error) throw errorResult.error;
 
             setSaveStatus('success');
+            showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
             fetchHistory();
             resetAll();
             scrollToReimbursementForm();
@@ -3219,6 +3301,22 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
 
     return (
         <div className="min-h-screen bg-[#0f1115] text-slate-300 font-sans">
+            {saveToast.visible && (
+                <div className="fixed top-5 right-5 z-[70] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-emerald-300/35 bg-[#11161f]/95 backdrop-blur-xl shadow-[0_12px_40px_rgba(16,185,129,0.25)] animate-in fade-in slide-in-from-top-3 duration-200">
+                    <div className="px-4 py-3 border-b border-emerald-300/20 flex items-center justify-between">
+                        <p className="text-xs uppercase tracking-[0.16em] font-bold text-emerald-300">Saved to Database</p>
+                        {saveToast.recordCount > 1 && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/35 bg-emerald-500/15 text-emerald-200 font-semibold">
+                                {saveToast.recordCount} records
+                            </span>
+                        )}
+                    </div>
+                    <div className="px-4 py-3 space-y-1.5 text-sm">
+                        <p className="text-slate-300">NAB Code: <span className="text-white font-semibold">{saveToast.nabCode}</span></p>
+                        <p className="text-slate-300">Amount: <span className="text-white font-semibold">${saveToast.amount}</span></p>
+                    </div>
+                </div>
+            )}
             {/* ... (Header Section same as before) ... */}
             <div className="relative z-10 p-6 max-w-[1600px] mx-auto">
                 <header className="flex items-center justify-between mb-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-full px-6 py-3 shadow-2xl">
