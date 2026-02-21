@@ -214,6 +214,7 @@ interface DuplicateMatchEvidence {
     txStaffName: string;
     txStoreName: string;
     txProduct: string;
+    txDateTime: string;
     txDateKey: string;
     txAmount: string;
     txTotalAmount: string;
@@ -221,6 +222,7 @@ interface DuplicateMatchEvidence {
     historyStaffName: string;
     historyStoreName: string;
     historyProduct: string;
+    historyDateTime: string;
     historyDateKey: string;
     historyAmount: string;
     historyTotalAmount: string;
@@ -1387,8 +1389,10 @@ const [isEditing, setIsEditing] = useState(false);
                         ypName: ypName,
                         youngPersonName: youngPersonName,
                         staffName,
+                        storeName: normalized.storeName,
                         product: normalized.product,
                         expenseType: normalized.category,
+                        receiptDateTime: normalized.dateTime || receiptDate,
                         receiptDate,
                         amount: amountForDb,
                         totalAmount: normalized.receiptTotal,
@@ -1411,8 +1415,10 @@ const [isEditing, setIsEditing] = useState(false);
                     ypName: ypName,
                     youngPersonName: youngPersonName,
                     staffName,
+                    storeName: '-',
                     product: 'Petty Cash / Reimbursement',
                     expenseType: 'Batch Request',
+                    receiptDateTime: dateProcessed,
                     receiptDate: dateProcessed,
                     amount: typeof totalAmount === 'number' ? totalAmount.toFixed(2) : totalAmount,
                     totalAmount: typeof totalAmount === 'number' ? totalAmount.toFixed(2) : totalAmount,
@@ -1480,7 +1486,6 @@ const [isEditing, setIsEditing] = useState(false);
             const signatureKey = [
                 normalizeTextKey(normalized.storeName || ''),
                 productKey,
-                dateKey,
                 normalizeMoneyValue(String(totalAmount), '0.00')
             ].join('|');
 
@@ -1547,7 +1552,7 @@ const [isEditing, setIsEditing] = useState(false);
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
             const txReference = normalizeReferenceKey(tx.uid);
 
-            if (!txStoreKey || !txProductKey || !txDateKey || !txTotalAmount) return;
+            if (!txStoreKey || !txProductKey || !txTotalAmount) return;
 
             historyRows.forEach((row: any) => {
                 const historyStaff = normalizeNameKey(String(row.staffName || ''));
@@ -1564,9 +1569,8 @@ const [isEditing, setIsEditing] = useState(false);
 
                 const storeMatch = txStoreKey === historyStoreKey;
                 const productMatch = txProductKey === historyProductKey;
-                const dateMatch = txDateKey === historyDateKey;
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
-                const baseMatch = storeMatch && productMatch && dateMatch && totalAmountMatch;
+                const baseMatch = storeMatch && productMatch && totalAmountMatch;
 
                 if (!baseMatch) return;
 
@@ -1574,6 +1578,7 @@ const [isEditing, setIsEditing] = useState(false);
                     txStaffName: tx.staffName,
                     txStoreName: tx.storeName || '-',
                     txProduct: tx.product || '-',
+                    txDateTime: tx.rawDate || '-',
                     txDateKey: txDateKey || '-',
                     txAmount,
                     txTotalAmount,
@@ -1581,6 +1586,7 @@ const [isEditing, setIsEditing] = useState(false);
                     historyStaffName: String(row.staffName || '-'),
                     historyStoreName: String(row.storeName || '-'),
                     historyProduct: String(row.product || '-'),
+                    historyDateTime: String(row.receiptDateTime || row.receiptDate || '-'),
                     historyDateKey: historyDateKey || '-',
                     historyAmount,
                     historyTotalAmount,
@@ -1628,7 +1634,6 @@ const [isEditing, setIsEditing] = useState(false);
             const signatureKey = [
                 rowStore,
                 rowProduct,
-                rowDateKey,
                 rowAmount
             ].join('|');
             historyBySignature.set(signatureKey, [...(historyBySignature.get(signatureKey) || []), row]);
@@ -2747,7 +2752,7 @@ const handleCopyEmail = async () => {
         setSaveStatus('idle');
 
         if (duplicateCheckResult.signal === 'red') {
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Date Purchased + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days (Date/Time is optional).`;
             setSaveStatus('duplicate');
             setSaveModalDecision({ mode: 'red', detail });
             setShowSaveModal(true);
@@ -2919,6 +2924,21 @@ const handleCopyEmail = async () => {
                 || /Staff\s*member/i.test(formText)
                 || /Particular/i.test(formText);
             const hasReceiptTable = receiptText.includes('Receipt #') || receiptText.includes('GRAND TOTAL') || items.length > 0;
+            const explicitReceiptIdMatch = allText.match(/(?:\*\*\s*)?Receipt\s*ID\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/i);
+            const explicitReceiptId = String(explicitReceiptIdMatch?.[1] || '').trim();
+            const isMeaningfulReceiptId = (value: string): boolean => {
+                const normalized = String(value || '').trim();
+                if (!normalized) return false;
+                if (normalized === '-') return false;
+                if (/^n\/a$/i.test(normalized)) return false;
+                if (/^rcpt-manual-/i.test(normalized)) return false;
+                return true;
+            };
+            const canonicalReceiptId = [
+                explicitReceiptId,
+                ...items.map(item => String(item.uniqueId || '').trim()),
+                ...items.map(item => String(item.receiptNum || '').trim())
+            ].find(isMeaningfulReceiptId) || '[Enter Receipt ID]';
 
             if (isGroupPettyCashRequest) {
                 const summaryLines = groupPettyCashEntries
@@ -3012,7 +3032,7 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
-**Receipt ID:** ${'RCPT-MANUAL-' + Math.random().toString(36).substr(2, 4).toUpperCase()}
+**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -3071,7 +3091,7 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
-**Receipt ID:** ${'RCPT-MANUAL-' + Math.random().toString(36).substr(2, 4).toUpperCase()}
+**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -3119,7 +3139,7 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address || '[Enter Address]'}
 **Approved By:** [Enter Approver Name]
 **Amount:** [Enter Amount]
-**Receipt ID:** RCPT-MANUAL-${Math.random().toString(36).substr(2, 4).toUpperCase()}
+**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -4988,7 +5008,7 @@ GRAND TOTAL: $39.45`}
                                     )}
                                     <div>
                                         <h3 className="text-white font-bold">
-                                            {saveModalDecision?.mode === 'red' && 'Possible Double Payment'}
+                                            {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
                                             {saveModalDecision?.mode === 'yellow' && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
@@ -5041,7 +5061,8 @@ GRAND TOTAL: $39.45`}
                                                         <div key={`${match.historyDateKey}-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2 text-xs text-slate-300">
                                                             <p><span className="text-slate-400">Store:</span> <span className="text-white">{match.historyStoreName}</span></p>
                                                             <p><span className="text-slate-400">Product:</span> <span className="text-white">{match.historyProduct}</span></p>
-                                                            <p><span className="text-slate-400">Date Purchased:</span> <span className="text-white">{match.historyDateKey}</span></p>
+                                                            <p><span className="text-slate-400">Date & Time (Optional):</span> <span className="text-white">{match.historyDateTime}</span></p>
+                                                            <p><span className="text-slate-400">Date Match:</span> <span className="text-white">{(match.txDateKey !== '-' && match.historyDateKey !== '-') ? (match.txDateKey === match.historyDateKey ? 'Yes' : 'No (optional)') : 'Not provided'}</span></p>
                                                             <p><span className="text-slate-400">Total Amount:</span> <span className="text-white">${match.historyTotalAmount}</span></p>
                                                         </div>
                                                     ))}
