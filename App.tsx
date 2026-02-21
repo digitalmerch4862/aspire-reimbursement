@@ -407,7 +407,9 @@ const QUICK_EDIT_FIELD_CONFIGS: QuickEditFieldConfig[] = [
 const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
     const base = {
         staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i],
-        clientFullName: [/\*\*Client(?:'|’)?s\s+Full\s+Name:\*\*\s*(.*?)(?:\n|$)/i],
+        clientFullName: [
+            /^(?:\*\*\s*)?(?:Client(?:'|’)?s\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
+        ],
         clientLocation: [/\*\*Client\s*\/\s*Location:\*\*\s*(.*?)(?:\n|$)/i],
         address: [/\*\*Address:\*\*\s*(.*?)(?:\n|$)/i],
         approvedBy: [/\*\*Approved\s*By:\*\*\s*(.*?)(?:\n|$)/i, /\*\*Approved\s*by:\*\*\s*(.*?)(?:\n|$)/i],
@@ -1162,7 +1164,7 @@ const [isEditing, setIsEditing] = useState(false);
                 /(?:\*\*\s*Address\s*:\s*\*\*|Address\s*:)\s*(.*?)(?:\n|$)/i
             ]);
             const clientFullNameValue = extractFieldValue(content, [
-                /(?:\*\*\s*Client(?:'|’)?s?\s+Full\s+Name\s*:\s*\*\*|Client(?:'|’)?s?\s+Full\s+Name\s*:)\s*(.*?)(?:\n|$)/i
+                /^(?:\*\*\s*)?(?:Client(?:'|’)?s?\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
             ]);
             const clientLocationValue = extractFieldValue(content, [
                 /(?:\*\*\s*Client\s*\/\s*Location\s*:\s*\*\*|Client\s*\/\s*Location\s*:)\s*(.*?)(?:\n|$)/i
@@ -1483,7 +1485,7 @@ const [isEditing, setIsEditing] = useState(false);
             return days > 30;
         }).length;
 
-        const clientMatch = formText.match(/Client(?:'|’)?s?\s*full\s*name\s*:\s*(.+)/i);
+        const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
         const addressMatch = formText.match(/Address:\s*(.+)/i);
         const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
         const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
@@ -2588,7 +2590,7 @@ const handleCopyEmail = async () => {
             let receiptGrandTotal: number | null = null;
 
             // Parse key-value pairs from Reimbursement Form
-            const clientMatch = formText.match(/Client(?:'|’)?s?\s*full\s*name\s*:\s*(.+)/i);
+            const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
             const addressMatch = formText.match(/Address:\s*(.+)/i);
             const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
             const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
