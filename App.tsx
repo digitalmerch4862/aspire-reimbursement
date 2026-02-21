@@ -114,7 +114,8 @@ const isValidNabReference = (value: string | null | undefined): boolean => {
         '[enter nab reference]'
     ];
 
-    return !invalidValues.includes(normalized);
+    if (invalidValues.includes(normalized)) return false;
+    return /^[a-z][0-9]{10}$/i.test(normalized);
 };
 
 const isPendingNabCodeValue = (value: string | null | undefined): boolean => {
@@ -753,6 +754,8 @@ const [isEditing, setIsEditing] = useState(false);
     const [showSaveModal, setShowSaveModal] = useState(false);
     const [saveModalDecision, setSaveModalDecision] = useState<SaveModalDecision | null>(null);
     const [reviewerOverrideReason, setReviewerOverrideReason] = useState('');
+    const [manualNabCodeInput, setManualNabCodeInput] = useState('');
+    const [manualNabCodeError, setManualNabCodeError] = useState<string | null>(null);
     const [saveToast, setSaveToast] = useState<SaveToastState>({ visible: false, nabCode: '-', amount: '0.00', recordCount: 0 });
     const saveToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [quickEditDrafts, setQuickEditDrafts] = useState<Partial<Record<QuickEditFieldKey, string>>>({});
@@ -1194,10 +1197,7 @@ const [isEditing, setIsEditing] = useState(false);
         setQuickEditDrafts({});
     };
 
-    const handleTransactionNabChange = (index: number, newVal: string) => {
-        const content = isEditing ? editableContent : results?.phase4;
-        if (!content) return;
-
+    const setTransactionNabInContent = (content: string, index: number, newVal: string): string => {
         const marker = '**Staff Member:**';
         const parts = content.split(marker);
 
@@ -1205,7 +1205,7 @@ const [isEditing, setIsEditing] = useState(false);
         // So transaction index maps to parts[index + 1]
         const partIndex = index + 1;
 
-        if (parts.length <= partIndex) return;
+        if (parts.length <= partIndex) return content;
 
         let targetPart = parts[partIndex];
 
@@ -1221,7 +1221,13 @@ const [isEditing, setIsEditing] = useState(false);
         }
 
         parts[partIndex] = targetPart;
-        const newContent = parts.join(marker);
+        return parts.join(marker);
+    };
+
+    const handleTransactionNabChange = (index: number, newVal: string) => {
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+        const newContent = setTransactionNabInContent(content, index, newVal);
 
         if (isEditing) {
             setEditableContent(newContent);
@@ -2463,7 +2469,7 @@ const handleCopyEmail = async () => {
                     if (isPendingSave) {
                         uniqueReceiptId = 'Nab code is pending';
                     } else if (!isValidNabReference(uniqueReceiptId)) {
-                        uniqueReceiptId = `BATCH-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
+                        uniqueReceiptId = null;
                     }
 
                     payloads.push({
@@ -2488,8 +2494,8 @@ const handleCopyEmail = async () => {
 
                 if (isPendingSave) {
                     uniqueReceiptId = 'Nab code is pending';
-                } else if (!uniqueReceiptId && (contentToSave.toLowerCase().includes('discrepancy') || contentToSave.toLowerCase().includes('mismatch') || contentToSave.includes('STATUS: PENDING'))) {
-                    uniqueReceiptId = `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                } else if (!isValidNabReference(uniqueReceiptId)) {
+                    uniqueReceiptId = null;
                 }
 
                 payloads.push({
@@ -2559,13 +2565,15 @@ const handleCopyEmail = async () => {
         setShowSaveModal(false);
         setSaveModalDecision(null);
         setReviewerOverrideReason('');
+        setManualNabCodeInput('');
+        setManualNabCodeError(null);
     };
 
-    const confirmSave = (
+    const confirmSaveWithContent = (
         status: 'PENDING' | 'PAID',
+        baseContent: string,
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
-        const baseContent = isEditing ? editableContent : results?.phase4 || '';
         const withStatus = upsertStatusTag(baseContent, status);
         const finalContent = appendDuplicateAuditMeta(withStatus, options?.duplicateSignal ? {
             signal: options.duplicateSignal,
@@ -2576,6 +2584,48 @@ const handleCopyEmail = async () => {
 
         handleSaveToCloud(finalContent);
         closeSaveModal();
+    };
+
+    const confirmSave = (
+        status: 'PENDING' | 'PAID',
+        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
+    ) => {
+        const baseContent = isEditing ? editableContent : results?.phase4 || '';
+        confirmSaveWithContent(status, baseContent, options);
+    };
+
+    const handleSaveAsPaid = () => {
+        const hasTransactions = parsedTransactions.length > 0;
+        const missingNabIndexes = parsedTransactions
+            .filter(tx => !isValidNabReference(tx.currentNabRef))
+            .map(tx => tx.index);
+
+        if (hasTransactions && missingNabIndexes.length > 0) {
+            const normalizedManualNab = manualNabCodeInput.trim().toUpperCase();
+            if (!isValidNabReference(normalizedManualNab)) {
+                setManualNabCodeError('NAB code must be exactly 11 characters (1 letter + 10 digits).');
+                setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required before saving as PAID. Enter bank-provided NAB code manually.' });
+                setShowSaveModal(true);
+                return;
+            }
+
+            const currentContent = isEditing ? editableContent : (results?.phase4 || '');
+            let updatedContent = currentContent;
+            missingNabIndexes.forEach((index) => {
+                updatedContent = setTransactionNabInContent(updatedContent, index, normalizedManualNab);
+            });
+
+            if (isEditing) {
+                setEditableContent(updatedContent);
+            } else {
+                setResults(prev => (prev ? { ...prev, phase4: updatedContent } : prev));
+            }
+
+            confirmSaveWithContent('PAID', updatedContent, { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' });
+            return;
+        }
+
+        confirmSave('PAID', { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' });
     };
 
     const openPendingApprovalModal = (staffGroup: PendingStaffGroup) => {
@@ -2712,7 +2762,8 @@ const handleCopyEmail = async () => {
         }
 
         if (hasTransactions && !allHaveRef) {
-            setSaveModalDecision({ mode: 'nab', detail: 'NAB Code is incomplete or placeholder (e.g. Enter NAB Code).' });
+            setManualNabCodeError(null);
+            setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required before saving as PAID. Enter bank-provided NAB code manually.' });
             setShowSaveModal(true);
             return;
         }
@@ -5008,6 +5059,23 @@ GRAND TOTAL: $39.45`}
                                             </div>
                                         </>
                                     )}
+                                    {saveModalDecision?.mode === 'nab' && (
+                                        <div className="space-y-2">
+                                            <label className="text-xs text-slate-400 block mb-1">Provide NAB Code (manual)</label>
+                                            <input
+                                                type="text"
+                                                value={manualNabCodeInput}
+                                                onChange={(e) => {
+                                                    setManualNabCodeInput(e.target.value.toUpperCase());
+                                                    if (manualNabCodeError) setManualNabCodeError(null);
+                                                }}
+                                                placeholder="A1234567890"
+                                                className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-400/70 font-mono"
+                                            />
+                                            <p className="text-[11px] text-slate-400">Required format: 11 characters (1 letter + 10 digits).</p>
+                                            {manualNabCodeError && <p className="text-xs text-red-300">{manualNabCodeError}</p>}
+                                        </div>
+                                    )}
                                     {(!saveModalDecision || saveModalDecision.mode === 'nab') && (
                                         <p className="text-center">Save this entry as</p>
                                     )}
@@ -5040,7 +5108,7 @@ GRAND TOTAL: $39.45`}
                                                 Save as PENDING
                                             </button>
                                             <button
-                                                onClick={() => confirmSave('PAID', { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' })}
+                                                onClick={handleSaveAsPaid}
                                                 className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors"
                                             >
                                                 Save as PAID
