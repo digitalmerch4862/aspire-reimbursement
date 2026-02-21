@@ -430,6 +430,7 @@ const getQuickEditFieldValue = (content: string, key: QuickEditFieldKey): string
 };
 
 const isQuickEditFieldMissing = (key: QuickEditFieldKey, rawValue: string): boolean => {
+    if (key === 'clientLocation') return false;
     const value = String(rawValue || '').trim();
     if (!value) return true;
     if (/^\[.*\]$/.test(value)) return true;
