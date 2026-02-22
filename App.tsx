@@ -17,6 +17,7 @@ John	Smith	Smith, John	000000	00000000
 Jane	Doe	Doe, Jane	000000	00000000`;
 
 interface Employee {
+    id: string;
     firstName: string;
     surname: string;
     fullName: string;
@@ -24,36 +25,157 @@ interface Employee {
     account: string;
 }
 
-const parseEmployeeData = (rawData: string): Employee[] => {
-    return rawData.split('\n')
-        .slice(1) // Skip header
-        .filter(line => line.trim().length > 0)
-        .map(line => {
-            const cols = line.split('\t');
-            if (cols.length < 3) return null; // Relaxed check
-            return {
-                firstName: cols[0]?.trim() || '',
-                surname: cols[1]?.trim() || '',
-                fullName: cols[2]?.trim() || `${cols[1] || ''}, ${cols[0] || ''}`,
-                bsb: cols[3]?.trim() || '',
-                account: cols[4]?.trim() || ''
-            };
-        })
-        .filter(item => item !== null) as Employee[];
-};
+const normalizeEmployeeName = (value: string): string => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-const findBestEmployeeMatch = (scannedName: string, employees: Employee[]): Employee | null => {
-    if (!scannedName) return null;
-    const normalizedInput = scannedName.toLowerCase().replace(/[^a-z ]/g, '');
-    let bestMatch: Employee | null = null;
+const levenshteinDistance = (a: string, b: string): number => {
+    const s = normalizeEmployeeName(a);
+    const t = normalizeEmployeeName(b);
+    if (!s) return t.length;
+    if (!t) return s.length;
 
-    for (const emp of employees) {
-        const full = emp.fullName.toLowerCase();
-        if (normalizedInput.includes(full) || full.includes(normalizedInput)) {
-            return emp;
+    const rows = s.length + 1;
+    const cols = t.length + 1;
+    const dp: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+    for (let i = 0; i < rows; i += 1) dp[i][0] = i;
+    for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+
+    for (let i = 1; i < rows; i += 1) {
+        for (let j = 1; j < cols; j += 1) {
+            const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+            dp[i][j] = Math.min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost
+            );
         }
     }
-    return null;
+
+    return dp[s.length][t.length];
+};
+
+const matchScore = (inputName: string, employee: Employee): number => {
+    const normalizedInput = normalizeEmployeeName(inputName);
+    const normalizedFull = normalizeEmployeeName(employee.fullName);
+    const normalizedFirst = normalizeEmployeeName(employee.firstName);
+    const normalizedSurname = normalizeEmployeeName(employee.surname);
+
+    if (!normalizedInput || !normalizedFull) return 0;
+    if (normalizedInput === normalizedFull) return 100;
+
+    const inputParts = normalizedInput.split(' ').filter(Boolean);
+    const surnameGuess = inputParts[inputParts.length - 1] || '';
+    const firstGuess = inputParts.slice(0, -1).join(' ');
+
+    const fullDistance = levenshteinDistance(normalizedInput, normalizedFull);
+    const fullMax = Math.max(normalizedInput.length, normalizedFull.length) || 1;
+    const fullScore = ((fullMax - fullDistance) / fullMax) * 100;
+
+    const surnameDistance = levenshteinDistance(surnameGuess, normalizedSurname);
+    const surnameMax = Math.max(surnameGuess.length, normalizedSurname.length) || 1;
+    const surnameScore = ((surnameMax - surnameDistance) / surnameMax) * 100;
+
+    const firstDistance = levenshteinDistance(firstGuess, normalizedFirst);
+    const firstMax = Math.max(firstGuess.length, normalizedFirst.length) || 1;
+    const firstScore = ((firstMax - firstDistance) / firstMax) * 100;
+
+    const containsBonus = normalizedFull.includes(normalizedInput) || normalizedInput.includes(normalizedFull) ? 8 : 0;
+    const finalScore = (fullScore * 0.45) + (surnameScore * 0.4) + (firstScore * 0.15) + containsBonus;
+
+    return Math.max(0, Math.min(100, Number(finalScore.toFixed(2))));
+};
+
+const parseDelimitedLine = (line: string, delimiter: ',' | '\t'): string[] => {
+    if (delimiter === '\t') return line.split('\t').map((cell) => cell.trim());
+
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+
+        if (char === ',' && !inQuotes) {
+            values.push(current.trim());
+            current = '';
+            continue;
+        }
+
+        current += char;
+    }
+
+    values.push(current.trim());
+    return values;
+};
+
+const parseEmployeeData = (rawData: string): Employee[] => {
+    const rows = rawData
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    if (rows.length === 0) return [];
+
+    const delimiter: ',' | '\t' = rows[0].includes('\t') ? '\t' : ',';
+    const header = parseDelimitedLine(rows[0], delimiter).map((col) => normalizeEmployeeName(col));
+
+    const firstNameIndex = header.findIndex((col) => col === 'first names' || col === 'first name' || col === 'firstname');
+    const surnameIndex = header.findIndex((col) => col === 'surname' || col === 'last name' || col === 'lastname');
+    const bsbIndex = header.findIndex((col) => col === 'bsb');
+    const accountIndex = header.findIndex((col) => col === 'account' || col === 'account number' || col === 'account #');
+    const concatIndex = header.findIndex((col) => col === 'concatenate' || col === 'full name');
+
+    return rows.slice(1)
+        .map((line, index) => {
+            const cols = parseDelimitedLine(line, delimiter);
+            const firstName = firstNameIndex >= 0 ? (cols[firstNameIndex] || '').trim() : (cols[0] || '').trim();
+            const surname = surnameIndex >= 0 ? (cols[surnameIndex] || '').trim() : (cols[1] || '').trim();
+            const bsb = bsbIndex >= 0 ? (cols[bsbIndex] || '').trim() : (cols[3] || '').trim();
+            const account = accountIndex >= 0 ? (cols[accountIndex] || '').trim() : (cols[4] || '').trim();
+            const concatenated = concatIndex >= 0 ? (cols[concatIndex] || '').trim() : '';
+
+            if (!firstName || !surname || !bsb || !account) return null;
+
+            return {
+                id: `${normalizeEmployeeName(firstName)}_${normalizeEmployeeName(surname)}_${account}_${index}`,
+                firstName,
+                surname,
+                fullName: concatenated || `${firstName} ${surname}`,
+                bsb,
+                account
+            };
+        })
+        .filter((item): item is Employee => item !== null);
+};
+
+const serializeEmployeeData = (employees: Employee[]): string => {
+    const header = 'First Names,Surname,BSB,Account';
+    const rows = employees.map((employee) => `${employee.firstName},${employee.surname},${employee.bsb},${employee.account}`);
+    return [header, ...rows].join('\n');
+};
+
+const findBestEmployeeMatches = (scannedName: string, employees: Employee[], limit = 5): Array<{ employee: Employee; score: number }> => {
+    if (!scannedName) return [];
+    const normalizedInput = normalizeEmployeeName(scannedName);
+    if (!normalizedInput) return [];
+
+    return employees
+        .map((employee) => ({ employee, score: matchScore(normalizedInput, employee) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
 };
 
 const stripUidFallbackMeta = (text: string): string => {
@@ -61,6 +183,8 @@ const stripUidFallbackMeta = (text: string): string => {
 };
 
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
+const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
+const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
 
 const loadLocalAuditLogs = (): any[] => {
     try {
@@ -806,12 +930,17 @@ const [isEditing, setIsEditing] = useState(false);
     // Employee Database State
     const [employeeList, setEmployeeList] = useState<Employee[]>([]);
     const [employeeRawText, setEmployeeRawText] = useState(DEFAULT_EMPLOYEE_DATA);
+    const [pendingDeactivationEmployees, setPendingDeactivationEmployees] = useState<Employee[]>([]);
+    const [employeeAliasMap, setEmployeeAliasMap] = useState<Record<string, string>>({});
+    const [csvImportMessage, setCsvImportMessage] = useState<string>('');
     const [saveEmployeeStatus, setSaveEmployeeStatus] = useState<'idle' | 'saved'>('idle');
+    const employeeCsvInputRef = useRef<HTMLInputElement | null>(null);
     
     // Employee Selection State for Banking Details
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
     const [showEmployeeDropdown, setShowEmployeeDropdown] = useState<Map<number, boolean>>(new Map());
+    const [amountSelectionByTx, setAmountSelectionByTx] = useState<Map<number, string>>(new Map());
 
     // Rules Management
     const [rulesConfig, setRulesConfig] = useState<RuleConfig[]>(getDefaultBuiltInRules());
@@ -857,6 +986,30 @@ const [isEditing, setIsEditing] = useState(false);
             setEmployeeList(parseEmployeeData(storedEmployees));
         } else {
             setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
+        }
+
+        const storedPendingEmployees = localStorage.getItem(EMPLOYEE_PENDING_DEACTIVATION_KEY);
+        if (storedPendingEmployees) {
+            try {
+                const parsed = JSON.parse(storedPendingEmployees);
+                if (Array.isArray(parsed)) {
+                    setPendingDeactivationEmployees(parsed);
+                }
+            } catch (error) {
+                console.warn('Failed to parse pending deactivation employees:', error);
+            }
+        }
+
+        const storedAliasMap = localStorage.getItem(EMPLOYEE_ALIAS_MAP_KEY);
+        if (storedAliasMap) {
+            try {
+                const parsed = JSON.parse(storedAliasMap);
+                if (parsed && typeof parsed === 'object') {
+                    setEmployeeAliasMap(parsed);
+                }
+            } catch (error) {
+                console.warn('Failed to parse employee alias map:', error);
+            }
         }
 
         // Load Rules Config
@@ -975,6 +1128,85 @@ const [isEditing, setIsEditing] = useState(false);
         setEmployeeList(parseEmployeeData(employeeRawText));
         setSaveEmployeeStatus('saved');
         setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+    };
+
+    const persistPendingDeactivationEmployees = (records: Employee[]) => {
+        setPendingDeactivationEmployees(records);
+        localStorage.setItem(EMPLOYEE_PENDING_DEACTIVATION_KEY, JSON.stringify(records));
+    };
+
+    const persistEmployeeAliasMap = (aliases: Record<string, string>) => {
+        setEmployeeAliasMap(aliases);
+        localStorage.setItem(EMPLOYEE_ALIAS_MAP_KEY, JSON.stringify(aliases));
+    };
+
+    const handleCsvUploadClick = () => {
+        employeeCsvInputRef.current?.click();
+    };
+
+    const handleCsvFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const raw = await file.text();
+            const parsedEmployees = parseEmployeeData(raw);
+
+            if (parsedEmployees.length === 0) {
+                setCsvImportMessage('No valid rows found. Check CSV headers: First Names, Surname, BSB, Account.');
+                return;
+            }
+
+            const newAccountSet = new Set(parsedEmployees.map((employee) => employee.account.trim()));
+            const pendingApproval = employeeList.filter((employee) => !newAccountSet.has(employee.account.trim()));
+
+            setEmployeeRawText(raw);
+            setEmployeeList(parsedEmployees);
+            localStorage.setItem('aspire_employee_list', raw);
+            persistPendingDeactivationEmployees(pendingApproval);
+            setCsvImportMessage(`Imported ${parsedEmployees.length} active records. ${pendingApproval.length} account(s) moved to approval queue.`);
+        } catch (error) {
+            console.error('CSV import failed:', error);
+            setCsvImportMessage('CSV import failed. Please try again with a clean .csv file.');
+        } finally {
+            if (event.target) {
+                event.target.value = '';
+            }
+        }
+    };
+
+    const handleKeepPendingEmployee = (account: string) => {
+        const target = pendingDeactivationEmployees.find((employee) => employee.account === account);
+        if (!target) return;
+
+        const nextActive = employeeList.some((employee) => employee.account === target.account)
+            ? employeeList
+            : [...employeeList, target];
+        setEmployeeList(nextActive);
+        const nextRaw = serializeEmployeeData(nextActive);
+        setEmployeeRawText(nextRaw);
+        localStorage.setItem('aspire_employee_list', nextRaw);
+
+        const nextPending = pendingDeactivationEmployees.filter((employee) => employee.account !== account);
+        persistPendingDeactivationEmployees(nextPending);
+        setCsvImportMessage(`Kept account ${account} as active.`);
+    };
+
+    const handleApproveDeactivateEmployee = (account: string) => {
+        const nextPending = pendingDeactivationEmployees.filter((employee) => employee.account !== account);
+        persistPendingDeactivationEmployees(nextPending);
+        setCsvImportMessage(`Approved deactivation for account ${account}.`);
+    };
+
+    const createAliasFromQuery = (txIndex: number) => {
+        const selectedEmployee = selectedEmployees.get(txIndex);
+        const typed = (employeeSearchQuery.get(txIndex) || '').trim();
+        if (!selectedEmployee || !typed) return;
+
+        const aliasKey = normalizeEmployeeName(typed);
+        if (!aliasKey) return;
+        const nextAliases = { ...employeeAliasMap, [aliasKey]: selectedEmployee.fullName };
+        persistEmployeeAliasMap(nextAliases);
     };
 
     const persistRulesConfig = (nextRules: RuleConfig[]) => {
@@ -1152,6 +1384,45 @@ const [isEditing, setIsEditing] = useState(false);
 
     const parsedTransactions = getParsedTransactions();
 
+    useEffect(() => {
+        if (parsedTransactions.length === 0 || employeeList.length === 0) return;
+
+        setSelectedEmployees((previous) => {
+            const next = new Map(previous);
+            parsedTransactions.forEach((tx) => {
+                if (next.has(tx.index)) return;
+                const rawName = tx.formattedName || tx.staffName || '';
+                const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
+                const query = aliasHit || rawName;
+                const [best] = findBestEmployeeMatches(query, employeeList, 1);
+                if (best && best.score >= 85) {
+                    next.set(tx.index, best.employee);
+                }
+            });
+            return next;
+        });
+
+        setEmployeeSearchQuery((previous) => {
+            const next = new Map(previous);
+            parsedTransactions.forEach((tx) => {
+                if (next.has(tx.index)) return;
+                const rawName = tx.formattedName || tx.staffName || '';
+                const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
+                next.set(tx.index, aliasHit || rawName);
+            });
+            return next;
+        });
+
+        setAmountSelectionByTx((previous) => {
+            const next = new Map(previous);
+            parsedTransactions.forEach((tx) => {
+                if (next.has(tx.index)) return;
+                next.set(tx.index, tx.amount.replace(/[^0-9.\-]/g, '') || '0.00');
+            });
+            return next;
+        });
+    }, [parsedTransactions, employeeList, employeeAliasMap]);
+
     const activeEmailContent = isEditing ? editableContent : (results?.phase4 || '');
 
     const quickEditFields = useMemo<QuickEditFieldState[]>(() => {
@@ -1262,13 +1533,51 @@ const [isEditing, setIsEditing] = useState(false);
     };
 
     const getFilteredEmployees = (query: string) => {
-        if (!query || query.trim() === '') return employeeList;
-        const lowerQuery = query.toLowerCase();
-        return employeeList.filter(emp => 
-            emp.fullName.toLowerCase().includes(lowerQuery) ||
-            emp.firstName.toLowerCase().includes(lowerQuery) ||
-            emp.surname.toLowerCase().includes(lowerQuery)
-        );
+        if (!query || query.trim() === '') return employeeList.slice(0, 30);
+        const aliasTargetName = employeeAliasMap[normalizeEmployeeName(query)];
+        if (aliasTargetName) {
+            const aliasMatch = employeeList.find((employee) => normalizeEmployeeName(employee.fullName) === normalizeEmployeeName(aliasTargetName));
+            if (aliasMatch) return [aliasMatch];
+        }
+
+        return findBestEmployeeMatches(query, employeeList, 5).map((entry) => entry.employee);
+    };
+
+    const setTransactionAmountInContent = (content: string, index: number, amountValue: string): string => {
+        const marker = '**Staff Member:**';
+        const parts = content.split(marker);
+        const partIndex = index + 1;
+        if (parts.length <= partIndex) return content;
+
+        const numericAmount = String(amountValue || '').replace(/[^0-9.\-]/g, '');
+        if (!numericAmount) return content;
+        const parsedNumber = Number(numericAmount);
+        if (Number.isNaN(parsedNumber)) return content;
+
+        let targetPart = parts[partIndex];
+        if (/\*\*Amount:\*\*/i.test(targetPart)) {
+            targetPart = targetPart.replace(/(\*\*Amount:\*\*\s*)(.*)/i, `$1$${parsedNumber.toFixed(2)}`);
+        } else if (/Amount:/i.test(targetPart)) {
+            targetPart = targetPart.replace(/(Amount:\s*)(.*)/i, `$1$${parsedNumber.toFixed(2)}`);
+        } else {
+            targetPart += `\n**Amount:** $${parsedNumber.toFixed(2)}`;
+        }
+
+        parts[partIndex] = targetPart;
+        return parts.join(marker);
+    };
+
+    const handleTransactionAmountChange = (index: number, nextAmount: string) => {
+        setAmountSelectionByTx((prev) => new Map(prev).set(index, nextAmount));
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+
+        const updated = setTransactionAmountInContent(content, index, nextAmount);
+        if (isEditing) {
+            setEditableContent(updated);
+        } else {
+            setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
     };
 
     const fetchHistory = async () => {
@@ -1297,6 +1606,11 @@ const [isEditing, setIsEditing] = useState(false);
         } finally {
             setLoadingHistory(false);
         }
+    };
+
+    const handleRefreshCycleView = async () => {
+        await fetchHistory();
+        setNowTick(Date.now());
     };
 
     const parseDatabaseRows = (data: any[]) => {
@@ -2377,6 +2691,10 @@ const [isEditing, setIsEditing] = useState(false);
         setReimbursementFormText('');
         setReceiptDetailsText('');
         setRequestMode('solo');
+        setSelectedEmployees(new Map());
+        setEmployeeSearchQuery(new Map());
+        setShowEmployeeDropdown(new Map());
+        setAmountSelectionByTx(new Map());
     };
 
     const scrollToReimbursementForm = () => {
@@ -4023,10 +4341,14 @@ GRAND TOTAL: $39.45`}
                                             </div>
 
                                             {parsedTransactions.length > 0 && parsedTransactions.map((tx, idx) => {
-                                                const selectedEmployee = selectedEmployees.get(idx);
-                                                const searchQuery = employeeSearchQuery.get(idx) || tx.formattedName;
-                                                const showDropdown = showEmployeeDropdown.get(idx) || false;
+                                                const txKey = tx.index;
+                                                const selectedEmployee = selectedEmployees.get(txKey);
+                                                const searchQuery = employeeSearchQuery.get(txKey) || tx.formattedName;
+                                                const showDropdown = showEmployeeDropdown.get(txKey) || false;
                                                 const filteredEmployees = getFilteredEmployees(searchQuery);
+                                                const amountOptionsRaw = Array.from(new Set(parsedTransactions.map((entry) => entry.amount.replace(/[^0-9.\-]/g, '')).filter(Boolean)));
+                                                const selectedAmount = amountSelectionByTx.get(txKey) || tx.amount.replace(/[^0-9.\-]/g, '') || '0.00';
+                                                const amountOptions = amountOptionsRaw.length > 0 ? amountOptionsRaw : [selectedAmount];
                                                 
                                                 return (
                                                 <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
@@ -4047,9 +4369,9 @@ GRAND TOTAL: $39.45`}
                                                                         <input
                                                                             type="text"
                                                                             value={searchQuery}
-                                                                            onChange={(e) => handleEmployeeSearchChange(idx, e.target.value)}
-                                                                            onFocus={() => handleEmployeeSearchFocus(idx)}
-                                                                            onBlur={() => handleEmployeeSearchBlur(idx)}
+                                                                            onChange={(e) => handleEmployeeSearchChange(txKey, e.target.value)}
+                                                                            onFocus={() => handleEmployeeSearchFocus(txKey)}
+                                                                            onBlur={() => handleEmployeeSearchBlur(txKey)}
                                                                             className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
                                                                             placeholder="Search employee..."
                                                                         />
@@ -4059,7 +4381,7 @@ GRAND TOTAL: $39.45`}
                                                                                 {filteredEmployees.map((emp, empIdx) => (
                                                                                     <button
                                                                                         key={empIdx}
-                                                                                        onClick={() => handleEmployeeSelect(idx, emp)}
+                                                                                        onClick={() => handleEmployeeSelect(txKey, emp)}
                                                                                         className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
                                                                                     >
                                                                                         {emp.fullName}
@@ -4072,13 +4394,31 @@ GRAND TOTAL: $39.45`}
                                                                         {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
                                                                     </button>
                                                                 </div>
+                                                                {selectedEmployee && normalizeEmployeeName(searchQuery) !== normalizeEmployeeName(selectedEmployee.fullName) && (
+                                                                    <button
+                                                                        onClick={() => createAliasFromQuery(txKey)}
+                                                                        className="mt-2 text-[10px] uppercase tracking-wider text-indigo-300 hover:text-indigo-100"
+                                                                    >
+                                                                        Save typed name as alias
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                             <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
                                                                 <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
                                                                 <div className="flex justify-between items-center">
-                                                                    <p className="text-emerald-400 font-bold text-lg">{tx.amount.replace(/[^0-9.]/g, '')}</p>
-                                                                    <button onClick={() => handleCopyField(tx.amount.replace(/[^0-9.]/g, ''), 'amount')} className="text-emerald-500 hover:text-white transition-colors">
-                                                                        {copiedField === 'amount' ? <Check size={14} /> : <Copy size={14} />}
+                                                                    <select
+                                                                        value={selectedAmount}
+                                                                        onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
+                                                                        className="bg-transparent text-emerald-400 font-bold text-lg border-none outline-none pr-6"
+                                                                    >
+                                                                        {amountOptions.map((amountOption) => (
+                                                                            <option key={amountOption} value={amountOption} className="bg-slate-900 text-emerald-300">
+                                                                                {amountOption}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors">
+                                                                        {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
                                                                     </button>
                                                                 </div>
                                                             </div>
@@ -4091,11 +4431,11 @@ GRAND TOTAL: $39.45`}
                                                                 <div className="flex justify-between items-center">
                                                                     <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
                                                                     <button 
-                                                                        onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${idx}`)} 
+                                                                        onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${txKey}`)} 
                                                                         className="text-slate-500 hover:text-white transition-colors"
                                                                         disabled={!selectedEmployee?.bsb}
                                                                     >
-                                                                        {copiedField === `bsb-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        {copiedField === `bsb-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
                                                                     </button>
                                                                 </div>
                                                             </div>
@@ -4104,11 +4444,11 @@ GRAND TOTAL: $39.45`}
                                                                 <div className="flex justify-between items-center">
                                                                     <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
                                                                     <button 
-                                                                        onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${idx}`)} 
+                                                                        onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${txKey}`)} 
                                                                         className="text-slate-500 hover:text-white transition-colors"
                                                                         disabled={!selectedEmployee?.account}
                                                                     >
-                                                                        {copiedField === `account-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        {copiedField === `account-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
                                                                     </button>
                                                                 </div>
                                                             </div>
@@ -4119,7 +4459,7 @@ GRAND TOTAL: $39.45`}
                                                             <input
                                                                 type="text"
                                                                 value={tx.currentNabRef || ''}
-                                                                onChange={(e) => handleTransactionNabChange(idx, e.target.value)}
+                                                                onChange={(e) => handleTransactionNabChange(txKey, e.target.value)}
                                                                 placeholder="Enter NAB Code"
                                                                 className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
                                                             />
@@ -4266,7 +4606,7 @@ GRAND TOTAL: $39.45`}
                                         {reportCopied === 'nab' ? <Check size={16} /> : <Copy size={16} />}
                                         {reportCopied === 'nab' ? 'Copied Table!' : 'Copy for Outlook'}
                                     </button>
-                                    <button onClick={fetchHistory} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white">
+                                    <button onClick={handleRefreshCycleView} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white" title="Refresh current cycle">
                                         <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
                                     </button>
                                 </div>
@@ -4366,7 +4706,7 @@ GRAND TOTAL: $39.45`}
                                         {reportCopied === 'eod' ? <Check size={16} /> : <Copy size={16} />}
                                         {reportCopied === 'eod' ? 'Copied Schedule!' : 'Copy for Outlook'}
                                     </button>
-                                    <button onClick={fetchHistory} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white">
+                                    <button onClick={handleRefreshCycleView} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white" title="Refresh current cycle">
                                         <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
                                     </button>
                                 </div>
@@ -4621,14 +4961,30 @@ GRAND TOTAL: $39.45`}
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <h3 className="text-lg font-medium text-white">Employee Database</h3>
-                                            <p className="text-sm text-slate-400">Manage the list of staff names for auto-correction. Format: First Name [tab] Surname [tab] Concatenate...</p>
+                                            <p className="text-sm text-slate-400">Upload a new CSV to replace active staff list. Missing accounts go to approval queue, not auto-delete.</p>
                                         </div>
                                         <div className="flex gap-3">
+                                            <input
+                                                ref={employeeCsvInputRef}
+                                                type="file"
+                                                accept=".csv,text/csv,.txt"
+                                                onChange={handleCsvFileChange}
+                                                className="hidden"
+                                            />
+                                            <button
+                                                onClick={handleCsvUploadClick}
+                                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-2"
+                                            >
+                                                <Upload size={14} />
+                                                Upload .CSV for Update
+                                            </button>
                                             <button
                                                 onClick={() => {
                                                     if (window.confirm('Reset to default list?')) {
                                                         setEmployeeRawText(DEFAULT_EMPLOYEE_DATA);
                                                         setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
+                                                        persistPendingDeactivationEmployees([]);
+                                                        setCsvImportMessage('Employee list reset to defaults.');
                                                     }
                                                 }}
                                                 className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold uppercase tracking-wider transition-colors"
@@ -4644,6 +5000,11 @@ GRAND TOTAL: $39.45`}
                                             </button>
                                         </div>
                                     </div>
+                                    {csvImportMessage && (
+                                        <div className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-400/20 rounded-xl px-3 py-2">
+                                            {csvImportMessage}
+                                        </div>
+                                    )}
                                     <div className="bg-black/30 rounded-xl border border-white/10 p-1">
                                         <textarea
                                             value={employeeRawText}
@@ -4651,6 +5012,43 @@ GRAND TOTAL: $39.45`}
                                             className="w-full h-64 bg-transparent border-none text-slate-300 font-mono text-xs p-4 focus:ring-0 resize-y"
                                             spellCheck={false}
                                         />
+                                    </div>
+
+                                    <div className="bg-black/20 rounded-xl border border-amber-400/20 p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-xs uppercase tracking-wider text-amber-200 font-bold">For Approval to Deactivate</p>
+                                            <span className="text-[11px] px-2 py-1 rounded-full bg-amber-500/20 border border-amber-400/30 text-amber-100">
+                                                {pendingDeactivationEmployees.length} account(s)
+                                            </span>
+                                        </div>
+                                        {pendingDeactivationEmployees.length === 0 ? (
+                                            <p className="text-xs text-slate-500">No pending deactivation requests.</p>
+                                        ) : (
+                                            <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-2">
+                                                {pendingDeactivationEmployees.map((employee) => (
+                                                    <div key={`${employee.account}-${employee.id}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg bg-black/25 border border-white/10">
+                                                        <div>
+                                                            <p className="text-sm text-white font-semibold uppercase">{employee.fullName}</p>
+                                                            <p className="text-xs text-slate-400">BSB: {employee.bsb} | Account: {employee.account}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                onClick={() => handleKeepPendingEmployee(employee.account)}
+                                                                className="px-3 py-1.5 rounded-md bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 text-[10px] font-bold uppercase tracking-wider"
+                                                            >
+                                                                Keep Active
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleApproveDeactivateEmployee(employee.account)}
+                                                                className="px-3 py-1.5 rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-200 text-[10px] font-bold uppercase tracking-wider"
+                                                            >
+                                                                Approve Deactivate
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
