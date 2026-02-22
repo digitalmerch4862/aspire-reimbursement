@@ -937,6 +937,9 @@ const [isEditing, setIsEditing] = useState(false);
     const [manualNabCodeError, setManualNabCodeError] = useState<string | null>(null);
     const [saveToast, setSaveToast] = useState<SaveToastState>({ visible: false, nabCode: '-', amount: '0.00', recordCount: 0 });
     const saveToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [isRedPopupAlertActive, setIsRedPopupAlertActive] = useState(false);
+    const redPopupAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const redPopupAlertPlayedRef = useRef(false);
     const [quickEditDrafts, setQuickEditDrafts] = useState<Partial<Record<QuickEditFieldKey, string>>>({});
     const [pendingApprovalStaffGroup, setPendingApprovalStaffGroup] = useState<PendingStaffGroup | null>(null);
     const [pendingApprovalNabCode, setPendingApprovalNabCode] = useState('');
@@ -1110,8 +1113,39 @@ const [isEditing, setIsEditing] = useState(false);
             if (saveToastTimeoutRef.current) {
                 clearTimeout(saveToastTimeoutRef.current);
             }
+            if (redPopupAlertTimeoutRef.current) {
+                clearTimeout(redPopupAlertTimeoutRef.current);
+            }
         };
     }, []);
+
+    useEffect(() => {
+        const isRedPopup = showSaveModal && saveModalDecision?.mode === 'red';
+
+        if (!isRedPopup) {
+            setIsRedPopupAlertActive(false);
+            redPopupAlertPlayedRef.current = false;
+            if (redPopupAlertTimeoutRef.current) {
+                clearTimeout(redPopupAlertTimeoutRef.current);
+                redPopupAlertTimeoutRef.current = null;
+            }
+            return;
+        }
+
+        if (redPopupAlertPlayedRef.current) return;
+
+        redPopupAlertPlayedRef.current = true;
+        setIsRedPopupAlertActive(true);
+        playRedPopupSiren3s();
+
+        if (redPopupAlertTimeoutRef.current) {
+            clearTimeout(redPopupAlertTimeoutRef.current);
+        }
+
+        redPopupAlertTimeoutRef.current = setTimeout(() => {
+            setIsRedPopupAlertActive(false);
+        }, 3000);
+    }, [showSaveModal, saveModalDecision?.mode]);
 
     const playToastCloseTechSound = () => {
         try {
@@ -1148,6 +1182,51 @@ const [isEditing, setIsEditing] = useState(false);
             setTimeout(() => {
                 void ctx.close();
             }, 220);
+        } catch {
+            // Ignore audio errors and keep UX non-blocking.
+        }
+    };
+
+    const playRedPopupSiren3s = () => {
+        try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtx) return;
+
+            const ctx = new AudioCtx();
+            const now = ctx.currentTime;
+            const duration = 3;
+
+            const siren = ctx.createOscillator();
+            const harmonic = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            siren.type = 'sawtooth';
+            harmonic.type = 'triangle';
+
+            for (let t = 0; t <= duration; t += 0.25) {
+                const high = Math.floor(t / 0.25) % 2 === 0;
+                const baseFreq = high ? 980 : 620;
+                siren.frequency.setValueAtTime(baseFreq, now + t);
+                harmonic.frequency.setValueAtTime(baseFreq * 0.5, now + t);
+            }
+
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.08, now + 0.07);
+            gain.gain.setValueAtTime(0.08, now + duration - 0.2);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+            siren.connect(gain);
+            harmonic.connect(gain);
+            gain.connect(ctx.destination);
+
+            siren.start(now);
+            harmonic.start(now + 0.01);
+            siren.stop(now + duration);
+            harmonic.stop(now + duration);
+
+            setTimeout(() => {
+                void ctx.close();
+            }, 3300);
         } catch {
             // Ignore audio errors and keep UX non-blocking.
         }
@@ -5456,17 +5535,17 @@ GRAND TOTAL: $39.45`}
                     {/* Save Status Modal */}
                     {showSaveModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="bg-[#1c1e24] w-full max-w-xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
-                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${saveModalDecision?.mode === 'red' ? 'bg-red-500/10' : saveModalDecision?.mode === 'yellow' ? 'bg-amber-500/10' : 'bg-white/5'}`}>
+                            <div className={`bg-[#1c1e24] w-full max-w-xl rounded-[24px] border shadow-2xl overflow-hidden ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'border-red-400/70 animate-pulse shadow-[0_0_45px_rgba(248,113,113,0.45)]' : 'border-white/10'}`}>
+                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${saveModalDecision?.mode === 'red' ? (isRedPopupAlertActive ? 'bg-red-500/30 animate-pulse' : 'bg-red-500/10') : saveModalDecision?.mode === 'yellow' ? 'bg-amber-500/10' : 'bg-white/5'}`}>
                                     {saveModalDecision?.mode === 'red' ? (
-                                        <AlertCircle className="text-red-300" size={20} />
+                                        <AlertCircle className={`${isRedPopupAlertActive ? 'text-red-100 animate-pulse drop-shadow-[0_0_10px_rgba(248,113,113,0.9)]' : 'text-red-300'}`} size={20} />
                                     ) : saveModalDecision?.mode === 'yellow' ? (
                                         <AlertCircle className="text-amber-300" size={20} />
                                     ) : (
                                         <HelpCircle className="text-indigo-300" size={20} />
                                     )}
                                     <div>
-                                        <h3 className="text-white font-bold">
+                                        <h3 className={`text-white font-bold ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'tracking-wide' : ''}`}>
                                             {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
                                             {saveModalDecision?.mode === 'yellow' && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
