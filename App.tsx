@@ -25,11 +25,48 @@ interface Employee {
     account: string;
 }
 
+const NICKNAME_MAP: Record<string, string[]> = {
+    tim: ['timothy'],
+    mike: ['michael'],
+    alex: ['alexander', 'alexandra'],
+    liz: ['elizabeth'],
+    beth: ['elizabeth'],
+    dan: ['daniel'],
+    ben: ['benjamin'],
+    sam: ['samuel'],
+    chris: ['christopher', 'christina'],
+    matt: ['matthew'],
+    kate: ['katherine'],
+    tony: ['anthony']
+};
+
 const normalizeEmployeeName = (value: string): string => String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+const getEmployeeDisplayName = (employee: Employee): string => {
+    const composed = `${employee.firstName || ''} ${employee.surname || ''}`.replace(/\s+/g, ' ').trim();
+    return composed || employee.fullName || '';
+};
+
+const expandInputNameVariants = (rawInput: string): string[] => {
+    const normalized = normalizeEmployeeName(rawInput);
+    if (!normalized) return [];
+
+    const variants = new Set<string>([normalized]);
+    const parts = normalized.split(' ').filter(Boolean);
+    if (parts.length === 0) return Array.from(variants);
+
+    const firstToken = parts[0];
+    const nicknameExpansions = NICKNAME_MAP[firstToken] || [];
+    nicknameExpansions.forEach((expandedFirst) => {
+        variants.add([expandedFirst, ...parts.slice(1)].join(' ').trim());
+    });
+
+    return Array.from(variants);
+};
 
 const levenshteinDistance = (a: string, b: string): number => {
     const s = normalizeEmployeeName(a);
@@ -60,7 +97,7 @@ const levenshteinDistance = (a: string, b: string): number => {
 
 const matchScore = (inputName: string, employee: Employee): number => {
     const normalizedInput = normalizeEmployeeName(inputName);
-    const normalizedFull = normalizeEmployeeName(employee.fullName);
+    const normalizedFull = normalizeEmployeeName(getEmployeeDisplayName(employee));
     const normalizedFirst = normalizeEmployeeName(employee.firstName);
     const normalizedSurname = normalizeEmployeeName(employee.surname);
 
@@ -136,7 +173,6 @@ const parseEmployeeData = (rawData: string): Employee[] => {
     const surnameIndex = header.findIndex((col) => col === 'surname' || col === 'last name' || col === 'lastname');
     const bsbIndex = header.findIndex((col) => col === 'bsb');
     const accountIndex = header.findIndex((col) => col === 'account' || col === 'account number' || col === 'account #');
-    const concatIndex = header.findIndex((col) => col === 'concatenate' || col === 'full name');
 
     return rows.slice(1)
         .map((line, index) => {
@@ -145,15 +181,13 @@ const parseEmployeeData = (rawData: string): Employee[] => {
             const surname = surnameIndex >= 0 ? (cols[surnameIndex] || '').trim() : (cols[1] || '').trim();
             const bsb = bsbIndex >= 0 ? (cols[bsbIndex] || '').trim() : (cols[3] || '').trim();
             const account = accountIndex >= 0 ? (cols[accountIndex] || '').trim() : (cols[4] || '').trim();
-            const concatenated = concatIndex >= 0 ? (cols[concatIndex] || '').trim() : '';
-
             if (!firstName || !surname || !bsb || !account) return null;
 
             return {
                 id: `${normalizeEmployeeName(firstName)}_${normalizeEmployeeName(surname)}_${account}_${index}`,
                 firstName,
                 surname,
-                fullName: concatenated || `${firstName} ${surname}`,
+                fullName: `${firstName} ${surname}`,
                 bsb,
                 account
             };
@@ -167,15 +201,34 @@ const serializeEmployeeData = (employees: Employee[]): string => {
     return [header, ...rows].join('\n');
 };
 
-const findBestEmployeeMatches = (scannedName: string, employees: Employee[], limit = 5): Array<{ employee: Employee; score: number }> => {
+const findBestEmployeeMatches = (scannedName: string, employees: Employee[], limit = 10): Array<{ employee: Employee; score: number }> => {
     if (!scannedName) return [];
-    const normalizedInput = normalizeEmployeeName(scannedName);
-    if (!normalizedInput) return [];
+    const variants = expandInputNameVariants(scannedName);
+    if (variants.length === 0) return [];
 
-    return employees
-        .map((employee) => ({ employee, score: matchScore(normalizedInput, employee) }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
+    const scored = employees.map((employee) => {
+        const normalizedDisplay = normalizeEmployeeName(getEmployeeDisplayName(employee));
+        const normalizedSurname = normalizeEmployeeName(employee.surname);
+        const normalizedFirst = normalizeEmployeeName(employee.firstName);
+
+        let bestScore = 0;
+        variants.forEach((variant) => {
+            const base = matchScore(variant, employee);
+            const wildcardBoost = normalizedDisplay.includes(variant) || variant.includes(normalizedDisplay) ? 9 : 0;
+            const variantTokens = variant.split(' ').filter(Boolean);
+            const surnameToken = variantTokens[variantTokens.length - 1] || '';
+            const firstToken = variantTokens[0] || '';
+            const surnameBoost = surnameToken && normalizedSurname.includes(surnameToken) ? 12 : 0;
+            const firstBoost = firstToken && normalizedFirst.includes(firstToken) ? 8 : 0;
+            bestScore = Math.max(bestScore, Math.min(100, base + wildcardBoost + surnameBoost + firstBoost));
+        });
+
+        return { employee, score: Number(bestScore.toFixed(2)) };
+    });
+
+    return scored
+        .sort((a, b) => b.score - a.score || getEmployeeDisplayName(a.employee).localeCompare(getEmployeeDisplayName(b.employee)))
+        .slice(0, Math.max(5, Math.min(10, limit)));
 };
 
 const stripUidFallbackMeta = (text: string): string => {
@@ -1205,7 +1258,7 @@ const [isEditing, setIsEditing] = useState(false);
 
         const aliasKey = normalizeEmployeeName(typed);
         if (!aliasKey) return;
-        const nextAliases = { ...employeeAliasMap, [aliasKey]: selectedEmployee.fullName };
+        const nextAliases = { ...employeeAliasMap, [aliasKey]: selectedEmployee.id };
         persistEmployeeAliasMap(nextAliases);
     };
 
@@ -1387,28 +1440,19 @@ const [isEditing, setIsEditing] = useState(false);
     useEffect(() => {
         if (parsedTransactions.length === 0 || employeeList.length === 0) return;
 
-        setSelectedEmployees((previous) => {
-            const next = new Map(previous);
-            parsedTransactions.forEach((tx) => {
-                if (next.has(tx.index)) return;
-                const rawName = tx.formattedName || tx.staffName || '';
-                const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
-                const query = aliasHit || rawName;
-                const [best] = findBestEmployeeMatches(query, employeeList, 1);
-                if (best && best.score >= 85) {
-                    next.set(tx.index, best.employee);
-                }
-            });
-            return next;
-        });
-
         setEmployeeSearchQuery((previous) => {
             const next = new Map(previous);
             parsedTransactions.forEach((tx) => {
                 if (next.has(tx.index)) return;
                 const rawName = tx.formattedName || tx.staffName || '';
                 const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
-                next.set(tx.index, aliasHit || rawName);
+                if (aliasHit) {
+                    const aliasEmployee = employeeList.find((employee) => employee.id === aliasHit)
+                        || employeeList.find((employee) => normalizeEmployeeName(getEmployeeDisplayName(employee)) === normalizeEmployeeName(aliasHit));
+                    next.set(tx.index, aliasEmployee ? getEmployeeDisplayName(aliasEmployee) : rawName);
+                    return;
+                }
+                next.set(tx.index, rawName);
             });
             return next;
         });
@@ -1512,12 +1556,17 @@ const [isEditing, setIsEditing] = useState(false);
     // Employee Selection Handlers for Banking Details
     const handleEmployeeSelect = (txIndex: number, employee: Employee) => {
         setSelectedEmployees(prev => new Map(prev).set(txIndex, employee));
-        setEmployeeSearchQuery(prev => new Map(prev).set(txIndex, employee.fullName));
+        setEmployeeSearchQuery(prev => new Map(prev).set(txIndex, getEmployeeDisplayName(employee)));
         setShowEmployeeDropdown(prev => new Map(prev).set(txIndex, false));
     };
 
     const handleEmployeeSearchChange = (txIndex: number, query: string) => {
         setEmployeeSearchQuery(prev => new Map(prev).set(txIndex, query));
+        setSelectedEmployees(prev => {
+            const next = new Map(prev);
+            next.delete(txIndex);
+            return next;
+        });
         setShowEmployeeDropdown(prev => new Map(prev).set(txIndex, true));
     };
 
@@ -1533,14 +1582,26 @@ const [isEditing, setIsEditing] = useState(false);
     };
 
     const getFilteredEmployees = (query: string) => {
-        if (!query || query.trim() === '') return employeeList.slice(0, 30);
-        const aliasTargetName = employeeAliasMap[normalizeEmployeeName(query)];
-        if (aliasTargetName) {
-            const aliasMatch = employeeList.find((employee) => normalizeEmployeeName(employee.fullName) === normalizeEmployeeName(aliasTargetName));
-            if (aliasMatch) return [aliasMatch];
+        if (!query || query.trim() === '') {
+            return employeeList
+                .slice()
+                .sort((a, b) => getEmployeeDisplayName(a).localeCompare(getEmployeeDisplayName(b)))
+                .slice(0, 10);
         }
 
-        return findBestEmployeeMatches(query, employeeList, 5).map((entry) => entry.employee);
+        const aliasTarget = employeeAliasMap[normalizeEmployeeName(query)];
+        if (aliasTarget) {
+            const aliasMatch = employeeList.find((employee) => employee.id === aliasTarget)
+                || employeeList.find((employee) => normalizeEmployeeName(getEmployeeDisplayName(employee)) === normalizeEmployeeName(aliasTarget));
+            if (aliasMatch) {
+                const fuzzyMatches = findBestEmployeeMatches(query, employeeList, 10)
+                    .map((entry) => entry.employee)
+                    .filter((employee) => employee.id !== aliasMatch.id);
+                return [aliasMatch, ...fuzzyMatches].slice(0, 10);
+            }
+        }
+
+        return findBestEmployeeMatches(query, employeeList, 10).map((entry) => entry.employee);
     };
 
     const setTransactionAmountInContent = (content: string, index: number, amountValue: string): string => {
@@ -4378,13 +4439,13 @@ GRAND TOTAL: $39.45`}
                                                                         {/* Dropdown */}
                                                                         {showDropdown && filteredEmployees.length > 0 && (
                                                                             <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
-                                                                                {filteredEmployees.map((emp, empIdx) => (
+                                                                                {filteredEmployees.map((emp) => (
                                                                                     <button
-                                                                                        key={empIdx}
+                                                                                        key={emp.id}
                                                                                         onClick={() => handleEmployeeSelect(txKey, emp)}
                                                                                         className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
                                                                                     >
-                                                                                        {emp.fullName}
+                                                                                        {getEmployeeDisplayName(emp)}
                                                                                     </button>
                                                                                 ))}
                                                                             </div>
@@ -5028,7 +5089,7 @@ GRAND TOTAL: $39.45`}
                                                 {pendingDeactivationEmployees.map((employee) => (
                                                     <div key={`${employee.account}-${employee.id}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg bg-black/25 border border-white/10">
                                                         <div>
-                                                            <p className="text-sm text-white font-semibold uppercase">{employee.fullName}</p>
+                                                            <p className="text-sm text-white font-semibold uppercase">{getEmployeeDisplayName(employee)}</p>
                                                             <p className="text-xs text-slate-400">BSB: {employee.bsb} | Account: {employee.account}</p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
