@@ -453,11 +453,11 @@ const DELETE_RULE_CONFIRMATION_PHRASE = 'yes i have decided to delete this rule 
 const getDefaultBuiltInRules = (): RuleConfig[] => {
     const now = new Date().toISOString();
     return [
-        { id: 'r1', title: 'Duplicate in Current Upload', detail: 'Checks duplicate receipts in current upload.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r2', title: 'Already Processed Check', detail: 'Checks if receipt appears in processed history.', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r3', title: 'Amount Threshold (> $300)', detail: 'Flags transactions that exceed $300.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r4', title: 'Receipt Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r5', title: 'Required Fields', detail: 'Checks mandatory fields from reimbursement form.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using staff name + store name + purchase date + amount.', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using staff name + store name + amount (date mismatch or missing).', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r6', title: 'Subject for Approval', detail: 'Marks if request needs approval based on rule outcomes.', severity: 'info', enabled: true, isBuiltIn: true, updatedAt: now }
     ];
 };
@@ -1976,6 +1976,11 @@ const [isEditing, setIsEditing] = useState(false);
         }];
     }, [reimbursementFormText, receiptDetailsText, requestMode]);
 
+    const overLimitTransactionCount = useMemo(
+        () => currentInputTransactions.filter((tx) => tx.amount > 300).length,
+        [currentInputTransactions]
+    );
+
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
         if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
@@ -2023,10 +2028,13 @@ const [isEditing, setIsEditing] = useState(false);
 
                 const storeMatch = txStoreKey === historyStoreKey;
                 const productMatch = txProductKey === historyProductKey;
+                const staffMatch = txStaff && historyStaff ? txStaff === historyStaff : false;
+                const dateMatch = txDateKey && historyDateKey ? txDateKey === historyDateKey : false;
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
-                const baseMatch = storeMatch && productMatch && totalAmountMatch;
+                const exactMatch = staffMatch && storeMatch && totalAmountMatch && dateMatch;
+                const nearMatch = staffMatch && storeMatch && totalAmountMatch && !dateMatch;
 
-                if (!baseMatch) return;
+                if (!exactMatch && !nearMatch) return;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -2049,11 +2057,16 @@ const [isEditing, setIsEditing] = useState(false);
                     historyProcessedAt: String(row.dateProcessed || '-')
                 };
 
-                redMatches.push(evidence);
+                if (exactMatch) {
+                    redMatches.push(evidence);
+                } else if (nearMatch || (productMatch && staffMatch && storeMatch && totalAmountMatch)) {
+                    yellowMatches.push(evidence);
+                }
             });
         });
 
         if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
+        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
@@ -2093,20 +2106,6 @@ const [isEditing, setIsEditing] = useState(false);
             historyBySignature.set(signatureKey, [...(historyBySignature.get(signatureKey) || []), row]);
         });
 
-        const uidMap = new Map<string, number>();
-        const signatureMap = new Map<string, number>();
-        currentInputTransactions.forEach((tx) => {
-            if (tx.uid && tx.uid !== '-' && tx.uid !== 'n/a') {
-                uidMap.set(tx.uid, (uidMap.get(tx.uid) || 0) + 1);
-            }
-            if (tx.signatureKey) {
-                signatureMap.set(tx.signatureKey, (signatureMap.get(tx.signatureKey) || 0) + 1);
-            }
-        });
-
-        const duplicateUidCurrent = Array.from(uidMap.entries()).filter(([, count]) => count > 1);
-        const duplicateSignatureCurrent = Array.from(signatureMap.entries()).filter(([, count]) => count > 1);
-
         const historyUidMatches = currentInputTransactions
             .filter(tx => tx.uid && historyByUid.has(tx.uid))
             .flatMap(tx => historyByUid.get(tx.uid) || []);
@@ -2114,7 +2113,7 @@ const [isEditing, setIsEditing] = useState(false);
             .map(tx => historyBySignature.get(tx.signatureKey) || [])
             .flat();
 
-        const overLimitCount = currentInputTransactions.filter(tx => tx.amount > 300).length;
+        const overLimitCount = overLimitTransactionCount;
         const agedCount = currentInputTransactions.filter(tx => {
             if (!tx.rawDate) return false;
             const parsedDate = parseDateValue(tx.rawDate);
@@ -2122,6 +2121,15 @@ const [isEditing, setIsEditing] = useState(false);
             const ageMs = Date.now() - parsedDate.getTime();
             const days = ageMs / (1000 * 60 * 60 * 24);
             return days > 30;
+        }).length;
+
+        const missingStaffCount = currentInputTransactions.filter((tx) => {
+            const staff = normalizeEmployeeName(tx.staffName);
+            return !staff || staff === 'unknown';
+        }).length;
+        const missingStoreCount = currentInputTransactions.filter((tx) => {
+            const store = normalizeTextKey(tx.storeName);
+            return !store || store === '-';
         }).length;
 
         const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
@@ -2149,39 +2157,41 @@ const [isEditing, setIsEditing] = useState(false);
 
         const items: RuleStatusItem[] = [];
 
-        const rule1 = getRuleMeta('r1', 'Duplicate in Current Upload', 'high');
+        const rule1 = getRuleMeta('r1', 'Fraud Exact Match', 'critical');
         if (rule1) {
             items.push({
                 id: 'r1',
                 title: rule1.title,
-                detail: duplicateUidCurrent.length > 0 || duplicateSignatureCurrent.length > 0
-                    ? `Potential duplicate rows found (${duplicateUidCurrent.length + duplicateSignatureCurrent.length}).`
-                    : 'No duplicate receipt patterns in the current upload.',
+                detail: duplicateCheckResult.redMatches.length > 0
+                    ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same staff + store + purchase date + amount in history.`
+                    : 'No exact fraud match found for staff + store + purchase date + amount.',
                 severity: rule1.severity,
-                status: duplicateUidCurrent.length > 0 || duplicateSignatureCurrent.length > 0 ? 'blocked' : 'pass'
+                status: duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass'
             });
         }
 
-        const rule2 = getRuleMeta('r2', 'Already Processed Check', 'critical');
+        const rule2 = getRuleMeta('r2', 'Fraud Near Match', 'high');
         if (rule2) {
             items.push({
                 id: 'r2',
                 title: rule2.title,
-                detail: firstHistoryMatch
-                    ? `Matched previous record. Date Processed: ${firstHistoryMatch.dateProcessed || '-'} | NAB Code: ${firstHistoryMatch.nabCode || '-'}`
-                    : 'No matching processed receipts found in history.',
+                detail: duplicateCheckResult.yellowMatches.length > 0
+                    ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same staff + store + amount, with purchase date mismatch/missing.`
+                    : firstHistoryMatch
+                        ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
+                        : 'No near fraud pattern found in history.',
                 severity: rule2.severity,
-                status: firstHistoryMatch ? 'blocked' : 'pass'
+                status: duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass'
             });
         }
 
-        const rule3 = getRuleMeta('r3', 'Amount Threshold (> $300)', 'medium');
+        const rule3 = getRuleMeta('r3', 'Receipt Amount > $300', 'high');
         if (rule3) {
             items.push({
                 id: 'r3',
                 title: rule3.title,
                 detail: overLimitCount > 0
-                    ? `${overLimitCount} transaction(s) exceed $300 and require approval.`
+                    ? `${overLimitCount} transaction(s) are more than $300 (partial blocked: Save as Pending only).`
                     : 'All transactions are within $300 threshold.',
                 severity: rule3.severity,
                 status: overLimitCount > 0 ? 'warning' : 'pass'
@@ -2201,16 +2211,18 @@ const [isEditing, setIsEditing] = useState(false);
             });
         }
 
-        const rule5 = getRuleMeta('r5', 'Required Fields', 'high');
+        const rule5 = getRuleMeta('r5', 'Staff & Store Integrity', 'high');
         if (rule5) {
             items.push({
                 id: 'r5',
                 title: rule5.title,
-                detail: missingFields.length > 0
-                    ? `Missing: ${missingFields.join(', ')}.`
-                    : 'Required form fields are complete.',
+                detail: missingStaffCount > 0 || missingStoreCount > 0
+                    ? `Missing data for fraud checks: staff=${missingStaffCount}, store=${missingStoreCount}.`
+                    : missingFields.length > 0
+                        ? `Core form fields missing: ${missingFields.join(', ')}.`
+                        : 'Staff and store values are complete for fraud checks.',
                 severity: rule5.severity,
-                status: missingFields.length > 0 ? 'blocked' : 'pass'
+                status: missingStaffCount > 0 || missingStoreCount > 0 || missingFields.length > 0 ? 'warning' : 'pass'
             });
         }
 
@@ -2239,7 +2251,7 @@ const [isEditing, setIsEditing] = useState(false);
         });
 
         return items;
-    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig]);
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -3219,6 +3231,13 @@ const handleCopyEmail = async () => {
 
         if (duplicateCheckResult.signal === 'yellow') {
             const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            setSaveModalDecision({ mode: 'yellow', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (overLimitTransactionCount > 0) {
+            const detail = `${overLimitTransactionCount} transaction(s) are above $300. Partial blocked: Save & Pay is disabled, use Pending with approval.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -5547,7 +5566,8 @@ GRAND TOTAL: $39.45`}
                                     <div>
                                         <h3 className={`text-white font-bold ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'tracking-wide' : ''}`}>
                                             {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
-                                            {saveModalDecision?.mode === 'yellow' && 'Potential Duplicate Needs Review'}
+                                            {saveModalDecision?.mode === 'yellow' && (saveModalDecision?.detail || '').toLowerCase().includes('above $300') && 'Partial Block: Amount Over $300'}
+                                            {saveModalDecision?.mode === 'yellow' && !(saveModalDecision?.detail || '').toLowerCase().includes('above $300') && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
                                         <p className="text-xs text-slate-300">
