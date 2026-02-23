@@ -5883,7 +5883,7 @@ GRAND TOTAL: $39.45`}
                                                 {saveModalDecision.mode === 'red'
                                                     ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
                                                     : isOver300Detail(saveModalDecision?.detail)
-                                                        ? 'This can proceed only as Pending and will be routed for Julian approval. Reviewer reason is required for audit trail.'
+                                                        ? 'This can proceed only as Pending and will be routed for Julian approval.'
                                                         : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
                                             <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
@@ -5930,13 +5930,15 @@ GRAND TOTAL: $39.45`}
                                                 </div>
                                             )}
                                             <div>
-                                                <label className="text-xs text-slate-400 block mb-1">Reviewer reason (required)</label>
+                                                <label className="text-xs text-slate-400 block mb-1">
+                                                    {isOver300Detail(saveModalDecision?.detail) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
+                                                </label>
                                                 <textarea
                                                     value={reviewerOverrideReason}
                                                     onChange={(e) => setReviewerOverrideReason(e.target.value)}
                                                     rows={3}
                                                     placeholder={isOver300Detail(saveModalDecision?.detail)
-                                                        ? 'Explain why this should be sent to Julian for approval'
+                                                        ? 'Optional note for Julian approval routing'
                                                         : 'Explain why this should be saved as pending'}
                                                     className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
                                                 />
@@ -5975,10 +5977,12 @@ GRAND TOTAL: $39.45`}
                                         <button
                                             onClick={() => confirmSave('PENDING', {
                                                 duplicateSignal: saveModalDecision.mode,
-                                                reviewerReason: reviewerOverrideReason,
+                                                reviewerReason: reviewerOverrideReason.trim() || (isOver300Detail(saveModalDecision?.detail)
+                                                    ? 'Auto-routed: total reimbursement at or above $300, pending Julian approval.'
+                                                    : reviewerOverrideReason),
                                                 detail: saveModalDecision.detail
                                             })}
-                                            disabled={!reviewerOverrideReason.trim()}
+                                            disabled={!isOver300Detail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
                                             className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             {isOver300Detail(saveModalDecision?.detail) ? 'Save as PENDING (For Julian Approval)' : 'Save as PENDING'}
