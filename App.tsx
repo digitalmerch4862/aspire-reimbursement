@@ -462,7 +462,7 @@ const getDefaultBuiltInRules = (): RuleConfig[] => {
     ];
 };
 
-const dateLikeRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2}|\btime\b|\b\d{1,2}:\d{2}\s*(?:am|pm)?\b)/i;
+const dateLikeRegex = /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\btime\b|\b\d{1,2}:\d{2}\s*(?:am|pm)?\b)/i;
 
 const isDateLike = (value: string): boolean => dateLikeRegex.test(value || '');
 
@@ -494,6 +494,37 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
     return extracted;
 };
 
+interface ParticularAmountLine {
+    product: string;
+    date: string;
+    amount: string;
+}
+
+const parseParticularAmountLines = (rawText: string): ParticularAmountLine[] => {
+    const lines = rawText.split('\n').map((line) => line.trim()).filter(Boolean);
+    const extracted: ParticularAmountLine[] = [];
+
+    for (const line of lines) {
+        const normalizedLine = line
+            .replace(/[\u2013\u2014]/g, '-')
+            .replace(/\s+/g, ' ')
+            .replace(/^[\-*•]+\s*/, '')
+            .trim();
+
+        const match = normalizedLine.match(/^(.+?)\s*-\s*date\s*:\s*(.+?)\s*-\s*amount\s*:\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+        if (!match) continue;
+
+        const product = String(match[1] || '').trim();
+        const date = String(match[2] || '').trim();
+        const amount = normalizeMoneyValue(String(match[3] || ''), '0.00');
+        if (!product) continue;
+
+        extracted.push({ product, date, amount });
+    }
+
+    return extracted;
+};
+
 const parseDateValue = (value: string): Date | null => {
     const raw = String(value || '').trim();
     if (!raw) return null;
@@ -501,7 +532,7 @@ const parseDateValue = (value: string): Date | null => {
     const direct = new Date(raw);
     if (!Number.isNaN(direct.getTime())) return direct;
 
-    const slashMatch = raw.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    const slashMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
     if (!slashMatch) return null;
 
     const day = Number(slashMatch[1]);
@@ -1958,6 +1989,28 @@ const [isEditing, setIsEditing] = useState(false);
 
         if (parsed.length > 0) return parsed;
 
+        const particularAmountLines = parseParticularAmountLines(formText);
+        if (particularAmountLines.length > 0) {
+            return particularAmountLines.map((entry, idx) => {
+                const numericAmount = Number(normalizeMoneyValue(entry.amount, '0.00'));
+                return {
+                    staffName: fallbackStaff,
+                    amount: numericAmount,
+                    totalAmount: numericAmount,
+                    uid: `particular-${idx + 1}`,
+                    storeName: 'particulars',
+                    product: entry.product,
+                    rawDate: entry.date,
+                    dateKey: toDateKey(entry.date),
+                    signatureKey: [
+                        'particulars',
+                        normalizeTextKey(entry.product),
+                        normalizeMoneyValue(String(numericAmount), '0.00')
+                    ].join('|')
+                };
+            });
+        }
+
         const amountMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i) ||
             formText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i) ||
             receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
@@ -3321,10 +3374,13 @@ const handleCopyEmail = async () => {
             totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
                           receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
             receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
+            const particularAmountLines = parseParticularAmountLines(formText);
+            let usedParticularAmountLines = false;
 
             // Parse table from Receipt Details or Reimbursement Form
             const allText = formText + '\n' + receiptText;
             const lines = allText.split('\n');
+            const hasPipeTableInput = lines.some((line) => line.trim().startsWith('|'));
             const items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }> = [];
             const groupPettyCashEntries = parseGroupPettyCashEntries(allText);
             const isGroupPettyCashRequest = requestMode === 'group';
@@ -3354,6 +3410,25 @@ const handleCopyEmail = async () => {
                 }
             }
 
+            if (items.length === 0 && particularAmountLines.length > 0) {
+                usedParticularAmountLines = true;
+                particularAmountLines.forEach((entry, idx) => {
+                    items.push({
+                        receiptNum: String(idx + 1),
+                        uniqueId: `particular-${idx + 1}`,
+                        storeName: 'Particulars',
+                        dateTime: entry.date,
+                        product: entry.product,
+                        category: 'Other',
+                        itemAmount: entry.amount,
+                        receiptTotal: entry.amount,
+                        notes: '',
+                        amount: entry.amount,
+                        onCharge: 'N'
+                    });
+                });
+            }
+
             // If no items from table, use key-value from form
             if (items.length === 0 && particularMatch) {
                 items.push({
@@ -3369,6 +3444,13 @@ const handleCopyEmail = async () => {
                     amount: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
                     onCharge: onChargeMatch ? onChargeMatch[1].trim() : 'N'
                 });
+            }
+
+            if (!formTotalMatch && !receiptTotalMatch && (usedParticularAmountLines || (!hasPipeTableInput && items.length > 0))) {
+                totalAmount = items.reduce((sum, item) => {
+                    const itemTotal = Number(normalizeMoneyValue(item.receiptTotal || item.itemAmount || item.amount, '0.00'));
+                    return sum + (Number.isNaN(itemTotal) ? 0 : itemTotal);
+                }, 0);
             }
 
             if (isGroupPettyCashRequest) {
