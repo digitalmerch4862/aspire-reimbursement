@@ -689,10 +689,6 @@ const upsertJulianApprovalSection = (
         /Total\s*Amount:\s*(.+)/i,
         /Amount:\s*(.+)/i
     ]);
-    const receiptId = extractFieldValue(stripped, [
-        /\*\*Receipt\s*ID:\*\*\s*(.+)/i,
-        /Receipt\s*ID:\s*(.+)/i
-    ]);
     const approvalReason = String(options?.approvalReason || 'Total reimbursement amount is at or above $300').trim();
     const fraudReceiptStatus = String(options?.fraudReceiptStatus || 'Not matched in duplicate history').trim();
     const subjectLine = /older than 30 days/i.test(approvalReason)
@@ -712,7 +708,6 @@ const upsertJulianApprovalSection = (
         `**Staff Member:** ${staffMember || '-'}`,
         `**Client Name:** ${clientName || '-'}`,
         `**Amount:** ${amount || '-'}`,
-        `**Receipt ID:** ${receiptId || '-'}`,
         `**Approved By:** ${approvedBy || '-'}`,
         '',
         'Please review and confirm your approval. Full reimbursement details are included below.',
@@ -3863,7 +3858,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
-**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -3922,7 +3916,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
-**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -3970,7 +3963,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address || '[Enter Address]'}
 **Approved By:** [Enter Approver Name]
 **Amount:** [Enter Amount]
-**Receipt ID:** ${canonicalReceiptId}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
