@@ -3364,7 +3364,10 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     .map((block, idx) => `Approved Reimbursement ${idx + 1}\n\n${block}`)
                     .join('\n\n------------------------------\n\n');
 
-            await Promise.all(updatedRecords.map(async (record) => {
+            let hadNabConflict = false;
+            const appliedRecords: Array<{ id: any; nab_code: string | null; full_email_content: string }> = [];
+
+            for (const record of updatedRecords) {
                 const { error } = await supabase
                     .from('audit_logs')
                     .update({
@@ -3373,11 +3376,24 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     })
                     .eq('id', record.id);
 
-                if (error) throw error;
-            }));
+                if (error && error.code === '23505') {
+                    hadNabConflict = true;
+                    const { error: fallbackError } = await supabase
+                        .from('audit_logs')
+                        .update({ full_email_content: record.full_email_content })
+                        .eq('id', record.id);
 
-            const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
-                updatedRecords.map(record => [record.id, record])
+                    if (fallbackError) throw fallbackError;
+                    appliedRecords.push({ ...record, nab_code: null });
+                    continue;
+                }
+
+                if (error) throw error;
+                appliedRecords.push(record);
+            }
+
+            const updatesById = new Map<any, { id: any; nab_code: string | null; full_email_content: string }>(
+                appliedRecords.map(record => [record.id, record])
             );
             setHistoryData(prev => prev.map(item => {
                 const updated = updatesById.get(item.id);
@@ -3395,9 +3411,13 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 setApprovedClaimantCopied(false);
                 setShowApprovedClaimantModal(true);
             }
+            if (hadNabConflict) {
+                alert('Approved successfully. Note: this NAB code is already used in another record, so duplicate NAB assignment was skipped for at least one entry.');
+            }
         } catch (error) {
             console.error('Failed to approve pending record:', error);
-            alert('Failed to approve pending record. Please try again.');
+            const message = (error as any)?.message || 'Please try again.';
+            alert(`Failed to approve pending record. ${message}`);
         } finally {
             setIsApprovingPending(false);
         }
