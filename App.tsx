@@ -4456,7 +4456,16 @@ GRAND TOTAL: $39.45`}
                                                                     <div className="mt-2 space-y-1.5">
                                                                         {evidenceRows.map((match, idx) => (
                                                                             <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
-                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
+                                                                                <div className="flex items-start justify-between gap-2">
+                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
+                                                                                    <button
+                                                                                        onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
+                                                                                        className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
+                                                                                    >
+                                                                                        {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
+                                                                                        {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
+                                                                                    </button>
+                                                                                </div>
                                                                                 <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
                                                                                 <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
                                                                             </div>
