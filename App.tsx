@@ -242,6 +242,7 @@ const stripInternalAuditMeta = (text: string): string => {
         .replace(/<!--\s*DUPLICATE_AUDIT:.*?-->\s*/gi, '')
         .replace(/<!--\s*PENDING_FOLLOWED_UP_AT:\s*.*?-->\s*/gi, '')
         .replace(/<!--\s*JULIAN_APPROVAL_BLOCK_(?:START|END)\s*-->\s*/gi, '')
+        .replace(/<!--\s*CLAIMANT_REVISION_BLOCK_(?:START|END)\s*-->\s*/gi, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 };
@@ -677,6 +678,57 @@ const isOver30DaysDetail = (detail?: string): boolean => {
 };
 
 const isJulianApprovalDetail = (detail?: string): boolean => isOver300Detail(detail) || isOver30DaysDetail(detail);
+
+const isFormHigherMismatchDetail = (detail?: string): boolean => {
+    const text = String(detail || '').toLowerCase();
+    return text.includes('reimbursement form total is higher than receipt total');
+};
+
+const parseFormReceiptTotalsFromContent = (content: string): { formTotal: number | null; receiptTotal: number | null; difference: number | null } => {
+    const formMatch = content.match(/Reimbursement\s*form\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+    const receiptMatch = content.match(/Receipt\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+
+    const formTotal = formMatch ? Number(formMatch[1].replace(/,/g, '')) : null;
+    const receiptTotal = receiptMatch ? Number(receiptMatch[1].replace(/,/g, '')) : null;
+
+    if (formTotal === null || receiptTotal === null || Number.isNaN(formTotal) || Number.isNaN(receiptTotal)) {
+        return { formTotal, receiptTotal, difference: null };
+    }
+
+    return {
+        formTotal,
+        receiptTotal,
+        difference: Number(Math.abs(formTotal - receiptTotal).toFixed(2))
+    };
+};
+
+const stripClaimantRevisionSection = (content: string): string => {
+    return String(content || '').replace(/\n*<!--\s*CLAIMANT_REVISION_BLOCK_START\s*-->[\s\S]*?<!--\s*CLAIMANT_REVISION_BLOCK_END\s*-->\s*/gi, '\n');
+};
+
+const upsertClaimantRevisionSection = (content: string): string => {
+    const stripped = stripClaimantRevisionSection(content).trimEnd();
+    const totals = parseFormReceiptTotalsFromContent(stripped);
+    const formDisplay = totals.formTotal !== null && Number.isFinite(totals.formTotal) ? totals.formTotal.toFixed(2) : '0.00';
+    const receiptDisplay = totals.receiptTotal !== null && Number.isFinite(totals.receiptTotal) ? totals.receiptTotal.toFixed(2) : '0.00';
+    const differenceDisplay = totals.difference !== null && Number.isFinite(totals.difference) ? totals.difference.toFixed(2) : '0.00';
+
+    const revisionSection = [
+        '<!-- CLAIMANT_REVISION_BLOCK_START -->',
+        'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.',
+        `Reimbursement form total is ${formDisplay}`,
+        `Receipt total is ${receiptDisplay}`,
+        `Difference amount is ${differenceDisplay}`,
+        '<!-- CLAIMANT_REVISION_BLOCK_END -->'
+    ].join('\n');
+
+    const normalizedBody = stripped.replace(
+        /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
+        'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
+    );
+
+    return `${revisionSection}\n\n${normalizedBody}`;
+};
 
 const isNetworkFetchError = (error: unknown): boolean => {
     const message = String((error as any)?.message || error || '').toLowerCase();
@@ -2165,6 +2217,27 @@ const [isEditing, setIsEditing] = useState(false);
         return 0;
     }, [reimbursementFormText, receiptDetailsText, currentInputTransactions]);
 
+    const formVsReceiptTotals = useMemo(() => {
+        const formText = reimbursementFormText.trim();
+        const receiptText = receiptDetailsText.trim();
+
+        const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
+        const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
+
+        const formTotal = formTotalMatch ? Number(formTotalMatch[1].replace(/,/g, '')) : null;
+        const receiptTotal = receiptTotalMatch ? Number(receiptTotalMatch[1].replace(/,/g, '')) : null;
+
+        const hasBoth = formTotal !== null && receiptTotal !== null && Number.isFinite(formTotal) && Number.isFinite(receiptTotal);
+        const difference = hasBoth ? Number(Math.abs((formTotal as number) - (receiptTotal as number)).toFixed(2)) : null;
+
+        return {
+            formTotal,
+            receiptTotal,
+            difference,
+            isFormHigherMismatch: Boolean(hasBoth && (formTotal as number) > (receiptTotal as number) + 0.01)
+        };
+    }, [reimbursementFormText, receiptDetailsText]);
+
     const currentInputAgedCount = useMemo(() => currentInputTransactions.filter((tx) => {
         if (!tx.rawDate) return false;
         const parsedDate = parseDateValue(tx.rawDate);
@@ -3266,6 +3339,10 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
         let withStatus = upsertStatusTag(baseContent, status);
+        withStatus = (status === 'PENDING' && isFormHigherMismatchDetail(options?.detail))
+            ? upsertClaimantRevisionSection(withStatus)
+            : stripClaimantRevisionSection(withStatus);
+
         const julianApprovalContext = {
             approvalReason: isOver30DaysDetail(options?.detail)
                 ? 'Receipt is older than 30 days from purchase date'
@@ -3565,6 +3642,13 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
                 : '';
             const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
+            setSaveModalDecision({ mode: 'yellow', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (formVsReceiptTotals.isFormHigherMismatch && formVsReceiptTotals.formTotal !== null && formVsReceiptTotals.receiptTotal !== null) {
+            const detail = `Reimbursement form total is higher than receipt total. Reimbursement form total is ${formVsReceiptTotals.formTotal.toFixed(2)}. Receipt total is ${formVsReceiptTotals.receiptTotal.toFixed(2)}. Difference amount is ${(formVsReceiptTotals.difference || 0).toFixed(2)}.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -3874,6 +3958,14 @@ Special instruction entry for logging.
             }
             bypassManualAuditRef.current = false;
 
+            const reimbursementFormTotalValue = formTotalMatch
+                ? Number(formTotalMatch[1].replace(/,/g, ''))
+                : totalAmount;
+            const receiptTotalValue = receiptGrandTotal !== null
+                ? receiptGrandTotal
+                : totalAmount;
+            const totalDifferenceValue = Number(Math.abs((reimbursementFormTotalValue || 0) - (receiptTotalValue || 0)).toFixed(2));
+
             // Determine which format is being used
             const hasFormData = /Client(?:'|’)?s?\s*full\s*name\s*:/i.test(formText)
                 || /Staff\s*member/i.test(formText)
@@ -3972,6 +4064,9 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
+Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
+Receipt total is ${receiptTotalValue.toFixed(2)}
+Difference amount is ${totalDifferenceValue.toFixed(2)}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -4030,6 +4125,9 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address}
 **Approved By:** ${approvedBy || '[Enter Approver]'}
 **Amount:** $${totalAmount.toFixed(2)}
+Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
+Receipt total is ${receiptTotalValue.toFixed(2)}
+Difference amount is ${totalDifferenceValue.toFixed(2)}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -4077,6 +4175,9 @@ I am writing to confirm that your reimbursement request has been successfully pr
 **Address:** ${address || '[Enter Address]'}
 **Approved By:** [Enter Approver Name]
 **Amount:** [Enter Amount]
+Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
+Receipt total is ${receiptTotalValue.toFixed(2)}
+Difference amount is ${totalDifferenceValue.toFixed(2)}
 **NAB Code:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
@@ -4156,11 +4257,20 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
 
             let discrepancyReason = '';
             if (isDiscrepancy) {
+                const mismatchFormTotalMatch = content.match(/Reimbursement\s*form\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+                const mismatchReceiptTotalMatch = content.match(/Receipt\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+                const mismatchFormTotal = mismatchFormTotalMatch ? Number(mismatchFormTotalMatch[1].replace(/,/g, '')) : null;
+                const mismatchReceiptTotal = mismatchReceiptTotalMatch ? Number(mismatchReceiptTotalMatch[1].replace(/,/g, '')) : null;
+
+                if (mismatchFormTotal !== null && mismatchReceiptTotal !== null && mismatchFormTotal > mismatchReceiptTotal + 0.01) {
+                    discrepancyReason = 'For revision mismatch reimbursement form total is higher than receipt total';
+                }
+
                 const formAmountMatch = content.match(/Amount on Form:\s*\$([0-9,.]+)/);
                 const receiptAmountMatch = content.match(/Actual Receipt Total:\s*\$([0-9,.]+)/);
-                if (formAmountMatch && receiptAmountMatch) {
+                if (!discrepancyReason && formAmountMatch && receiptAmountMatch) {
                     discrepancyReason = `Mismatch: Form $${formAmountMatch[1]} / Rcpt $${receiptAmountMatch[1]}`;
-                } else {
+                } else if (!discrepancyReason) {
                     discrepancyReason = 'Discrepancy / Pending';
                 }
             }
@@ -4209,7 +4319,9 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             let status = '';
             if (activity === 'Pending') {
                 const reason = String(record.discrepancyReason || '').trim();
-                if (reason && reason !== 'Discrepancy / Pending') {
+                if (/for revision mismatch reimbursement form total is higher than receipt total/i.test(reason)) {
+                    status = 'For revision mismatch reimbursement form total is higher than receipt total';
+                } else if (reason && reason !== 'Discrepancy / Pending') {
                     status = `Rematch (${reason.replace('Mismatch: ', '')})`;
                 } else {
                     status = 'For Approval';
@@ -6146,7 +6258,8 @@ GRAND TOTAL: $39.45`}
                                         <h3 className={`text-white font-bold ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'tracking-wide' : ''}`}>
                                             {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
                                             {saveModalDecision?.mode === 'yellow' && isJulianApprovalDetail(saveModalDecision?.detail) && 'Pending - Subject to Julian Approval'}
-                                            {saveModalDecision?.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
+                                            {saveModalDecision?.mode === 'yellow' && isFormHigherMismatchDetail(saveModalDecision?.detail) && 'Reject and Request Revision'}
+                                            {saveModalDecision?.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
                                         <p className="text-xs text-slate-300">
@@ -6162,8 +6275,11 @@ GRAND TOTAL: $39.45`}
                                                     ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
                                                     : isJulianApprovalDetail(saveModalDecision?.detail)
                                                         ? 'This can proceed only as Pending and will be routed for Julian approval.'
+                                                        : isFormHigherMismatchDetail(saveModalDecision?.detail)
+                                                            ? 'This is rejected for payment because reimbursement form total is higher than receipt total. Save as Pending to send claimant revision email.'
                                                         : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
+                                            {(saveModalDecision.mode === 'red' || (saveModalDecision.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail))) && (
                                             <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
                                                 <div className="flex items-center justify-between gap-2">
                                                     <p className="text-xs font-semibold text-red-200 uppercase tracking-wider">Matched NAB Code(s)</p>
@@ -6194,6 +6310,7 @@ GRAND TOTAL: $39.45`}
                                                     <p className="text-xs text-slate-300">No valid NAB code found on matched history.</p>
                                                 )}
                                             </div>
+                                            )}
                                             {duplicateMatchesForModal.length > 0 && (
                                                 <div className="space-y-2">
                                                     {duplicateMatchesForModal.map((match, idx) => (
@@ -6209,14 +6326,16 @@ GRAND TOTAL: $39.45`}
                                             )}
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">
-                                                    {isJulianApprovalDetail(saveModalDecision?.detail) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
+                                                    {(isJulianApprovalDetail(saveModalDecision?.detail) || isFormHigherMismatchDetail(saveModalDecision?.detail)) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
                                                 </label>
                                                 <textarea
                                                     value={reviewerOverrideReason}
                                                     onChange={(e) => setReviewerOverrideReason(e.target.value)}
                                                     rows={3}
-                                                    placeholder={isJulianApprovalDetail(saveModalDecision?.detail)
-                                                        ? 'Optional note for Julian approval routing'
+                                                    placeholder={(isJulianApprovalDetail(saveModalDecision?.detail) || isFormHigherMismatchDetail(saveModalDecision?.detail))
+                                                        ? (isFormHigherMismatchDetail(saveModalDecision?.detail)
+                                                            ? 'Optional note for claimant revision request'
+                                                            : 'Optional note for Julian approval routing')
                                                         : 'Explain why this should be saved as pending'}
                                                     className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
                                                 />
@@ -6254,18 +6373,24 @@ GRAND TOTAL: $39.45`}
                                     {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') ? (
                                         <button
                                             onClick={() => confirmSave('PENDING', {
-                                                duplicateSignal: saveModalDecision.mode,
+                                                duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode,
                                                 reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
                                                     ? (isOver30DaysDetail(saveModalDecision?.detail)
                                                         ? 'Auto-routed: receipt is older than 30 days, pending Julian approval.'
                                                         : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
+                                                    : isFormHigherMismatchDetail(saveModalDecision?.detail)
+                                                        ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
                                                     : reviewerOverrideReason),
                                                 detail: saveModalDecision.detail
                                             })}
-                                            disabled={!isJulianApprovalDetail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
+                                            disabled={!isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
                                             className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            {isJulianApprovalDetail(saveModalDecision?.detail) ? 'Save as PENDING (For Julian Approval)' : 'Save as PENDING'}
+                                            {isJulianApprovalDetail(saveModalDecision?.detail)
+                                                ? 'Save as PENDING (For Julian Approval)'
+                                                : isFormHigherMismatchDetail(saveModalDecision?.detail)
+                                                    ? 'Reject and Save as PENDING'
+                                                    : 'Save as PENDING'}
                                         </button>
                                     ) : (
                                         <>
