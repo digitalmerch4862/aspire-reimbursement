@@ -235,6 +235,17 @@ const stripUidFallbackMeta = (text: string): string => {
     return text.replace(/<!--\s*UID_FALLBACKS:.*?-->\s*/gi, '');
 };
 
+const stripInternalAuditMeta = (text: string): string => {
+    return String(text || '')
+        .replace(/<!--\s*UID_FALLBACKS:.*?-->\s*/gi, '')
+        .replace(/<!--\s*STATUS:\s*(?:PENDING|PAID)\s*-->\s*/gi, '')
+        .replace(/<!--\s*DUPLICATE_AUDIT:.*?-->\s*/gi, '')
+        .replace(/<!--\s*PENDING_FOLLOWED_UP_AT:\s*.*?-->\s*/gi, '')
+        .replace(/<!--\s*JULIAN_APPROVAL_BLOCK_(?:START|END)\s*-->\s*/gi, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
 const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
 const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
@@ -679,11 +690,12 @@ const upsertJulianApprovalSection = (content: string): string => {
         `**Approved By:** ${approvedBy || '-'}`,
         '',
         'Please review and approve this reimbursement request before payment release.',
+        'Full reimbursement details are included below for manual Outlook sending.',
         '',
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
 
-    return `${stripped}\n\n${approvalSection}`;
+    return `${approvalSection}\n\n${stripped}`;
 };
 
 const appendDuplicateAuditMeta = (
@@ -2971,7 +2983,7 @@ const [isEditing, setIsEditing] = useState(false);
 const handleCopyEmail = async () => {
         if (!results?.phase4) return;
         
-        let contentToCopy = stripClientLocationLine(stripUidFallbackMeta(isEditing ? editableContent : results.phase4));
+        let contentToCopy = stripClientLocationLine(stripInternalAuditMeta(isEditing ? editableContent : results.phase4));
         
         if (isEditing) {
             navigator.clipboard.writeText(contentToCopy);
