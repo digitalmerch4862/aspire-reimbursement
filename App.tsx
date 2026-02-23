@@ -449,6 +449,11 @@ interface SaveToastState {
     recordCount: number;
 }
 
+interface WarningToastState {
+    visible: boolean;
+    message: string;
+}
+
 type RequestMode = 'solo' | 'group';
 
 type QuickEditFieldKey =
@@ -1124,6 +1129,8 @@ const [isEditing, setIsEditing] = useState(false);
     const [manualNabCodeError, setManualNabCodeError] = useState<string | null>(null);
     const [saveToast, setSaveToast] = useState<SaveToastState>({ visible: false, nabCode: '-', amount: '0.00', recordCount: 0 });
     const saveToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [warningToast, setWarningToast] = useState<WarningToastState>({ visible: false, message: '' });
+    const warningToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isRedPopupAlertActive, setIsRedPopupAlertActive] = useState(false);
     const redPopupAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const redPopupAlertPlayedRef = useRef(false);
@@ -1307,6 +1314,9 @@ const [isEditing, setIsEditing] = useState(false);
             if (saveToastTimeoutRef.current) {
                 clearTimeout(saveToastTimeoutRef.current);
             }
+            if (warningToastTimeoutRef.current) {
+                clearTimeout(warningToastTimeoutRef.current);
+            }
             if (redPopupAlertTimeoutRef.current) {
                 clearTimeout(redPopupAlertTimeoutRef.current);
             }
@@ -1447,6 +1457,17 @@ const [isEditing, setIsEditing] = useState(false);
             setSaveToast(prev => ({ ...prev, visible: false }));
             playToastCloseTechSound();
         }, 2000);
+    };
+
+    const showWarningToast = (message: string) => {
+        if (warningToastTimeoutRef.current) {
+            clearTimeout(warningToastTimeoutRef.current);
+        }
+
+        setWarningToast({ visible: true, message: String(message || 'Action needs attention.') });
+        warningToastTimeoutRef.current = setTimeout(() => {
+            setWarningToast({ visible: false, message: '' });
+        }, 3000);
     };
 
     const handleSaveEmployeeList = () => {
@@ -2653,7 +2674,7 @@ const [isEditing, setIsEditing] = useState(false);
                 handleRowModalClose();
             } catch (e) {
                 console.error("Delete failed", e);
-                alert("Failed to delete record.");
+                showWarningToast('Failed to delete record.');
             }
         }
     };
@@ -2698,7 +2719,7 @@ const [isEditing, setIsEditing] = useState(false);
 
             } catch (e) {
                 console.error("Mass delete failed", e);
-                alert("Failed to delete records.");
+                showWarningToast('Failed to delete records.');
             }
         }
     };
@@ -2778,7 +2799,7 @@ const [isEditing, setIsEditing] = useState(false);
             handleRowModalClose();
         } catch (e) {
             console.error("Supabase Update Error", e);
-            alert("Failed to save changes to the database. Please check your connection.");
+            showWarningToast('Failed to save changes to the database. Please check your connection.');
         }
     };
 
@@ -2961,7 +2982,7 @@ const [isEditing, setIsEditing] = useState(false);
 
         } catch (e) {
             console.error("Mass edit failed", e);
-            alert("Failed to save mass edits. Please check console.");
+            showWarningToast('Failed to save mass edits. Please check console.');
         }
     };
 
@@ -3023,7 +3044,7 @@ const [isEditing, setIsEditing] = useState(false);
         });
 
         if (relevantRows.length === 0) {
-            alert("No records found for this period.");
+            showWarningToast('No records found for this period.');
             return;
         }
 
@@ -3580,7 +3601,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 setShowApprovedClaimantModal(true);
             }
             if (hadNabConflict) {
-                alert('Approved successfully. Note: this NAB code is already used in another record, so duplicate NAB assignment was skipped for at least one entry.');
+                showWarningToast('Approved successfully. Duplicate NAB assignment was skipped for at least one entry.');
             }
         } catch (error) {
             console.error('Failed to approve pending record:', error);
@@ -3605,12 +3626,12 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     setApprovedClaimantCopied(false);
                     setShowApprovedClaimantModal(true);
                 }
-                alert('Network issue while syncing. Approval was applied on-screen; please refresh later to confirm cloud sync.');
+                showWarningToast('Network issue while syncing. Approval was applied on-screen; please refresh later to confirm cloud sync.');
                 return;
             }
 
             const message = (error as any)?.message || 'Please try again.';
-            alert(`Failed to approve pending record. ${message}`);
+            showWarningToast(`Failed to approve pending record. ${message}`);
         } finally {
             setIsApprovingPending(false);
         }
@@ -3650,7 +3671,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             }));
         } catch (error) {
             console.error('Failed to mark pending follow-up:', error);
-            alert('Failed to update follow-up timestamp. Please try again.');
+            showWarningToast('Failed to update follow-up timestamp. Please try again.');
         } finally {
             setFollowUpingGroupKey(null);
         }
@@ -4649,6 +4670,18 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                     <div className="px-4 py-3 space-y-1.5 text-sm">
                         <p className="text-slate-300">NAB Code: <span className="text-white font-semibold">{saveToast.nabCode}</span></p>
                         <p className="text-slate-300">Amount: <span className="text-white font-semibold">${saveToast.amount}</span></p>
+                    </div>
+                </div>
+            )}
+            {warningToast.visible && (
+                <div className="fixed top-5 right-5 z-[71] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-amber-300/40 bg-[#1a1410]/95 backdrop-blur-xl shadow-[0_12px_40px_rgba(251,191,36,0.22)] animate-in fade-in slide-in-from-top-3 duration-200">
+                    <div className="px-4 py-3 border-b border-amber-300/20 flex items-center justify-between">
+                        <p className="text-xs uppercase tracking-[0.16em] font-bold text-amber-200">Warning</p>
+                        <AlertCircle size={14} className="text-amber-300" />
+                    </div>
+                    <div className="px-4 py-3 space-y-1.5 text-sm">
+                        <p className="text-slate-200">{warningToast.message}</p>
+                        <p className="text-[11px] text-amber-200/90">Check Rules Status for more details.</p>
                     </div>
                 </div>
             )}
