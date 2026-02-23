@@ -1036,6 +1036,9 @@ const [isEditing, setIsEditing] = useState(false);
     const [pendingApprovalStaffGroup, setPendingApprovalStaffGroup] = useState<PendingStaffGroup | null>(null);
     const [pendingApprovalNabCode, setPendingApprovalNabCode] = useState('');
     const [isApprovingPending, setIsApprovingPending] = useState(false);
+    const [showApprovedClaimantModal, setShowApprovedClaimantModal] = useState(false);
+    const [approvedClaimantEmailContent, setApprovedClaimantEmailContent] = useState('');
+    const [approvedClaimantCopied, setApprovedClaimantCopied] = useState(false);
     const [followUpingGroupKey, setFollowUpingGroupKey] = useState<string | null>(null);
     const [manualAuditIssues, setManualAuditIssues] = useState<ManualAuditIssue[]>([]);
     const [showManualAuditModal, setShowManualAuditModal] = useState(false);
@@ -2986,6 +2989,9 @@ const [isEditing, setIsEditing] = useState(false);
         setEmployeeSearchQuery(new Map());
         setShowEmployeeDropdown(new Map());
         setAmountSelectionByTx(new Map());
+        setShowApprovedClaimantModal(false);
+        setApprovedClaimantEmailContent('');
+        setApprovedClaimantCopied(false);
     };
 
     const scrollToReimbursementForm = () => {
@@ -3026,6 +3032,29 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         await navigator.clipboard.writeText(contentToCopy);
         setEmailCopied(target);
         setTimeout(() => setEmailCopied(null), 2000);
+    };
+
+    const handleCopyApprovedClaimantEmail = async () => {
+        if (!approvedClaimantEmailContent) return;
+
+        const emailElement = document.getElementById('approved-claimant-copy-content');
+        if (emailElement) {
+            try {
+                const blobHtml = new Blob([emailElement.innerHTML], { type: 'text/html' });
+                const blobText = new Blob([stripClientLocationLine(emailElement.innerText)], { type: 'text/plain' });
+                const data = [new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })];
+                await navigator.clipboard.write(data);
+                setApprovedClaimantCopied(true);
+                setTimeout(() => setApprovedClaimantCopied(false), 2000);
+                return;
+            } catch (e) {
+                console.warn('ClipboardItem API failed', e);
+            }
+        }
+
+        await navigator.clipboard.writeText(stripClientLocationLine(approvedClaimantEmailContent));
+        setApprovedClaimantCopied(true);
+        setTimeout(() => setApprovedClaimantCopied(false), 2000);
     };
 
     const handleCopyField = (text: string, fieldName: string) => {
@@ -3278,6 +3307,24 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 };
             });
 
+            const claimantBlocks = updatedRecords
+                .map((record) => {
+                    const content = String(record.full_email_content || '');
+                    if (!content.trim()) return '';
+                    return stripClientLocationLine(
+                        stripInternalAuditMeta(
+                            stripJulianApprovalSection(content)
+                        )
+                    );
+                })
+                .filter(Boolean);
+
+            const combinedClaimantEmail = claimantBlocks.length <= 1
+                ? (claimantBlocks[0] || '')
+                : claimantBlocks
+                    .map((block, idx) => `Approved Reimbursement ${idx + 1}\n\n${block}`)
+                    .join('\n\n------------------------------\n\n');
+
             await Promise.all(updatedRecords.map(async (record) => {
                 const { error } = await supabase
                     .from('audit_logs')
@@ -3304,6 +3351,11 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             }));
 
             closePendingApprovalModal();
+            if (combinedClaimantEmail) {
+                setApprovedClaimantEmailContent(combinedClaimantEmail);
+                setApprovedClaimantCopied(false);
+                setShowApprovedClaimantModal(true);
+            }
         } catch (error) {
             console.error('Failed to approve pending record:', error);
             alert('Failed to approve pending record. Please try again.');
@@ -3420,6 +3472,9 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         setShowManualAuditModal(false);
         setIsEditing(false);
         setOcrStatus('');
+        setShowApprovedClaimantModal(false);
+        setApprovedClaimantEmailContent('');
+        setApprovedClaimantCopied(false);
 
         try {
             setOcrStatus('Processing...');
@@ -5992,6 +6047,47 @@ GRAND TOTAL: $39.45`}
                                         className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {isApprovingPending ? 'Approving...' : 'Confirm Approval'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showApprovedClaimantModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-3xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-indigo-500/10 flex items-center gap-3">
+                                    <CheckCircle className="text-indigo-300" size={20} />
+                                    <div>
+                                        <h3 className="text-white font-bold">Claimant Letter Ready</h3>
+                                        <p className="text-xs text-slate-300">Combined approved entries are ready to copy and send to claimant.</p>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 max-h-[55vh] overflow-y-auto bg-black/20">
+                                    <MarkdownRenderer content={approvedClaimantEmailContent} theme="dark" />
+                                    <div className="hidden">
+                                        <MarkdownRenderer content={approvedClaimantEmailContent} theme="light" id="approved-claimant-copy-content" />
+                                    </div>
+                                </div>
+
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setShowApprovedClaimantModal(false);
+                                            setApprovedClaimantCopied(false);
+                                        }}
+                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        onClick={handleCopyApprovedClaimantEmail}
+                                        disabled={!approvedClaimantEmailContent.trim()}
+                                        className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    >
+                                        {approvedClaimantCopied ? <Check size={14} /> : <Copy size={14} />}
+                                        {approvedClaimantCopied ? 'Copied Claimant Letter' : 'Copy to Claimant'}
                                     </button>
                                 </div>
                             </div>
