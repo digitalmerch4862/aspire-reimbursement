@@ -2983,7 +2983,7 @@ const [isEditing, setIsEditing] = useState(false);
 const handleCopyEmail = async () => {
         if (!results?.phase4) return;
         
-        let contentToCopy = stripClientLocationLine(stripInternalAuditMeta(isEditing ? editableContent : results.phase4));
+        let contentToCopy = stripClientLocationLine(stripInternalAuditMeta(displayEmailContent));
         
         if (isEditing) {
             navigator.clipboard.writeText(contentToCopy);
@@ -4074,6 +4074,15 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         return Array.from(new Set(codes.map(code => code.toUpperCase())));
     }, [duplicateMatchesForModal]);
 
+    const displayEmailContent = useMemo(() => {
+        const source = isEditing ? editableContent : (results?.phase4 || '');
+        if (!source) return '';
+        const withoutUidMeta = stripUidFallbackMeta(source);
+        return overLimitTransactionCount > 0
+            ? upsertJulianApprovalSection(withoutUidMeta)
+            : stripJulianApprovalSection(withoutUidMeta);
+    }, [isEditing, editableContent, results?.phase4, overLimitTransactionCount]);
+
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
         duplicateCheckResult.redMatches.forEach((match) => {
@@ -4874,7 +4883,7 @@ GRAND TOTAL: $39.45`}
                                                         <textarea value={editableContent} onChange={(e) => setEditableContent(e.target.value)} className="w-full h-[400px] p-4 font-mono text-sm border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 text-white resize-none" placeholder="Edit email content here..." />
                                                     ) : (
                                                         <MarkdownRenderer 
-                                                            content={stripUidFallbackMeta(results.phase4)} 
+                                                            content={displayEmailContent} 
                                                             id="email-output-content" 
                                                             theme="dark" 
                                                         />
