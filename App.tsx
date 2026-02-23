@@ -4006,11 +4006,21 @@ Special instruction entry for logging.
                 );
 
             if (issues.length > 0 && !bypassManualAuditRef.current) {
-                setManualAuditIssues(issues);
-                setShowManualAuditModal(true);
-                setProcessingState(ProcessingState.IDLE);
-                setOcrStatus('Needs approval');
-                return;
+                const blockingIssues = issues.filter((issue) => issue.level === 'error');
+                const warningIssues = issues.filter((issue) => issue.level !== 'error');
+
+                if (blockingIssues.length > 0) {
+                    setErrorMessage(blockingIssues.map((issue) => issue.message).join(' | '));
+                    showWarningToast('Manual validation found blocking errors. Check Rules Status for more details.');
+                    setProcessingState(ProcessingState.IDLE);
+                    setOcrStatus('Needs review');
+                    return;
+                }
+
+                if (warningIssues.length > 0) {
+                    setManualAuditIssues(warningIssues);
+                    showWarningToast('Manual validation found warnings. Proceeding based on active rules.');
+                }
             }
             bypassManualAuditRef.current = false;
 
