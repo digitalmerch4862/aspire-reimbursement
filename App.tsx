@@ -648,7 +648,20 @@ const isOver300Detail = (detail?: string): boolean => {
         || text.includes('more than $300');
 };
 
-const upsertJulianApprovalSection = (content: string): string => {
+const isOver30DaysDetail = (detail?: string): boolean => {
+    const text = String(detail || '').toLowerCase();
+    return text.includes('older than 30 days')
+        || text.includes('over 30 days')
+        || text.includes('> 30 days')
+        || text.includes('30-day receipt age');
+};
+
+const isJulianApprovalDetail = (detail?: string): boolean => isOver300Detail(detail) || isOver30DaysDetail(detail);
+
+const upsertJulianApprovalSection = (
+    content: string,
+    options?: { approvalReason?: string; fraudReceiptStatus?: string }
+): string => {
     const stripped = stripJulianApprovalSection(content).trimEnd();
     const staffMember = extractFieldValue(stripped, [
         /\*\*Staff Member:\*\*\s*(.+)/i,
@@ -672,15 +685,22 @@ const upsertJulianApprovalSection = (content: string): string => {
         /\*\*Receipt\s*ID:\*\*\s*(.+)/i,
         /Receipt\s*ID:\s*(.+)/i
     ]);
+    const approvalReason = String(options?.approvalReason || 'Total reimbursement amount is at or above $300').trim();
+    const fraudReceiptStatus = String(options?.fraudReceiptStatus || 'Not matched in duplicate history').trim();
+    const subjectLine = /older than 30 days/i.test(approvalReason)
+        ? 'Approval Request - Reimbursement Over 30 Days'
+        : 'Approval Request - Reimbursement At or Above $300';
 
     const approvalSection = [
         '<!-- JULIAN_APPROVAL_BLOCK_START -->',
         '',
         `Hi ${JULIAN_APPROVER_NAME},`,
         '',
-        'I am requesting your approval for this reimbursement request because the total amount is at or above $300 before payment release.',
+        'I am requesting your approval for this reimbursement request before payment release.',
         '',
-        '**Subject:** Approval Request - Reimbursement At or Above $300',
+        `**Subject:** ${subjectLine}`,
+        `**Approval Reason:** ${approvalReason}`,
+        `**Fraud Receipt Check:** ${fraudReceiptStatus}`,
         `**Staff Member:** ${staffMember || '-'}`,
         `**Client Name:** ${clientName || '-'}`,
         `**Amount:** ${amount || '-'}`,
@@ -2119,7 +2139,16 @@ const [isEditing, setIsEditing] = useState(false);
         return 0;
     }, [reimbursementFormText, receiptDetailsText, currentInputTransactions]);
 
-    const isJulianApprovalRequired = currentInputOverallAmount >= 300;
+    const currentInputAgedCount = useMemo(() => currentInputTransactions.filter((tx) => {
+        if (!tx.rawDate) return false;
+        const parsedDate = parseDateValue(tx.rawDate);
+        if (!parsedDate) return false;
+        const ageMs = Date.now() - parsedDate.getTime();
+        const days = ageMs / (1000 * 60 * 60 * 24);
+        return days > 30;
+    }).length, [currentInputTransactions]);
+
+    const isOver300ApprovalRequired = currentInputOverallAmount >= 300;
 
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
         if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
@@ -2210,6 +2239,10 @@ const [isEditing, setIsEditing] = useState(false);
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
+    const hasFraudDuplicate = duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow';
+    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate;
+    const isJulianApprovalRequired = isOver300ApprovalRequired || isOver30DaysApprovalRequired;
+
     const rulesStatusItems = useMemo<RuleStatusItem[]>(() => {
         const formText = reimbursementFormText.trim();
         const receiptText = receiptDetailsText.trim();
@@ -2254,14 +2287,7 @@ const [isEditing, setIsEditing] = useState(false);
             .flat();
 
         const overLimitCount = overLimitTransactionCount;
-        const agedCount = currentInputTransactions.filter(tx => {
-            if (!tx.rawDate) return false;
-            const parsedDate = parseDateValue(tx.rawDate);
-            if (!parsedDate) return false;
-            const ageMs = Date.now() - parsedDate.getTime();
-            const days = ageMs / (1000 * 60 * 60 * 24);
-            return days > 30;
-        }).length;
+        const agedCount = currentInputAgedCount;
 
         const missingStaffCount = currentInputTransactions.filter((tx) => {
             const staff = normalizeEmployeeName(tx.staffName);
@@ -2330,13 +2356,13 @@ const [isEditing, setIsEditing] = useState(false);
             items.push({
                 id: 'r3',
                 title: rule3.title,
-                detail: isJulianApprovalRequired
+                detail: isOver300ApprovalRequired
                     ? `Total reimbursement amount is $${currentInputOverallAmount.toFixed(2)} (at or above $300): Save as Pending only with Julian approval.`
                     : overLimitCount > 0
                         ? `${overLimitCount} transaction(s) are more than $300 (partial blocked: Save as Pending only).`
                         : 'Total reimbursement amount is below $300 threshold.',
                 severity: rule3.severity,
-                status: isJulianApprovalRequired || overLimitCount > 0 ? 'warning' : 'pass'
+                status: isOver300ApprovalRequired || overLimitCount > 0 ? 'warning' : 'pass'
             });
         }
 
@@ -2346,7 +2372,9 @@ const [isEditing, setIsEditing] = useState(false);
                 id: 'r4',
                 title: rule4.title,
                 detail: agedCount > 0
-                    ? `${agedCount} receipt(s) appear older than 30 days from purchase date.`
+                    ? hasFraudDuplicate
+                        ? `${agedCount} receipt(s) appear older than 30 days from purchase date, but fraud duplicate handling takes priority.`
+                        : `${agedCount} receipt(s) appear older than 30 days from purchase date: Save as Pending only with Julian approval.`
                     : 'No receipts older than 30 days detected.',
                 severity: rule4.severity,
                 status: agedCount > 0 ? 'warning' : 'pass'
@@ -2393,7 +2421,7 @@ const [isEditing, setIsEditing] = useState(false);
         });
 
         return items;
-    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isJulianApprovalRequired, currentInputOverallAmount]);
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -3211,8 +3239,19 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
         let withStatus = upsertStatusTag(baseContent, status);
-        withStatus = (status === 'PENDING' && isOver300Detail(options?.detail))
-            ? upsertJulianApprovalSection(withStatus)
+        const julianApprovalContext = {
+            approvalReason: isOver30DaysDetail(options?.detail)
+                ? 'Receipt is older than 30 days from purchase date'
+                : 'Total reimbursement amount is at or above $300',
+            fraudReceiptStatus: options?.duplicateSignal === 'red'
+                ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
+                : options?.duplicateSignal === 'yellow'
+                    ? `Matched near fraud duplicate (${duplicateCheckResult.yellowMatches.length})`
+                    : 'Not matched in duplicate history'
+        };
+
+        withStatus = (status === 'PENDING' && isJulianApprovalDetail(options?.detail))
+            ? upsertJulianApprovalSection(withStatus, julianApprovalContext)
             : stripJulianApprovalSection(withStatus);
 
         const finalContent = appendDuplicateAuditMeta(withStatus, options?.duplicateSignal ? {
@@ -3410,7 +3449,10 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         setSaveStatus('idle');
 
         if (duplicateCheckResult.signal === 'red') {
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days (Date/Time is optional).`;
+            const ageContext = currentInputAgedCount > 0
+                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
+                : '';
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days (Date/Time is optional).${ageContext}`;
             setSaveStatus('duplicate');
             setSaveModalDecision({ mode: 'red', detail });
             setShowSaveModal(true);
@@ -3418,13 +3460,23 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         }
 
         if (duplicateCheckResult.signal === 'yellow') {
-            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.`;
+            const ageContext = currentInputAgedCount > 0
+                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
+                : '';
+            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
         }
 
-        if (isJulianApprovalRequired) {
+        if (isOver30DaysApprovalRequired) {
+            const detail = `${currentInputAgedCount} receipt(s) are older than 30 days from purchase date (30-day receipt age). Save as Pending only and subject to Julian approval. Fraud receipt check: Not matched in duplicate history.`;
+            setSaveModalDecision({ mode: 'yellow', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (isOver300ApprovalRequired) {
             const detail = `Total reimbursement amount is $${currentInputOverallAmount.toFixed(2)} (at or above $300). Save as Pending only and subject to Julian approval.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
@@ -4151,10 +4203,21 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         return stripInternalAuditMeta(stripJulianApprovalSection(withoutUidMeta));
     }, [isEditing, editableContent, results?.phase4]);
 
+    const julianApprovalContext = useMemo(() => ({
+        approvalReason: isOver30DaysApprovalRequired
+            ? 'Receipt is older than 30 days from purchase date'
+            : 'Total reimbursement amount is at or above $300',
+        fraudReceiptStatus: duplicateCheckResult.signal === 'red'
+            ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
+            : duplicateCheckResult.signal === 'yellow'
+                ? `Matched near fraud duplicate (${duplicateCheckResult.yellowMatches.length})`
+                : 'Not matched in duplicate history'
+    }), [isOver30DaysApprovalRequired, duplicateCheckResult]);
+
     const julianEmailContent = useMemo(() => {
         if (!claimantEmailContent) return '';
-        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantEmailContent));
-    }, [claimantEmailContent]);
+        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantEmailContent, julianApprovalContext));
+    }, [claimantEmailContent, julianApprovalContext]);
 
     const displayEmailContent = useMemo(() => (
         isJulianApprovalRequired ? julianEmailContent : claimantEmailContent
@@ -5867,8 +5930,8 @@ GRAND TOTAL: $39.45`}
                                     <div>
                                         <h3 className={`text-white font-bold ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'tracking-wide' : ''}`}>
                                             {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
-                                            {saveModalDecision?.mode === 'yellow' && isOver300Detail(saveModalDecision?.detail) && 'Pending - Subject to Julian Approval'}
-                                            {saveModalDecision?.mode === 'yellow' && !isOver300Detail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
+                                            {saveModalDecision?.mode === 'yellow' && isJulianApprovalDetail(saveModalDecision?.detail) && 'Pending - Subject to Julian Approval'}
+                                            {saveModalDecision?.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
                                         <p className="text-xs text-slate-300">
@@ -5882,7 +5945,7 @@ GRAND TOTAL: $39.45`}
                                             <p className="text-slate-200">
                                                 {saveModalDecision.mode === 'red'
                                                     ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
-                                                    : isOver300Detail(saveModalDecision?.detail)
+                                                    : isJulianApprovalDetail(saveModalDecision?.detail)
                                                         ? 'This can proceed only as Pending and will be routed for Julian approval.'
                                                         : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
@@ -5931,13 +5994,13 @@ GRAND TOTAL: $39.45`}
                                             )}
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">
-                                                    {isOver300Detail(saveModalDecision?.detail) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
+                                                    {isJulianApprovalDetail(saveModalDecision?.detail) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
                                                 </label>
                                                 <textarea
                                                     value={reviewerOverrideReason}
                                                     onChange={(e) => setReviewerOverrideReason(e.target.value)}
                                                     rows={3}
-                                                    placeholder={isOver300Detail(saveModalDecision?.detail)
+                                                    placeholder={isJulianApprovalDetail(saveModalDecision?.detail)
                                                         ? 'Optional note for Julian approval routing'
                                                         : 'Explain why this should be saved as pending'}
                                                     className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
@@ -5977,15 +6040,17 @@ GRAND TOTAL: $39.45`}
                                         <button
                                             onClick={() => confirmSave('PENDING', {
                                                 duplicateSignal: saveModalDecision.mode,
-                                                reviewerReason: reviewerOverrideReason.trim() || (isOver300Detail(saveModalDecision?.detail)
-                                                    ? 'Auto-routed: total reimbursement at or above $300, pending Julian approval.'
+                                                reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
+                                                    ? (isOver30DaysDetail(saveModalDecision?.detail)
+                                                        ? 'Auto-routed: receipt is older than 30 days, pending Julian approval.'
+                                                        : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
                                                     : reviewerOverrideReason),
                                                 detail: saveModalDecision.detail
                                             })}
-                                            disabled={!isOver300Detail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
+                                            disabled={!isJulianApprovalDetail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
                                             className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            {isOver300Detail(saveModalDecision?.detail) ? 'Save as PENDING (For Julian Approval)' : 'Save as PENDING'}
+                                            {isJulianApprovalDetail(saveModalDecision?.detail) ? 'Save as PENDING (For Julian Approval)' : 'Save as PENDING'}
                                         </button>
                                     ) : (
                                         <>
