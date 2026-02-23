@@ -4567,12 +4567,19 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         return Array.from(new Set(codes.map(code => code.toUpperCase())));
     }, [duplicateMatchesForModal]);
 
-    const claimantEmailContent = useMemo(() => {
+    const claimantBaseEmailContent = useMemo(() => {
         const source = isEditing ? editableContent : (results?.phase4 || '');
         if (!source) return '';
         const withoutUidMeta = stripUidFallbackMeta(source);
-        return stripInternalAuditMeta(stripJulianApprovalSection(withoutUidMeta));
+        return stripInternalAuditMeta(stripClaimantRevisionSection(stripJulianApprovalSection(withoutUidMeta)));
     }, [isEditing, editableContent, results?.phase4]);
+
+    const claimantEmailContent = useMemo(() => {
+        if (!claimantBaseEmailContent) return '';
+        return formVsReceiptTotals.isFormHigherMismatch
+            ? stripInternalAuditMeta(upsertClaimantRevisionSection(claimantBaseEmailContent))
+            : stripInternalAuditMeta(stripClaimantRevisionSection(claimantBaseEmailContent));
+    }, [claimantBaseEmailContent, formVsReceiptTotals.isFormHigherMismatch]);
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
@@ -4586,13 +4593,14 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
     }), [isOver30DaysApprovalRequired, duplicateCheckResult]);
 
     const julianEmailContent = useMemo(() => {
-        if (!claimantEmailContent) return '';
-        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantEmailContent, julianApprovalContext));
-    }, [claimantEmailContent, julianApprovalContext]);
+        if (!claimantBaseEmailContent) return '';
+        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantBaseEmailContent, julianApprovalContext));
+    }, [claimantBaseEmailContent, julianApprovalContext]);
 
-    const displayEmailContent = useMemo(() => (
-        isJulianApprovalRequired ? julianEmailContent : claimantEmailContent
-    ), [isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
+    const displayEmailContent = useMemo(() => {
+        if (formVsReceiptTotals.isFormHigherMismatch) return claimantEmailContent;
+        return isJulianApprovalRequired ? julianEmailContent : claimantEmailContent;
+    }, [formVsReceiptTotals.isFormHigherMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
