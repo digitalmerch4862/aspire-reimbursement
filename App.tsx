@@ -481,6 +481,7 @@ const getDefaultBuiltInRules = (): RuleConfig[] => {
         { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r7', title: 'Form and Receipt Total Consistency', detail: 'Compares reimbursement form total and receipt total and applies mismatch policy.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r6', title: 'Subject for Approval', detail: 'Marks if request needs approval based on rule outcomes.', severity: 'info', enabled: true, isBuiltIn: true, updatedAt: now }
     ];
 };
@@ -2495,6 +2496,40 @@ const [isEditing, setIsEditing] = useState(false);
             });
         }
 
+        const rule7 = getRuleMeta('r7', 'Form and Receipt Total Consistency', 'high');
+        if (rule7) {
+            const formTotal = formVsReceiptTotals.formTotal;
+            const receiptTotal = formVsReceiptTotals.receiptTotal;
+            const difference = formVsReceiptTotals.difference;
+
+            const hasBothTotals = formTotal !== null && receiptTotal !== null
+                && Number.isFinite(formTotal) && Number.isFinite(receiptTotal);
+
+            const detail = !hasBothTotals
+                ? 'Form total or receipt total is not fully available for comparison yet.'
+                : formVsReceiptTotals.isFormHigherMismatch
+                    ? `Reimbursement form total is higher than receipt total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}.`
+                    : receiptTotal! > formTotal! + 0.01
+                        ? `Receipt total is higher than reimbursement form total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}. Proceed based on reimbursement form total.`
+                        : `Form and receipt totals are aligned. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}.`;
+
+            const status: RuleStatusItem['status'] = !hasBothTotals
+                ? 'warning'
+                : formVsReceiptTotals.isFormHigherMismatch
+                    ? 'blocked'
+                    : receiptTotal! > formTotal! + 0.01
+                        ? 'warning'
+                        : 'pass';
+
+            items.push({
+                id: 'r7',
+                title: rule7.title,
+                detail,
+                severity: rule7.severity,
+                status
+            });
+        }
+
         const hasEscalation = items.some(item => item.status === 'blocked' || item.status === 'warning');
         const rule6 = getRuleMeta('r6', 'Subject for Approval', 'info');
         if (rule6) {
@@ -2520,7 +2555,7 @@ const [isEditing, setIsEditing] = useState(false);
         });
 
         return items;
-    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate]);
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
