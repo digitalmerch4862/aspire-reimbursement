@@ -238,6 +238,7 @@ const stripUidFallbackMeta = (text: string): string => {
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
 const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
 const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
+const JULIAN_APPROVER_NAME = 'Julian';
 
 const loadLocalAuditLogs = (): any[] => {
     try {
@@ -632,6 +633,57 @@ const upsertStatusTag = (content: string, status: 'PENDING' | 'PAID'): string =>
         return content.replace(/<!--\s*STATUS:\s*(?:PENDING|PAID)\s*-->/gi, statusTag);
     }
     return `${content}${content.endsWith('\n') ? '' : '\n\n'}${statusTag}`;
+};
+
+const stripJulianApprovalSection = (content: string): string => {
+    return String(content || '').replace(/\n*<!--\s*JULIAN_APPROVAL_BLOCK_START\s*-->[\s\S]*?<!--\s*JULIAN_APPROVAL_BLOCK_END\s*-->\s*/gi, '\n');
+};
+
+const isOver300Detail = (detail?: string): boolean => String(detail || '').toLowerCase().includes('above $300');
+
+const upsertJulianApprovalSection = (content: string): string => {
+    const stripped = stripJulianApprovalSection(content).trimEnd();
+    const staffMember = extractFieldValue(stripped, [
+        /\*\*Staff Member:\*\*\s*(.+)/i,
+        /Staff\s*member\s*to\s*reimburse:\s*(.+)/i
+    ]);
+    const clientName = extractFieldValue(stripped, [
+        /\*\*Client(?:'|’)?s?\s*Full\s*Name:\*\*\s*(.+)/i,
+        /Client(?:'|’)?s?\s*full\s*name:\s*(.+)/i
+    ]);
+    const approvedBy = extractFieldValue(stripped, [
+        /\*\*Approved\s*By:\*\*\s*(.+)/i,
+        /Approved\s*by:\s*(.+)/i
+    ]);
+    const amount = extractFieldValue(stripped, [
+        /\*\*Amount:\*\*\s*(.+)/i,
+        /\*\*TOTAL\s*AMOUNT:\s*(.+?)\*\*/i,
+        /Total\s*Amount:\s*(.+)/i,
+        /Amount:\s*(.+)/i
+    ]);
+    const receiptId = extractFieldValue(stripped, [
+        /\*\*Receipt\s*ID:\*\*\s*(.+)/i,
+        /Receipt\s*ID:\s*(.+)/i
+    ]);
+
+    const approvalSection = [
+        '<!-- JULIAN_APPROVAL_BLOCK_START -->',
+        '',
+        '**Approval Routing**',
+        '**Subject:** Approval Required - Reimbursement Over $300',
+        `**For Approval:** ${JULIAN_APPROVER_NAME}`,
+        `**Staff Member:** ${staffMember || '-'}`,
+        `**Client Name:** ${clientName || '-'}`,
+        `**Amount:** ${amount || '-'}`,
+        `**Receipt ID:** ${receiptId || '-'}`,
+        `**Approved By:** ${approvedBy || '-'}`,
+        '',
+        'Please review and approve this reimbursement request before payment release.',
+        '',
+        '<!-- JULIAN_APPROVAL_BLOCK_END -->'
+    ].join('\n');
+
+    return `${stripped}\n\n${approvalSection}`;
 };
 
 const appendDuplicateAuditMeta = (
@@ -3102,7 +3154,11 @@ const handleCopyEmail = async () => {
         baseContent: string,
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
-        const withStatus = upsertStatusTag(baseContent, status);
+        let withStatus = upsertStatusTag(baseContent, status);
+        withStatus = (status === 'PENDING' && isOver300Detail(options?.detail))
+            ? upsertJulianApprovalSection(withStatus)
+            : stripJulianApprovalSection(withStatus);
+
         const finalContent = appendDuplicateAuditMeta(withStatus, options?.duplicateSignal ? {
             signal: options.duplicateSignal,
             reason: options.reviewerReason,
@@ -3290,7 +3346,7 @@ const handleCopyEmail = async () => {
         }
 
         if (overLimitTransactionCount > 0) {
-            const detail = `${overLimitTransactionCount} transaction(s) are above $300. Partial blocked: Save & Pay is disabled, use Pending with approval.`;
+            const detail = `${overLimitTransactionCount} transaction(s) are above $300. Save as Pending only and subject to Julian approval.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -5696,8 +5752,8 @@ GRAND TOTAL: $39.45`}
                                     <div>
                                         <h3 className={`text-white font-bold ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'tracking-wide' : ''}`}>
                                             {saveModalDecision?.mode === 'red' && 'Possible Fraud Duplicate'}
-                                            {saveModalDecision?.mode === 'yellow' && (saveModalDecision?.detail || '').toLowerCase().includes('above $300') && 'Partial Block: Amount Over $300'}
-                                            {saveModalDecision?.mode === 'yellow' && !(saveModalDecision?.detail || '').toLowerCase().includes('above $300') && 'Potential Duplicate Needs Review'}
+                                            {saveModalDecision?.mode === 'yellow' && isOver300Detail(saveModalDecision?.detail) && 'Pending - Subject to Julian Approval'}
+                                            {saveModalDecision?.mode === 'yellow' && !isOver300Detail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
                                         <p className="text-xs text-slate-300">
@@ -5711,7 +5767,9 @@ GRAND TOTAL: $39.45`}
                                             <p className="text-slate-200">
                                                 {saveModalDecision.mode === 'red'
                                                     ? 'Save & Pay is blocked. You may only continue as Pending with reviewer override reason.'
-                                                    : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
+                                                    : isOver300Detail(saveModalDecision?.detail)
+                                                        ? 'This can proceed only as Pending and will be routed for Julian approval. Reviewer reason is required for audit trail.'
+                                                        : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
                                             <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
                                                 <div className="flex items-center justify-between gap-2">
@@ -5762,7 +5820,9 @@ GRAND TOTAL: $39.45`}
                                                     value={reviewerOverrideReason}
                                                     onChange={(e) => setReviewerOverrideReason(e.target.value)}
                                                     rows={3}
-                                                    placeholder="Explain why this should be saved as pending"
+                                                    placeholder={isOver300Detail(saveModalDecision?.detail)
+                                                        ? 'Explain why this should be sent to Julian for approval'
+                                                        : 'Explain why this should be saved as pending'}
                                                     className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
                                                 />
                                             </div>
@@ -5806,7 +5866,7 @@ GRAND TOTAL: $39.45`}
                                             disabled={!reviewerOverrideReason.trim()}
                                             className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            Save as PENDING
+                                            {isOver300Detail(saveModalDecision?.detail) ? 'Save as PENDING (For Julian Approval)' : 'Save as PENDING'}
                                         </button>
                                     ) : (
                                         <>
