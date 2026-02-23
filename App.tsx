@@ -650,7 +650,13 @@ const stripJulianApprovalSection = (content: string): string => {
     return String(content || '').replace(/\n*<!--\s*JULIAN_APPROVAL_BLOCK_START\s*-->[\s\S]*?<!--\s*JULIAN_APPROVAL_BLOCK_END\s*-->\s*/gi, '\n');
 };
 
-const isOver300Detail = (detail?: string): boolean => String(detail || '').toLowerCase().includes('above $300');
+const isOver300Detail = (detail?: string): boolean => {
+    const text = String(detail || '').toLowerCase();
+    return text.includes('above $300')
+        || text.includes('at or above $300')
+        || text.includes('$300 and up')
+        || text.includes('more than $300');
+};
 
 const upsertJulianApprovalSection = (content: string): string => {
     const stripped = stripJulianApprovalSection(content).trimEnd();
@@ -2098,6 +2104,29 @@ const [isEditing, setIsEditing] = useState(false);
         [currentInputTransactions]
     );
 
+    const currentInputOverallAmount = useMemo(() => {
+        const formText = reimbursementFormText.trim();
+        const receiptText = receiptDetailsText.trim();
+
+        const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
+        if (formTotalMatch) {
+            return Number(formTotalMatch[1].replace(/,/g, '')) || 0;
+        }
+
+        const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
+        if (receiptTotalMatch) {
+            return Number(receiptTotalMatch[1].replace(/,/g, '')) || 0;
+        }
+
+        if (currentInputTransactions.length > 0) {
+            return Number(currentInputTransactions.reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0).toFixed(2));
+        }
+
+        return 0;
+    }, [reimbursementFormText, receiptDetailsText, currentInputTransactions]);
+
+    const isJulianApprovalRequired = currentInputOverallAmount >= 300;
+
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
         if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
@@ -2307,11 +2336,13 @@ const [isEditing, setIsEditing] = useState(false);
             items.push({
                 id: 'r3',
                 title: rule3.title,
-                detail: overLimitCount > 0
-                    ? `${overLimitCount} transaction(s) are more than $300 (partial blocked: Save as Pending only).`
-                    : 'All transactions are within $300 threshold.',
+                detail: isJulianApprovalRequired
+                    ? `Total reimbursement amount is $${currentInputOverallAmount.toFixed(2)} (at or above $300): Save as Pending only with Julian approval.`
+                    : overLimitCount > 0
+                        ? `${overLimitCount} transaction(s) are more than $300 (partial blocked: Save as Pending only).`
+                        : 'Total reimbursement amount is below $300 threshold.',
                 severity: rule3.severity,
-                status: overLimitCount > 0 ? 'warning' : 'pass'
+                status: isJulianApprovalRequired || overLimitCount > 0 ? 'warning' : 'pass'
             });
         }
 
@@ -2368,7 +2399,7 @@ const [isEditing, setIsEditing] = useState(false);
         });
 
         return items;
-    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount]);
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isJulianApprovalRequired, currentInputOverallAmount]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -3357,8 +3388,8 @@ const handleCopyEmail = async () => {
             return;
         }
 
-        if (overLimitTransactionCount > 0) {
-            const detail = `${overLimitTransactionCount} transaction(s) are above $300. Save as Pending only and subject to Julian approval.`;
+        if (isJulianApprovalRequired) {
+            const detail = `Total reimbursement amount is $${currentInputOverallAmount.toFixed(2)} (at or above $300). Save as Pending only and subject to Julian approval.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -4078,10 +4109,10 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         const source = isEditing ? editableContent : (results?.phase4 || '');
         if (!source) return '';
         const withoutUidMeta = stripUidFallbackMeta(source);
-        return overLimitTransactionCount > 0
+        return isJulianApprovalRequired
             ? upsertJulianApprovalSection(withoutUidMeta)
             : stripJulianApprovalSection(withoutUidMeta);
-    }, [isEditing, editableContent, results?.phase4, overLimitTransactionCount]);
+    }, [isEditing, editableContent, results?.phase4, isJulianApprovalRequired]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
