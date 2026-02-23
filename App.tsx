@@ -247,6 +247,7 @@ const stripInternalAuditMeta = (text: string): string => {
 };
 
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
+const SPECIAL_INSTRUCTION_LOGS_KEY = 'aspire_special_instruction_logs';
 const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
 const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
 const JULIAN_APPROVER_NAME = 'Julian';
@@ -267,6 +268,25 @@ const saveLocalAuditLogs = (records: any[]): void => {
         localStorage.setItem(LOCAL_AUDIT_LOGS_KEY, JSON.stringify(records));
     } catch (error) {
         console.warn('Failed to save local audit logs', error);
+    }
+};
+
+const loadSpecialInstructionLogs = (): any[] => {
+    try {
+        const raw = localStorage.getItem(SPECIAL_INSTRUCTION_LOGS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const saveSpecialInstructionLogs = (records: any[]): void => {
+    try {
+        localStorage.setItem(SPECIAL_INSTRUCTION_LOGS_KEY, JSON.stringify(records));
+    } catch (error) {
+        console.warn('Failed to save special instruction logs', error);
     }
 };
 
@@ -1073,6 +1093,7 @@ const [isEditing, setIsEditing] = useState(false);
     const [reimbursementFormText, setReimbursementFormText] = useState('');
     const [receiptDetailsText, setReceiptDetailsText] = useState('');
     const [requestMode, setRequestMode] = useState<RequestMode>('solo');
+    const [isSpecialInstructionMode, setIsSpecialInstructionMode] = useState(false);
     const reimbursementFormRef = useRef<HTMLTextAreaElement | null>(null);
 
     const [emailCopied, setEmailCopied] = useState<'julian' | 'claimant' | null>(null);
@@ -1090,6 +1111,7 @@ const [isEditing, setIsEditing] = useState(false);
 
     // Database / History State
     const [historyData, setHistoryData] = useState<any[]>([]);
+    const [specialInstructionLogs, setSpecialInstructionLogs] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [dismissedIds, setDismissedIds] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -1151,6 +1173,8 @@ const [isEditing, setIsEditing] = useState(false);
         if (storedDismissed) {
             setDismissedIds(JSON.parse(storedDismissed));
         }
+
+        setSpecialInstructionLogs(loadSpecialInstructionLogs());
 
         // Load Employee Data
         const storedEmployees = localStorage.getItem('aspire_employee_list');
@@ -3015,6 +3039,7 @@ const [isEditing, setIsEditing] = useState(false);
         setReimbursementFormText('');
         setReceiptDetailsText('');
         setRequestMode('solo');
+        setIsSpecialInstructionMode(false);
         setSelectedEmployees(new Map());
         setEmployeeSearchQuery(new Map());
         setShowEmployeeDropdown(new Map());
@@ -3573,6 +3598,71 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         });
     };
 
+    const handleSaveSpecialInstruction = () => {
+        setSaveStatus('idle');
+        setErrorMessage(null);
+        if (!results?.phase4) {
+            setErrorMessage('Run Start Audit first to generate Special Instruction output.');
+            return;
+        }
+
+        if (parsedTransactions.length === 0) {
+            setErrorMessage('No transaction rows found for Special Instruction.');
+            return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const payloads = parsedTransactions.map((tx, idx) => {
+            const selectedEmployee = selectedEmployees.get(tx.index);
+            const typedName = String(employeeSearchQuery.get(tx.index) || '').trim();
+            const staffName = selectedEmployee
+                ? getEmployeeDisplayName(selectedEmployee)
+                : typedName || tx.formattedName || tx.staffName || 'Unknown';
+
+            const selectedAmount = String(amountSelectionByTx.get(tx.index) || tx.amount || '0').trim();
+            const amount = Number(normalizeMoneyValue(selectedAmount, '0.00'));
+            const nabCode = String(tx.currentNabRef || '').trim();
+            const hasValidNab = isValidNabReference(nabCode);
+            const normalizedNab = hasValidNab ? nabCode.toUpperCase() : 'Nab code is pending';
+            const statusTag = hasValidNab ? '<!-- STATUS: PAID -->' : '<!-- STATUS: PENDING -->';
+
+            const content = [
+                'Hi,',
+                '',
+                'Special instruction entry recorded for NAB/EOD logging.',
+                '',
+                `**Staff Member:** ${staffName}`,
+                `**Amount:** $${amount.toFixed(2)}`,
+                `**NAB Code:** ${hasValidNab ? normalizedNab : 'Enter NAB Code'}`,
+                statusTag,
+                '<!-- SPECIAL_INSTRUCTION -->'
+            ].join('\n');
+
+            return {
+                id: `special-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+                staff_name: staffName,
+                amount,
+                nab_code: normalizedNab,
+                full_email_content: content,
+                created_at: nowIso,
+                is_special_instruction: true
+            };
+        });
+
+        if (payloads.some((p) => !Number.isFinite(p.amount) || p.amount <= 0)) {
+            setErrorMessage('Special Instruction amount must be greater than 0.');
+            return;
+        }
+
+        const next = [...payloads, ...specialInstructionLogs];
+        setSpecialInstructionLogs(next);
+        saveSpecialInstructionLogs(next);
+        showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
+        setSaveStatus('success');
+        resetAll();
+        scrollToReimbursementForm();
+    };
+
     const handleApproveManualAudit = () => {
         setShowManualAuditModal(false);
         bypassManualAuditRef.current = true;
@@ -3586,7 +3676,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
     };
 
     const handleProcess = async () => {
-        if (!reimbursementFormText.trim() && !receiptDetailsText.trim()) {
+        if (!reimbursementFormText.trim() && !receiptDetailsText.trim() && !isSpecialInstructionMode) {
             setErrorMessage("Please paste Reimbursement Form or Receipt Details first.");
             return;
         }
@@ -3616,6 +3706,46 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             let phase4 = '';
             let totalAmount = 0;
             let receiptGrandTotal: number | null = null;
+
+            if (isSpecialInstructionMode && !formText && !receiptText) {
+                phase1 = `<<<PHASE_1_START>>>
+## Special Instruction
+
+Manual special instruction mode is active. This entry is intended for NAB/EOD logs only.
+<<<PHASE_1_END>>>`;
+
+                phase2 = `<<<PHASE_2_START>>>
+## Data Standardization
+
+Special instruction template initialized.
+<<<PHASE_2_END>>>`;
+
+                phase3 = `<<<PHASE_3_START>>>
+Special instruction mode: bypassed reimbursement and receipt parsing.
+<<<PHASE_3_END>>>`;
+
+                phase4 = `Hi,
+
+Special instruction entry for logging.
+
+**Staff Member:** [Enter Staff Name]
+**Amount:** $0.00
+**NAB Code:** Enter NAB Code
+
+**Summary of Expenses:**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | SPECIAL-INSTRUCTION | Manual Entry | - | Special Instruction | Other | $0.00 | $0.00 | No reimbursement form/receipt |
+
+**TOTAL AMOUNT: $0.00**
+`;
+
+                setResults({ phase1, phase2, phase3, phase4 });
+                setProcessingState(ProcessingState.COMPLETE);
+                setOcrStatus('Complete');
+                return;
+            }
 
             // Parse key-value pairs from Reimbursement Form
             const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
@@ -3749,21 +3879,6 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 || /Staff\s*member/i.test(formText)
                 || /Particular/i.test(formText);
             const hasReceiptTable = receiptText.includes('Receipt #') || receiptText.includes('GRAND TOTAL') || items.length > 0;
-            const explicitReceiptIdMatch = allText.match(/(?:\*\*\s*)?Receipt\s*ID\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/i);
-            const explicitReceiptId = String(explicitReceiptIdMatch?.[1] || '').trim();
-            const isMeaningfulReceiptId = (value: string): boolean => {
-                const normalized = String(value || '').trim();
-                if (!normalized) return false;
-                if (normalized === '-') return false;
-                if (/^n\/a$/i.test(normalized)) return false;
-                if (/^rcpt-manual-/i.test(normalized)) return false;
-                return true;
-            };
-            const canonicalReceiptId = [
-                explicitReceiptId,
-                ...items.map(item => String(item.uniqueId || '').trim()),
-                ...items.map(item => String(item.receiptNum || '').trim())
-            ].find(isMeaningfulReceiptId) || '[Enter Receipt ID]';
 
             if (isGroupPettyCashRequest) {
                 const summaryLines = groupPettyCashEntries
@@ -4139,13 +4254,15 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
     };
 
     const allProcessedRecords = useMemo<any[]>(() => processRecords(historyData), [historyData]);
+    const specialProcessedRecords = useMemo<any[]>(() => processRecords(specialInstructionLogs), [specialInstructionLogs]);
+    const logEligibleRecords = useMemo<any[]>(() => [...allProcessedRecords, ...specialProcessedRecords], [allProcessedRecords, specialProcessedRecords]);
 
     const todaysProcessedRecords = useMemo<any[]>(() => {
         const now = new Date(nowTick);
-        return allProcessedRecords
+        return logEligibleRecords
             .filter(r => isWithinWeekdayResetWindow(r.created_at, now))
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }, [allProcessedRecords, nowTick]);
+    }, [logEligibleRecords, nowTick]);
 
     const pendingApprovalRecords = useMemo(() => {
         return allProcessedRecords
@@ -4233,6 +4350,9 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         if (saveStatus === 'success') return <><RefreshCw size={12} strokeWidth={2.5} /> Start New Audit</>;
         if (saveStatus === 'error') return <><CloudUpload size={12} strokeWidth={2.5} /> Retry Save</>;
         if (saveStatus === 'duplicate') return <><AlertCircle size={12} strokeWidth={2.5} /> Duplicate Found</>;
+        if (isSpecialInstructionMode) {
+            return <><CloudUpload size={12} strokeWidth={2.5} /> Save to NAB/EOD</>;
+        }
         if (results?.phase4.toLowerCase().includes('discrepancy')) {
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save Record</>;
         }
@@ -4717,6 +4837,18 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                                                 Group
                                             </button>
                                         </div>
+                                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 flex items-center justify-between gap-2">
+                                            <div>
+                                                <p className="text-[10px] uppercase tracking-wider font-bold text-cyan-200">Special Instruction</p>
+                                                <p className="text-[11px] text-cyan-100/80">Skip database save; include in NAB/EOD logs only.</p>
+                                            </div>
+                                            <button
+                                                onClick={() => setIsSpecialInstructionMode((prev) => !prev)}
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-colors ${isSpecialInstructionMode ? 'bg-cyan-400/20 text-cyan-100 border-cyan-300/60' : 'bg-black/30 text-slate-300 border-white/15'}`}
+                                            >
+                                                {isSpecialInstructionMode ? 'On' : 'Off'}
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="p-6 space-y-6">
                                         <div className="space-y-4">
@@ -4907,7 +5039,7 @@ GRAND TOTAL: $39.45`}
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <button
-                                                        onClick={saveStatus === 'success' ? handleStartNewAudit : handleSmartSave}
+                                                        onClick={saveStatus === 'success' ? handleStartNewAudit : (isSpecialInstructionMode ? handleSaveSpecialInstruction : handleSmartSave)}
                                                         disabled={isSaving || isEditing}
                                                         className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${saveStatus === 'success' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : saveStatus === 'error' || saveStatus === 'duplicate' ? 'bg-red-500 text-white shadow-red-500/20' : isEditing ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600 shadow-slate-900/20'}`}
                                                     >
@@ -4988,17 +5120,27 @@ GRAND TOTAL: $39.45`}
                                                             <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
                                                                 <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
                                                                 <div className="flex justify-between items-center">
-                                                                    <select
-                                                                        value={selectedAmount}
-                                                                        onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
-                                                                        className="bg-transparent text-emerald-400 font-bold text-lg border-none outline-none pr-6"
-                                                                    >
-                                                                        {amountOptions.map((amountOption) => (
-                                                                            <option key={amountOption} value={amountOption} className="bg-slate-900 text-emerald-300">
-                                                                                {amountOption}
-                                                                            </option>
-                                                                        ))}
-                                                                    </select>
+                                                                    {isSpecialInstructionMode ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={selectedAmount}
+                                                                            onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
+                                                                            placeholder="0.00"
+                                                                            className="w-24 bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
+                                                                        />
+                                                                    ) : (
+                                                                        <select
+                                                                            value={selectedAmount}
+                                                                            onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
+                                                                            className="bg-transparent text-emerald-400 font-bold text-lg border-none outline-none pr-6"
+                                                                        >
+                                                                            {amountOptions.map((amountOption) => (
+                                                                                <option key={amountOption} value={amountOption} className="bg-slate-900 text-emerald-300">
+                                                                                    {amountOption}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
+                                                                    )}
                                                                     <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors">
                                                                         {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
                                                                     </button>
