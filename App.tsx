@@ -278,16 +278,6 @@ const stripClientLocationLine = (text: string): string => {
         .trim();
 };
 
-const stripClientLocationFromElement = (element: HTMLElement): void => {
-    const targets = element.querySelectorAll('p, li, div, span, td, th');
-    targets.forEach((node) => {
-        const text = String(node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-        if (text.startsWith('client / location:')) {
-            node.remove();
-        }
-    });
-};
-
 const isValidNabReference = (value: string | null | undefined): boolean => {
     if (!value) return false;
     const normalized = value.trim().toLowerCase();
@@ -686,17 +676,18 @@ const upsertJulianApprovalSection = (content: string): string => {
     const approvalSection = [
         '<!-- JULIAN_APPROVAL_BLOCK_START -->',
         '',
-        '**Approval Routing**',
-        '**Subject:** Approval Required - Reimbursement Over $300',
-        `**For Approval:** ${JULIAN_APPROVER_NAME}`,
+        `Hi ${JULIAN_APPROVER_NAME},`,
+        '',
+        'Good day boss, requesting your approval for this reimbursement at or above $300 before payment release.',
+        '',
+        '**Subject:** Approval Request - Reimbursement At or Above $300',
         `**Staff Member:** ${staffMember || '-'}`,
         `**Client Name:** ${clientName || '-'}`,
         `**Amount:** ${amount || '-'}`,
         `**Receipt ID:** ${receiptId || '-'}`,
         `**Approved By:** ${approvedBy || '-'}`,
         '',
-        'Please review and approve this reimbursement request before payment release.',
-        'Full reimbursement details are included below for manual Outlook sending.',
+        'Please review and confirm approval. Full reimbursement details are included below.',
         '',
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
@@ -1059,7 +1050,7 @@ const [isEditing, setIsEditing] = useState(false);
     const [requestMode, setRequestMode] = useState<RequestMode>('solo');
     const reimbursementFormRef = useRef<HTMLTextAreaElement | null>(null);
 
-    const [emailCopied, setEmailCopied] = useState(false);
+    const [emailCopied, setEmailCopied] = useState<'julian' | 'claimant' | null>(null);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [reportCopied, setReportCopied] = useState<'nab' | 'eod' | 'analytics' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'generated' | null>(null);
 
@@ -2984,7 +2975,7 @@ const [isEditing, setIsEditing] = useState(false);
         setProcessingState(ProcessingState.IDLE);
         setResults(null);
         setErrorMessage(null);
-        setEmailCopied(false);
+        setEmailCopied(null);
         setSaveStatus('idle');
         setIsEditing(false);
         setOcrStatus('');
@@ -3011,37 +3002,14 @@ const [isEditing, setIsEditing] = useState(false);
         scrollToReimbursementForm();
     };
 
-const handleCopyEmail = async () => {
-        if (!results?.phase4) return;
-        
-        let contentToCopy = stripClientLocationLine(stripInternalAuditMeta(displayEmailContent));
-        
-        if (isEditing) {
-            navigator.clipboard.writeText(contentToCopy);
-            setEmailCopied(true);
-            setTimeout(() => setEmailCopied(false), 2000);
-            return;
-        }
-        const emailElement = document.getElementById('email-output-content');
-        if (emailElement) {
-            try {
-                const sanitizedElement = emailElement.cloneNode(true) as HTMLElement;
-                stripClientLocationFromElement(sanitizedElement);
+const handleCopyEmail = async (target: 'julian' | 'claimant') => {
+        const rawContent = target === 'julian' ? julianEmailContent : claimantEmailContent;
+        if (!rawContent) return;
 
-                const blobHtml = new Blob([sanitizedElement.innerHTML], { type: 'text/html' });
-                const blobText = new Blob([stripClientLocationLine(sanitizedElement.innerText)], { type: 'text/plain' });
-                const data = [new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })];
-                await navigator.clipboard.write(data);
-                setEmailCopied(true);
-                setTimeout(() => setEmailCopied(false), 2000);
-                return;
-            } catch (e) {
-                console.warn("ClipboardItem API failed", e);
-            }
-        }
-        navigator.clipboard.writeText(contentToCopy);
-        setEmailCopied(true);
-        setTimeout(() => setEmailCopied(false), 2000);
+        const contentToCopy = stripClientLocationLine(stripInternalAuditMeta(rawContent));
+        await navigator.clipboard.writeText(contentToCopy);
+        setEmailCopied(target);
+        setTimeout(() => setEmailCopied(null), 2000);
     };
 
     const handleCopyField = (text: string, fieldName: string) => {
@@ -3430,7 +3398,7 @@ const handleCopyEmail = async () => {
         setProcessingState(ProcessingState.PROCESSING);
         setErrorMessage(null);
         setResults(null);
-        setEmailCopied(false);
+        setEmailCopied(null);
         setSaveStatus('idle');
         setManualAuditIssues([]);
         setShowManualAuditModal(false);
@@ -4105,14 +4073,21 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         return Array.from(new Set(codes.map(code => code.toUpperCase())));
     }, [duplicateMatchesForModal]);
 
-    const displayEmailContent = useMemo(() => {
+    const claimantEmailContent = useMemo(() => {
         const source = isEditing ? editableContent : (results?.phase4 || '');
         if (!source) return '';
         const withoutUidMeta = stripUidFallbackMeta(source);
-        return isJulianApprovalRequired
-            ? upsertJulianApprovalSection(withoutUidMeta)
-            : stripJulianApprovalSection(withoutUidMeta);
-    }, [isEditing, editableContent, results?.phase4, isJulianApprovalRequired]);
+        return stripInternalAuditMeta(stripJulianApprovalSection(withoutUidMeta));
+    }, [isEditing, editableContent, results?.phase4]);
+
+    const julianEmailContent = useMemo(() => {
+        if (!claimantEmailContent) return '';
+        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantEmailContent));
+    }, [claimantEmailContent]);
+
+    const displayEmailContent = useMemo(() => (
+        isJulianApprovalRequired ? julianEmailContent : claimantEmailContent
+    ), [isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
@@ -4731,8 +4706,11 @@ GRAND TOTAL: $39.45`}
                                                     >
                                                         {getSaveButtonText()}
                                                     </button>
-                                                    <button onClick={handleCopyEmail} disabled={isEditing} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
-                                                        {emailCopied ? (<><Check size={12} strokeWidth={3} /> Copied!</>) : (<><Copy size={12} strokeWidth={3} /> Copy for Outlook</>)}
+                                                    <button onClick={() => handleCopyEmail('julian')} disabled={isEditing || !isJulianApprovalRequired} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied === 'julian' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing || !isJulianApprovalRequired ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
+                                                        {emailCopied === 'julian' ? (<><Check size={12} strokeWidth={3} /> Copied Julian</>) : (<><Copy size={12} strokeWidth={3} /> Copy to Julian</>)}
+                                                    </button>
+                                                    <button onClick={() => handleCopyEmail('claimant')} disabled={isEditing} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied === 'claimant' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
+                                                        {emailCopied === 'claimant' ? (<><Check size={12} strokeWidth={3} /> Copied Claimant</>) : (<><Copy size={12} strokeWidth={3} /> Copy to Claimant</>)}
                                                     </button>
                                                 </div>
                                             </div>
