@@ -678,7 +678,7 @@ const upsertJulianApprovalSection = (content: string): string => {
         '',
         `Hi ${JULIAN_APPROVER_NAME},`,
         '',
-        'Good day boss, requesting your approval for this reimbursement at or above $300 before payment release.',
+        'I am requesting your approval for this reimbursement request because the total amount is at or above $300 before payment release.',
         '',
         '**Subject:** Approval Request - Reimbursement At or Above $300',
         `**Staff Member:** ${staffMember || '-'}`,
@@ -687,7 +687,7 @@ const upsertJulianApprovalSection = (content: string): string => {
         `**Receipt ID:** ${receiptId || '-'}`,
         `**Approved By:** ${approvedBy || '-'}`,
         '',
-        'Please review and confirm approval. Full reimbursement details are included below.',
+        'Please review and confirm your approval. Full reimbursement details are included below.',
         '',
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
@@ -3007,6 +3007,22 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         if (!rawContent) return;
 
         const contentToCopy = stripClientLocationLine(stripInternalAuditMeta(rawContent));
+        const targetId = target === 'julian' ? 'email-copy-julian' : 'email-copy-claimant';
+        const emailElement = document.getElementById(targetId);
+        if (emailElement) {
+            try {
+                const blobHtml = new Blob([emailElement.innerHTML], { type: 'text/html' });
+                const blobText = new Blob([stripClientLocationLine(emailElement.innerText)], { type: 'text/plain' });
+                const data = [new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })];
+                await navigator.clipboard.write(data);
+                setEmailCopied(target);
+                setTimeout(() => setEmailCopied(null), 2000);
+                return;
+            } catch (e) {
+                console.warn('ClipboardItem API failed', e);
+            }
+        }
+
         await navigator.clipboard.writeText(contentToCopy);
         setEmailCopied(target);
         setTimeout(() => setEmailCopied(null), 2000);
@@ -4891,11 +4907,25 @@ GRAND TOTAL: $39.45`}
                                                     {isEditing ? (
                                                         <textarea value={editableContent} onChange={(e) => setEditableContent(e.target.value)} className="w-full h-[400px] p-4 font-mono text-sm border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 text-white resize-none" placeholder="Edit email content here..." />
                                                     ) : (
-                                                        <MarkdownRenderer 
-                                                            content={displayEmailContent} 
-                                                            id="email-output-content" 
-                                                            theme="dark" 
-                                                        />
+                                                        <>
+                                                            <MarkdownRenderer
+                                                                content={displayEmailContent}
+                                                                id="email-output-content"
+                                                                theme="dark"
+                                                            />
+                                                            <div className="hidden">
+                                                                <MarkdownRenderer
+                                                                    content={julianEmailContent}
+                                                                    id="email-copy-julian"
+                                                                    theme="light"
+                                                                />
+                                                                <MarkdownRenderer
+                                                                    content={claimantEmailContent}
+                                                                    id="email-copy-claimant"
+                                                                    theme="light"
+                                                                />
+                                                            </div>
+                                                        </>
                                                     )}
                                                 </div>
                                             </div>
