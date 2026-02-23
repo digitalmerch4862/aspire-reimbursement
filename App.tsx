@@ -772,8 +772,7 @@ const QUICK_EDIT_FIELD_CONFIGS: QuickEditFieldConfig[] = [
     { key: 'clientLocation', label: 'Client / Location' },
     { key: 'address', label: 'Address' },
     { key: 'approvedBy', label: 'Approved By' },
-    { key: 'amount', label: 'Amount' },
-    { key: 'receiptId', label: 'Receipt ID' }
+    { key: 'amount', label: 'Amount' }
 ];
 
 const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
