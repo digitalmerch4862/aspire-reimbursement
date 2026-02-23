@@ -658,6 +658,14 @@ const isOver30DaysDetail = (detail?: string): boolean => {
 
 const isJulianApprovalDetail = (detail?: string): boolean => isOver300Detail(detail) || isOver30DaysDetail(detail);
 
+const isNetworkFetchError = (error: unknown): boolean => {
+    const message = String((error as any)?.message || error || '').toLowerCase();
+    return message.includes('failed to fetch')
+        || message.includes('networkerror')
+        || message.includes('network request failed')
+        || message.includes('load failed');
+};
+
 const upsertJulianApprovalSection = (
     content: string,
     options?: { approvalReason?: string; fraudReceiptStatus?: string }
@@ -3322,9 +3330,12 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const approvedNabCode = pendingApprovalNabCode.trim();
         if (!approvedNabCode) return;
 
+        let updatedRecords: Array<{ id: any; nab_code: string; full_email_content: string }> = [];
+        let combinedClaimantEmail = '';
+
         setIsApprovingPending(true);
         try {
-            const updatedRecords = pendingApprovalStaffGroup.records.map((record: any) => {
+            updatedRecords = pendingApprovalStaffGroup.records.map((record: any) => {
                 let updatedContent = record.full_email_content || '';
 
                 if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
@@ -3358,11 +3369,37 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 })
                 .filter(Boolean);
 
-            const combinedClaimantEmail = claimantBlocks.length <= 1
+            combinedClaimantEmail = claimantBlocks.length <= 1
                 ? (claimantBlocks[0] || '')
                 : claimantBlocks
                     .map((block, idx) => `Approved Reimbursement ${idx + 1}\n\n${block}`)
                     .join('\n\n------------------------------\n\n');
+
+            if (!hasSupabaseEnv) {
+                const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
+                    updatedRecords.map(record => [record.id, record])
+                );
+
+                const nextHistory = historyData.map(item => {
+                    const updated = updatesById.get(item.id);
+                    if (!updated) return item;
+                    return {
+                        ...item,
+                        nab_code: updated.nab_code,
+                        full_email_content: updated.full_email_content
+                    };
+                });
+
+                setHistoryData(nextHistory);
+                saveLocalAuditLogs(nextHistory);
+                closePendingApprovalModal();
+                if (combinedClaimantEmail) {
+                    setApprovedClaimantEmailContent(combinedClaimantEmail);
+                    setApprovedClaimantCopied(false);
+                    setShowApprovedClaimantModal(true);
+                }
+                return;
+            }
 
             let hadNabConflict = false;
             const appliedRecords: Array<{ id: any; nab_code: string | null; full_email_content: string }> = [];
@@ -3416,6 +3453,31 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             }
         } catch (error) {
             console.error('Failed to approve pending record:', error);
+            if (isNetworkFetchError(error) && updatedRecords.length > 0) {
+                const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
+                    updatedRecords.map(record => [record.id, record])
+                );
+
+                setHistoryData(prev => prev.map(item => {
+                    const updated = updatesById.get(item.id);
+                    if (!updated) return item;
+                    return {
+                        ...item,
+                        nab_code: updated.nab_code,
+                        full_email_content: updated.full_email_content
+                    };
+                }));
+
+                closePendingApprovalModal();
+                if (combinedClaimantEmail) {
+                    setApprovedClaimantEmailContent(combinedClaimantEmail);
+                    setApprovedClaimantCopied(false);
+                    setShowApprovedClaimantModal(true);
+                }
+                alert('Network issue while syncing. Approval was applied on-screen; please refresh later to confirm cloud sync.');
+                return;
+            }
+
             const message = (error as any)?.message || 'Please try again.';
             alert(`Failed to approve pending record. ${message}`);
         } finally {
