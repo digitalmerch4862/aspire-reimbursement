@@ -2441,7 +2441,12 @@ const [isEditing, setIsEditing] = useState(false);
 
             if (isGroupTable) {
                 let inGroupTable = false;
-                let rowIndex = 0;
+                const recordStaffName = String(record.staff_name || staffName || '').trim();
+                let matchedClient = record.yp_name || ypName;
+                let matchedLocation = record.location || youngPersonName;
+                let matchedType = 'Petty Cash';
+                let matchedAmount = normalizeMoneyValue(String(record.amount || totalAmount || '0.00'), '0.00');
+
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (line.includes(GROUP_TABLE_HEADER)) {
@@ -2452,40 +2457,41 @@ const [isEditing, setIsEditing] = useState(false);
                     if (inGroupTable && line.startsWith('|')) {
                         const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
                         if (cols.length >= 6) {
-                            const staffMember = cols[0] || staffName;
-                            const clientCell = cols[1];
-                            const locationCell = cols[2];
-                            const typeCell = cols[3] || 'Petty Cash';
-                            const amountCell = cols[4] || '0.00';
-
-                            const normalizedAmount = normalizeMoneyValue(amountCell, '0.00');
-
-                            tableRowsFound = true;
-                            allRows.push({
-                                id: `${internalId}-group-${rowIndex}`,
-                                uid: uidFallbacks[rowIndex] || receiptId,
-                                internalId: internalId,
-                                timestamp,
-                                rawDate,
-                                ypName: clientCell && clientCell !== '-' ? clientCell : (record.yp_name || ypName),
-                                youngPersonName: locationCell && locationCell !== '-' ? locationCell : (record.location || youngPersonName),
-                                staffName: staffMember,
-                                storeName: '-',
-                                product: 'Group Petty Cash',
-                                expenseType: typeCell,
-                                receiptDateTime: dateProcessed,
-                                receiptDate: dateProcessed,
-                                amount: normalizedAmount,
-                                totalAmount: normalizedAmount,
-                                dateProcessed,
-                                nabCode: nabRefDisplay
-                            });
-                            rowIndex += 1;
+                            const staffCell = cols[0] || '';
+                            if (normalizeNameKey(staffCell) === normalizeNameKey(recordStaffName)) {
+                                matchedClient = cols[1] && cols[1] !== '-' ? cols[1] : matchedClient;
+                                matchedLocation = cols[2] && cols[2] !== '-' ? cols[2] : matchedLocation;
+                                matchedType = cols[3] || matchedType;
+                                matchedAmount = normalizeMoneyValue(cols[4] || matchedAmount, matchedAmount);
+                                break;
+                            }
                         }
                         continue;
                     }
                     if (inGroupTable && line === '') break;
                 }
+
+                const normalizedAmount = normalizeMoneyValue(String(matchedAmount || '0.00'), '0.00');
+                tableRowsFound = true;
+                allRows.push({
+                    id: `${internalId}-group`,
+                    uid: uidFallbacks[0] || receiptId,
+                    internalId: internalId,
+                    timestamp,
+                    rawDate,
+                    ypName: matchedClient || '-',
+                    youngPersonName: matchedLocation || '-',
+                    staffName: recordStaffName || staffName,
+                    storeName: '-',
+                    product: 'Group Petty Cash',
+                    expenseType: matchedType,
+                    receiptDateTime: dateProcessed,
+                    receiptDate: dateProcessed,
+                    amount: normalizedAmount,
+                    totalAmount: normalizedAmount,
+                    dateProcessed,
+                    nabCode: nabRefDisplay
+                });
             }
 
             for (let i = 0; i < lines.length; i++) {
