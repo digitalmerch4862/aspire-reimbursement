@@ -3937,8 +3937,9 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             let totalAmount = 0;
             let receiptGrandTotal: number | null = null;
 
-            if (isSpecialInstructionMode && !formText && !receiptText) {
+            if (isSpecialInstructionMode) {
                 phase1 = `<<<PHASE_1_START>>>
+
 ## Special Instruction
 
 Manual special instruction mode is active. This entry is intended for NAB/EOD logs only.
@@ -5124,9 +5125,20 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                                                 <p className="text-[11px] text-cyan-100/80">Skip database save; include in NAB/EOD logs only.</p>
                                             </div>
                                             <button
-                                                onClick={() => setIsSpecialInstructionMode((prev) => !prev)}
+                                                onClick={() => {
+                                                    const nextMode = !isSpecialInstructionMode;
+                                                    setIsSpecialInstructionMode(nextMode);
+                                                    if (nextMode) {
+                                                        // Automatically trigger audit start logic to show boxes immediately
+                                                        setTimeout(() => handleProcess(), 0);
+                                                    } else {
+                                                        // Optionally reset when turned off
+                                                        resetAll();
+                                                    }
+                                                }}
                                                 className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-colors ${isSpecialInstructionMode ? 'bg-cyan-400/20 text-cyan-100 border-cyan-300/60' : 'bg-black/30 text-slate-300 border-white/15'}`}
                                             >
+
                                                 {isSpecialInstructionMode ? 'On' : 'Off'}
                                             </button>
                                         </div>
@@ -5183,8 +5195,9 @@ GRAND TOTAL: $39.45`}
                                         )}
                                         <button
                                             onClick={handleProcess}
-                                            disabled={processingState === ProcessingState.PROCESSING || (!reimbursementFormText.trim() && !receiptDetailsText.trim())}
+                                            disabled={processingState === ProcessingState.PROCESSING || (!isSpecialInstructionMode && !reimbursementFormText.trim() && !receiptDetailsText.trim())}
                                             className={`w-full group relative flex justify-center items-center gap-3 py-4 px-6 rounded-2xl font-semibold text-white transition-all duration-300 shadow-[0_0_20px_rgba(79,70,229,0.1)]
+
                         ${processingState === ProcessingState.PROCESSING
                                                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                                                     : 'bg-indigo-600 hover:bg-indigo-500 hover:shadow-[0_0_30px_rgba(79,70,229,0.4)] hover:scale-[1.02] active:scale-[0.98]'
