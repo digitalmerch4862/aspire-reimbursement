@@ -1751,8 +1751,49 @@ const [isEditing, setIsEditing] = useState(false);
         const content = isEditing ? editableContent : results?.phase4;
         if (!content) return [];
 
+        const isGroupTable = content.includes('<!-- GROUP_TABLE_FORMAT -->');
+        if (isGroupTable) {
+            const lines = content.split('\n');
+            const tableRows: any[] = [];
+            let inTable = false;
+            let rowIndex = 0;
+
+            for (const line of lines) {
+                if (line.includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                    inTable = true;
+                    continue;
+                }
+                if (inTable && line.includes('| :---')) continue;
+                if (inTable && line.startsWith('|')) {
+                    const parts = line.split('|').map(p => p.trim()).filter(p => p !== '');
+                    if (parts.length >= 4) {
+                        const staffName = parts[0];
+                        const ypName = parts[1] === '-' ? '' : parts[1];
+                        const location = parts[2] === '-' ? '' : parts[2];
+                        const amount = parts[3];
+                        const currentNabRef = parts[4] || '';
+
+                        tableRows.push({
+                            index: rowIndex++,
+                            staffName,
+                            formattedName: staffName, // Simplified for group table
+                            amount,
+                            receiptId: 'N/A',
+                            currentNabRef: isValidNabReference(currentNabRef) ? currentNabRef : '',
+                            ypName,
+                            location
+                        });
+                    }
+                } else if (inTable) {
+                    // Table ended
+                }
+            }
+            return tableRows;
+        }
+
         // Split by "**Staff Member:**" to isolate blocks
         const parts = content.split('**Staff Member:**');
+
 
         // If only 1 part, it means no "**Staff Member:**" found (header only?), or maybe format issue.
         if (parts.length <= 1) {
@@ -1897,7 +1938,33 @@ const [isEditing, setIsEditing] = useState(false);
     };
 
     const setTransactionNabInContent = (content: string, index: number, newVal: string): string => {
+        if (content.includes('<!-- GROUP_TABLE_FORMAT -->')) {
+            const lines = content.split('\n');
+            let rowIndex = 0;
+            let inTable = false;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                    inTable = true;
+                    continue;
+                }
+                if (inTable && lines[i].includes('| :---')) continue;
+                if (inTable && lines[i].startsWith('|')) {
+                    if (rowIndex === index) {
+                        const parts = lines[i].split('|');
+                        // Row format: | Staff | Client | Location | Amount | NAB |
+                        // Parts will be ["", " Staff ", " Client ", " Location ", " Amount ", " NAB ", ""]
+                        parts[5] = ` ${newVal} `;
+                        lines[i] = parts.join('|');
+                        return lines.join('\n');
+                    }
+                    rowIndex++;
+                }
+            }
+            return content;
+        }
+
         const marker = '**Staff Member:**';
+
         const parts = content.split(marker);
 
         // parts[0] is header. parts[1] is transaction 0, parts[2] is transaction 1...
@@ -1954,7 +2021,31 @@ const [isEditing, setIsEditing] = useState(false);
 
 
     const setStaffMemberInContent = (content: string, index: number, name: string): string => {
+        if (content.includes('<!-- GROUP_TABLE_FORMAT -->')) {
+            const lines = content.split('\n');
+            let rowIndex = 0;
+            let inTable = false;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                    inTable = true;
+                    continue;
+                }
+                if (inTable && lines[i].includes('| :---')) continue;
+                if (inTable && lines[i].startsWith('|')) {
+                    if (rowIndex === index) {
+                        const parts = lines[i].split('|');
+                        parts[1] = ` ${name} `;
+                        lines[i] = parts.join('|');
+                        return lines.join('\n');
+                    }
+                    rowIndex++;
+                }
+            }
+            return content;
+        }
+
         const marker = '**Staff Member:**';
+
         const parts = content.split(marker);
         const partIndex = index + 1;
         if (parts.length <= partIndex) return content;
@@ -2056,28 +2147,54 @@ const [isEditing, setIsEditing] = useState(false);
     };
 
     const setTransactionAmountInContent = (content: string, index: number, amountValue: string): string => {
-        const marker = '**Staff Member:**';
-        const parts = content.split(marker);
-        const partIndex = index + 1;
-        if (parts.length <= partIndex) return content;
-
         const numericAmount = String(amountValue || '').replace(/[^0-9.\-]/g, '');
         if (!numericAmount) return content;
         const parsedNumber = Number(numericAmount);
         if (Number.isNaN(parsedNumber)) return content;
+        const formattedAmount = `$${parsedNumber.toFixed(2)}`;
+
+        if (content.includes('<!-- GROUP_TABLE_FORMAT -->')) {
+            const lines = content.split('\n');
+            let rowIndex = 0;
+            let inTable = false;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                    inTable = true;
+                    continue;
+                }
+                if (inTable && lines[i].includes('| :---')) continue;
+                if (inTable && lines[i].startsWith('|')) {
+                    if (rowIndex === index) {
+                        const parts = lines[i].split('|');
+                        parts[4] = ` ${formattedAmount} `;
+                        lines[i] = parts.join('|');
+                        return lines.join('\n');
+                    }
+                    rowIndex++;
+                }
+            }
+            return content;
+        }
+
+        const marker = '**Staff Member:**';
+
+        const parts = content.split(marker);
+        const partIndex = index + 1;
+        if (parts.length <= partIndex) return content;
 
         let targetPart = parts[partIndex];
         if (/\*\*Amount:\*\*/i.test(targetPart)) {
-            targetPart = targetPart.replace(/(\*\*Amount:\*\*\s*)(.*)/i, `$1$${parsedNumber.toFixed(2)}`);
+            targetPart = targetPart.replace(/(\*\*Amount:\*\*\s*)(.*)/i, `$1${formattedAmount}`);
         } else if (/Amount:/i.test(targetPart)) {
-            targetPart = targetPart.replace(/(Amount:\s*)(.*)/i, `$1$${parsedNumber.toFixed(2)}`);
+            targetPart = targetPart.replace(/(Amount:\s*)(.*)/i, `$1${formattedAmount}`);
         } else {
-            targetPart += `\n**Amount:** $${parsedNumber.toFixed(2)}`;
+            targetPart += `\n**Amount:** ${formattedAmount}`;
         }
 
         parts[partIndex] = targetPart;
         return parts.join(marker);
     };
+
 
     const handleTransactionAmountChange = (index: number, nextAmount: string) => {
         setAmountSelectionByTx((prev) => new Map(prev).set(index, nextAmount));
@@ -4109,20 +4226,19 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
 
                 totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
                 
-                const staffBlocks = groupPettyCashEntries
-                    .map((entry) => [
-                        `**Staff Member:** ${entry.staffName}`,
-                        `**Amount Transferred:** $${entry.amount.toFixed(2)}`,
-                        entry.ypName ? `**Client:** ${entry.ypName}` : '',
-                        entry.location ? `**Location:** ${entry.location}` : '',
-                        `**NAB Reference:** Enter NAB Code`
-                    ].filter(Boolean).join('\n'))
-                    .join('\n\n');
+                const tableHeader = [
+                    '| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |',
+                    '| :--- | :--- | :--- | :--- | :--- |'
+                ].join('\n');
+
+                const tableRows = groupPettyCashEntries
+                    .map((entry) => `| ${entry.staffName} | ${entry.ypName || '-'} | ${entry.location || '-'} | $${entry.amount.toFixed(2)} | Enter NAB Code |`)
+                    .join('\n');
 
                 phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${groupPettyCashEntries.length} staff member(s).\n<<<PHASE_1_END>>>`;
                 phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nGroup processing active.\n<<<PHASE_2_END>>>`;
                 phase3 = `<<<PHASE_3_START>>>\nGroup Mode: Rules validation bypassed for multi-staff entry.\n<<<PHASE_3_END>>>`;
-                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your group reimbursement request has been prepared and processed today.\n\n${staffBlocks}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n`;
+                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your group reimbursement request has been prepared and processed today.\n\n${tableHeader}\n${tableRows}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n\n<!-- GROUP_TABLE_FORMAT -->`;
 
                 setResults({ phase1, phase2, phase3, phase4 });
                 setProcessingState(ProcessingState.COMPLETE);
