@@ -80,7 +80,7 @@ ${tableRows}
 **TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
 
 <!-- GROUP_TABLE_FORMAT -->
-<!-- STATUS: PENDING_LIQUIDATION -->`;
+<!-- STATUS: PENDING -->`;
 
     const transactions: TransactionRecord[] = extracted.map(entry => ({
         staffName: entry.staffName,

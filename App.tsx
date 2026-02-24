@@ -3770,7 +3770,6 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const contentToSave = contentOverride || (isEditing ? editableContent : results?.phase4);
         if (!contentToSave) return;
         const isPendingSave = contentToSave.includes('<!-- STATUS: PENDING -->');
-        const isLiquidationPendingSave = contentToSave.includes('<!-- STATUS: PENDING_LIQUIDATION -->');
 
         setIsSaving(true);
         setSaveStatus('idle');
@@ -3780,9 +3779,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             const transactions = getParsedTransactions();
             const payloads = transactions.map(tx => {
                 let nabCode = tx.currentNabRef;
-                if (isLiquidationPendingSave) {
-                    nabCode = 'PENDING_LIQUIDATION';
-                } else if (isPendingSave) {
+                if (isPendingSave) {
                     nabCode = 'PENDING';
                 } else if (!isValidNabReference(nabCode)) {
                     nabCode = null;
@@ -3810,9 +3807,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
                 let nabCode = nabMatch ? nabMatch[1].trim() : null;
 
-                if (isLiquidationPendingSave) {
-                    nabCode = 'PENDING_LIQUIDATION';
-                } else if (isPendingSave) {
+                if (isPendingSave) {
                     nabCode = 'PENDING';
                 } else if (!isValidNabReference(nabCode)) {
                     nabCode = null;
@@ -3933,9 +3928,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
         const baseContent = isEditing ? editableContent : results?.phase4 || '';
-        // Group mode always uses PENDING_LIQUIDATION
-        const finalStatus = requestMode === 'group' ? 'PENDING_LIQUIDATION' : status;
-        confirmSaveWithContent(finalStatus, baseContent, options);
+        confirmSaveWithContent(status, baseContent, options);
     };
 
 
@@ -4187,6 +4180,13 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const hasTransactions = parsedTransactions.length > 0;
         const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
         setSaveStatus('idle');
+
+        if (requestMode === 'group' && hasTransactions && !allHaveRef) {
+            setManualNabCodeError(null);
+            setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required for Group Mode. Provide a valid NAB code to continue.' });
+            setShowSaveModal(true);
+            return;
+        }
 
         // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
         if (hasTransactions && allHaveRef) {
@@ -4451,9 +4451,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (content.includes("<!-- STATUS: PENDING_LIQUIDATION -->")) {
-                isDiscrepancy = false;
-            } else if (content.includes("<!-- STATUS: PENDING -->")) {
+            if (content.includes("<!-- STATUS: PENDING -->")) {
                 isDiscrepancy = true;
             } else if (content.includes("<!-- STATUS: PAID -->")) {
                 isDiscrepancy = false;
@@ -4472,11 +4470,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             }
 
             if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
-                if (content.includes("<!-- STATUS: PENDING_LIQUIDATION -->")) {
-                    nabRef = 'PENDING_LIQUIDATION';
-                } else {
-                    nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
-                }
+                nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
             }
 
 
