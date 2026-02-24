@@ -730,7 +730,7 @@ const stripJulianApprovalSection = (content: string): string => {
 };
 
 const stripClaimantConfirmation = (content: string): string => {
-    return String(content || '').replace(/\n*Hi,[\s\S]*?I hope this message finds you well\.[\s\S]*?(?=\*\*Summary of Expenses:\*\*|\*\*TOTAL AMOUNT:|$)/gi, '\n');
+    return String(content || '').replace(/\n*Hi,[\s\S]*?I hope this message finds you well\.[\s\S]*?(?=\*\*Summary of Expenses\*\*|Summary of Expenses:|\*\*TOTAL AMOUNT:|TOTAL AMOUNT:|$)/gi, '\n');
 };
 
 const isOver300Detail = (detail?: string): boolean => {
@@ -817,7 +817,8 @@ const upsertJulianApprovalSection = (
     const stripped = stripJulianApprovalSection(content).trimEnd();
     const staffMember = extractFieldValue(stripped, [
         /\*\*Staff Member:\*\*\s*(.+)/i,
-        /Staff\s*member\s*to\s*reimburse:\s*(.+)/i
+        /Staff\s*member\s*to\s*reimburse:\s*(.+)/i,
+        /Staff\s*Member:\s*(.+)/i
     ]);
     const clientName = extractFieldValue(stripped, [
         /\*\*Client(?:'|’)?s?\s*Full\s*Name:\*\*\s*(.+)/i,
@@ -992,16 +993,16 @@ const updateGroupTableColumnValues = (
 
 const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
     const base = {
-        staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i],
+        staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i, /Staff Member:\s*(.*?)(?:\n|$)/i],
         clientFullName: [
             /^(?:\*\*\s*)?(?:Client(?:'|’)?s\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
         ],
         clientLocation: [/\*\*Client\s*\/\s*Location:\*\*\s*(.*?)(?:\n|$)/i],
-        address: [/\*\*Address:\*\*\s*(.*?)(?:\n|$)/i],
-        approvedBy: [/\*\*Approved\s*By:\*\*\s*(.*?)(?:\n|$)/i, /\*\*Approved\s*by:\*\*\s*(.*?)(?:\n|$)/i],
-        amount: [/\*\*Amount:\*\*\s*(.*?)(?:\n|$)/i],
+        address: [/\*\*Address:\*\*\s*(.*?)(?:\n|$)/i, /Address:\s*(.*?)(?:\n|$)/i],
+        approvedBy: [/\*\*Approved\s*By:\*\*\s*(.*?)(?:\n|$)/i, /\*\*Approved\s*by:\*\*\s*(.*?)(?:\n|$)/i, /Approved\s*By:\s*(.*?)(?:\n|$)/i, /Approved\s*by:\s*(.*?)(?:\n|$)/i],
+        amount: [/\*\*Amount:\*\*\s*(.*?)(?:\n|$)/i, /Amount:\s*(.*?)(?:\n|$)/i],
         receiptId: [/\*\*Receipt\s*ID:\*\*\s*(.*?)(?:\n|$)/i],
-        nabCode: [/\*\*NAB\s*(?:Code|Reference):\*\*\s*(.*?)(?:\n|$)/i]
+        nabCode: [/\*\*NAB\s*(?:Code|Reference):\*\*\s*(.*?)(?:\n|$)/i, /NAB\s*(?:Code|Reference):\s*(.*?)(?:\n|$)/i]
     };
 
     return base[key];

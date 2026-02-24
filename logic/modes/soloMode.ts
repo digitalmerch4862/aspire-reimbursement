@@ -20,6 +20,9 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     let totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
                   receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
     const receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
+    const formTotalValue = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
+    const receiptTotalValue = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : totalAmount;
+    const differenceAmount = Math.abs((formTotalValue || 0) - (receiptTotalValue || 0));
 
     const allText = formText + '\n' + receiptText;
     const lines = allText.split('\n');
@@ -113,22 +116,28 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
 
 I hope this message finds you well.
 
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
+I am writing to confirm that your reimbursement request has been successfully processed today.
 
-**Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Amount Transferred:** $${totalAmount.toFixed(2)}
-**NAB Reference:** Enter NAB Code
+Staff Member: ${staffMember || '[Enter Staff Name]'}
+Client's Full Name: ${clientName || '[Enter Client Name]'}
+Address: ${address || '[Enter Address]'}
+Approved By: ${approvedBy || '[Enter Approver]'}
+Amount: $${totalAmount.toFixed(2)}
+
+Reimbursement form total is ${formTotalValue.toFixed(2)}
+Receipt total is ${receiptTotalValue.toFixed(2)}
+Difference amount is ${differenceAmount.toFixed(2)}
+
+NAB Code: Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
----
-
-**Summary of Expenses**
+Summary of Expenses:
 
 | Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
 
-**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+TOTAL AMOUNT: $${totalAmount.toFixed(2)}
 `;
 
     const transactions: TransactionRecord[] = items.length > 0 ? items.map(item => ({
