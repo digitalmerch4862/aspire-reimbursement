@@ -377,7 +377,10 @@ interface PendingStaffGroup {
 interface GroupPettyCashEntry {
     staffName: string;
     amount: number;
+    ypName?: string;
+    location?: string;
 }
+
 
 interface InputTransactionFingerprint {
     staffName: string;
@@ -514,32 +517,54 @@ const normalizeMoneyValue = (value: string, fallback = '0.00'): string => {
 };
 
 const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
-    const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
     const extracted: GroupPettyCashEntry[] = [];
+    
+    // Extract Location/Client if present
+    const locationMatch = rawText.match(/Client\s*\/\s*Location:\s*(.+)/i);
+    const commonLocation = locationMatch ? locationMatch[1].trim() : '';
 
-    // First, try to detect "Staff member to reimburse: [Name]" patterns
-    const staffMemberMatches = Array.from(rawText.matchAll(/Staff\s*member\s*to\s*reimburse:\s*(.+)/gi));
-    if (staffMemberMatches.length > 0) {
-        staffMemberMatches.forEach(match => {
-            const staffName = match[1].trim();
-            if (staffName) {
-                // Try to find an amount following this staff member if possible, otherwise 0
-                extracted.push({ staffName, amount: 0 });
-            }
-        });
-        return extracted;
+    // Split by "Staff Member:" to get individual blocks
+    const blocks = rawText.split(/Staff\s*Member\s*:/gi);
+    
+    // Skip first part as it's usually the header/location
+    for (let i = 1; i < blocks.length; i++) {
+        const block = blocks[i];
+        
+        // Extract Name (it's the first line of the block)
+        const lines = block.trim().split('\n');
+        const staffName = lines[0].trim();
+        
+        // Extract Amount
+        const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+        const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+        
+        // Extract YP Name
+        const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
+        const ypName = ypMatch ? ypMatch[1].trim() : '';
+
+        if (staffName) {
+            extracted.push({ 
+                staffName, 
+                amount,
+                ypName,
+                location: commonLocation
+            });
+        }
     }
 
-    // Fallback to table-like pattern detection
-    for (const line of lines) {
-        const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
-        if (!match) continue;
+    // Fallback to old behavior if no blocks found
+    if (extracted.length === 0) {
+        const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+        for (const line of lines) {
+            const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
+            if (!match) continue;
 
-        const staffName = match[1].replace(/\s+/g, ' ').trim();
-        const amount = Number(match[2]);
-        if (!staffName || Number.isNaN(amount) || amount <= 0) continue;
+            const staffName = match[1].replace(/\s+/g, ' ').trim();
+            const amount = Number(match[2]);
+            if (!staffName || Number.isNaN(amount) || amount <= 0) continue;
 
-        extracted.push({ staffName, amount });
+            extracted.push({ staffName, amount });
+        }
     }
 
     return extracted;
@@ -1748,7 +1773,9 @@ const [isEditing, setIsEditing] = useState(false);
         let staffName = lines[0].trim();
 
         // Find amount
-        const amountMatch = part.match(/\*\*Amount:\*\*\s*(.*)/) || part.match(/Amount:\s*(.*)/);
+        const amountMatch = part.match(/\*\*Amount (?:Transferred):\*\*\s*(.*)/i) 
+            || part.match(/\*\*Amount:\*\*\s*(.*)/) 
+            || part.match(/Amount:\s*(.*)/);
         let amount = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
 
         // Find NAB code
@@ -1759,6 +1786,14 @@ const [isEditing, setIsEditing] = useState(false);
         // Find Receipt ID (if exists)
         const receiptMatch = part.match(/\*\*Receipt ID:\*\*\s*(.*)/) || part.match(/Receipt ID:\s*(.*)/);
         const receiptId = receiptMatch ? receiptMatch[1].trim() : 'N/A';
+
+        // Find YP Name
+        const ypMatch = part.match(/\*\*YP Name:\*\*\s*(.*)/i) || part.match(/YP Name:\s*(.*)/i);
+        const ypName = ypMatch ? ypMatch[1].trim() : '';
+
+        // Find Location
+        const locationMatch = part.match(/\*\*Location:\*\*\s*(.*)/i) || part.match(/Location:\s*(.*)/i);
+        const location = locationMatch ? locationMatch[1].trim() : '';
 
         // Format Name (Last, First -> First Last)
         let formattedName = staffName;
@@ -1773,9 +1808,12 @@ const [isEditing, setIsEditing] = useState(false);
             formattedName,
             amount,
             receiptId,
-            currentNabRef
+            currentNabRef,
+            ypName,
+            location
         };
     };
+
 
     const parsedTransactions = getParsedTransactions();
 
@@ -3422,66 +3460,65 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const contentToSave = contentOverride || (isEditing ? editableContent : results?.phase4);
         if (!contentToSave) return;
         const isPendingSave = contentToSave.includes('<!-- STATUS: PENDING -->');
+        const isLiquidationPendingSave = contentToSave.includes('<!-- STATUS: PENDING_LIQUIDATION -->');
 
         setIsSaving(true);
         setSaveStatus('idle');
 
         try {
-            const staffBlocks = contentToSave.split('**Staff Member:**');
-            const payloads = [];
-
-            if (staffBlocks.length > 1) {
-                for (let i = 1; i < staffBlocks.length; i++) {
-                    const block = staffBlocks[i];
-                    const staffNameLine = block.split('\n')[0].trim();
-                    const amountMatch = block.match(/\*\*Amount:\*\*\s*(.*)/);
-                    const nabMatch = block.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
-
-                    const staffName = staffNameLine;
-                    const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
-                    const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
-                    let uniqueReceiptId = nabMatch ? nabMatch[1].trim() : null;
-
-                    if (isPendingSave) {
-                        uniqueReceiptId = 'Nab code is pending';
-                    } else if (!isValidNabReference(uniqueReceiptId)) {
-                        uniqueReceiptId = null;
-                    }
-
-                    payloads.push({
-                        staff_name: staffName,
-                        amount: amount,
-                        nab_code: uniqueReceiptId,
-                        full_email_content: contentToSave,
-                        created_at: new Date().toISOString()
-                    });
+            // Use getParsedTransactions logic here as well for consistency
+            const transactions = getParsedTransactions();
+            const payloads = transactions.map(tx => {
+                let nabCode = tx.currentNabRef;
+                if (isLiquidationPendingSave) {
+                    nabCode = 'PENDING_LIQUIDATION';
+                } else if (isPendingSave) {
+                    nabCode = 'PENDING';
+                } else if (!isValidNabReference(nabCode)) {
+                    nabCode = null;
                 }
-            } else {
-                const staffNameMatch = contentToSave.match(/\*\*Staff Member:\*\*\s*(.*)/);
-                const amountMatch = contentToSave.match(/\*\*Amount:\*\*\s*(.*)/);
-                const receiptIdMatch = contentToSave.match(/\*\*Receipt ID:\*\*\s*(.*)/);
-                const nabMatch = contentToSave.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
 
+                return {
+                    staff_name: tx.staffName,
+                    amount: parseFloat(String(tx.amount).replace(/[^0-9.-]/g, '')) || 0,
+                    nab_code: nabCode,
+                    yp_name: tx.ypName || null,
+                    location: tx.location || null,
+                    full_email_content: contentToSave,
+                    created_at: new Date().toISOString()
+                };
+            });
+
+            if (payloads.length === 0) {
+                // Fallback for single block if parsing failed
+                const staffNameMatch = contentToSave.match(/\*\*Staff Member:\*\*\s*(.*)/);
+                const amountMatch = contentToSave.match(/\*\*Amount(?: Transferred)?:\*\*\s*(.*)/i);
+                const nabMatch = contentToSave.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
+                
                 const staffName = staffNameMatch ? staffNameMatch[1].trim() : 'Unknown';
                 const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
                 const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
+                let nabCode = nabMatch ? nabMatch[1].trim() : null;
 
-                let uniqueReceiptId = nabMatch && isValidNabReference(nabMatch[1].trim()) ? nabMatch[1].trim() : (receiptIdMatch ? receiptIdMatch[1].trim() : null);
-
-                if (isPendingSave) {
-                    uniqueReceiptId = 'Nab code is pending';
-                } else if (!isValidNabReference(uniqueReceiptId)) {
-                    uniqueReceiptId = null;
+                if (isLiquidationPendingSave) {
+                    nabCode = 'PENDING_LIQUIDATION';
+                } else if (isPendingSave) {
+                    nabCode = 'PENDING';
+                } else if (!isValidNabReference(nabCode)) {
+                    nabCode = null;
                 }
 
                 payloads.push({
                     staff_name: staffName,
                     amount: amount,
-                    nab_code: uniqueReceiptId,
+                    nab_code: nabCode,
+                    yp_name: null,
+                    location: null,
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 });
             }
+
 
             if (!hasSupabaseEnv) {
                 const now = Date.now();
@@ -4044,16 +4081,8 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             if (requestMode === 'group') {
                 const groupPettyCashEntries = parseGroupPettyCashEntries(formText + '\n' + receiptText);
                 
-                if (groupPettyCashEntries.length < 1) {
-                    // Try to detect staff from "Staff member to reimburse: ..." pattern
-                    const detectedStaff = Array.from(formText.matchAll(/Staff\s*member\s*to\s*reimburse:\s*(.+)/gi)).map(m => m[1].trim());
-                    if (detectedStaff.length > 0) {
-                        detectedStaff.forEach(name => groupPettyCashEntries.push({ staffName: name, amount: 0 }));
-                    }
-                }
-
                 if (groupPettyCashEntries.length === 0) {
-                    setErrorMessage('Group Mode could not detect any staff members. Use "Staff member to reimburse: [Name]" format.');
+                    setErrorMessage('Group Mode could not detect any staff members. Use "Staff Member: [Name]" block format.');
                     setProcessingState(ProcessingState.IDLE);
                     return;
                 }
@@ -4072,7 +4101,13 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
                 
                 const staffBlocks = groupPettyCashEntries
-                    .map((entry) => `**Staff Member:** ${entry.staffName}\n**Amount Transferred:** $${entry.amount.toFixed(2)}\n**NAB Reference:** Enter NAB Code`)
+                    .map((entry) => [
+                        `**Staff Member:** ${entry.staffName}`,
+                        `**Amount Transferred:** $${entry.amount.toFixed(2)}`,
+                        entry.ypName ? `**YP Name:** ${entry.ypName}` : '',
+                        entry.location ? `**Location:** ${entry.location}` : '',
+                        `**NAB Reference:** Enter NAB Code`
+                    ].filter(Boolean).join('\n'))
                     .join('\n\n');
 
                 phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${groupPettyCashEntries.length} staff member(s).\n<<<PHASE_1_END>>>`;
