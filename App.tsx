@@ -3779,6 +3779,14 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const contentToSave = contentOverride || (isEditing ? editableContent : results?.phase4);
         if (!contentToSave) return;
         const isPendingSave = contentToSave.includes('<!-- STATUS: PENDING -->');
+        const normalizeOptionalText = (value: unknown): string | null => {
+            const normalized = String(value || '').replace(/\*\*/g, '').trim();
+            if (!normalized) return null;
+            const lowered = normalized.toLowerCase();
+            if (lowered === '-' || lowered === 'n/a' || lowered === 'na' || lowered === 'unknown') return null;
+            if (lowered.startsWith('enter ')) return null;
+            return normalized;
+        };
 
         setIsSaving(true);
         setSaveStatus('idle');
@@ -3794,12 +3802,15 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     nabCode = null;
                 }
 
+                const ypNameValue = normalizeOptionalText(tx.ypName);
+                const locationValue = normalizeOptionalText(tx.location);
+
                 return {
                     staff_name: tx.staffName,
                     amount: parseFloat(String(tx.amount).replace(/[^0-9.-]/g, '')) || 0,
                     nab_code: nabCode,
-                    yp_name: tx.ypName || null,
-                    location: tx.location || null,
+                    yp_name: ypNameValue,
+                    location: locationValue,
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 };
@@ -3807,9 +3818,25 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
 
             if (payloads.length === 0) {
                 // Fallback for single block if parsing failed
-                const staffNameMatch = contentToSave.match(/\*\*Staff Member:\*\*\s*(.*)/);
-                const amountMatch = contentToSave.match(/\*\*Amount(?: Transferred)?:\*\*\s*(.*)/i);
+                const staffNameMatch = contentToSave.match(/\*\*Staff Member:\*\*\s*(.*)/) || contentToSave.match(/Staff Member:\s*(.*)/i);
+                const amountMatch = contentToSave.match(/\*\*Amount(?: Transferred)?:\*\*\s*(.*)/i) || contentToSave.match(/Amount:\s*(.*)/i);
                 const nabMatch = contentToSave.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
+                const fallbackClient = extractFieldValue(contentToSave, [
+                    /\*\*Client(?:'|’)?s?\s*Full\s*Name:\*\*\s*(.*)/i,
+                    /Client(?:'|’)?s?\s*Full\s*Name:\s*(.*)/i,
+                    /\*\*Client:\*\*\s*(.*)/i,
+                    /Client:\s*(.*)/i,
+                    /\*\*YP Name:\*\*\s*(.*)/i,
+                    /YP Name:\s*(.*)/i
+                ]);
+                const fallbackLocation = extractFieldValue(contentToSave, [
+                    /\*\*Address:\*\*\s*(.*)/i,
+                    /Address:\s*(.*)/i,
+                    /\*\*Location:\*\*\s*(.*)/i,
+                    /Location:\s*(.*)/i,
+                    /\*\*Client\s*\/\s*Location:\*\*\s*(.*)/i,
+                    /Client\s*\/\s*Location:\s*(.*)/i
+                ]);
                 
                 const staffName = staffNameMatch ? staffNameMatch[1].trim() : 'Unknown';
                 const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
@@ -3826,8 +3853,8 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     staff_name: staffName,
                     amount: amount,
                     nab_code: nabCode,
-                    yp_name: null,
-                    location: null,
+                    yp_name: normalizeOptionalText(fallbackClient),
+                    location: normalizeOptionalText(fallbackLocation),
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 });
