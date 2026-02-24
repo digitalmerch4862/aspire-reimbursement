@@ -3772,7 +3772,17 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
         setSaveStatus('idle');
 
+        // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
+        if (hasTransactions && allHaveRef) {
+            confirmSave('PAID', {
+                duplicateSignal: 'green',
+                detail: 'Direct save triggered by presence of NAB reference.'
+            });
+            return;
+        }
+
         if (duplicateCheckResult.signal === 'red') {
+
             const ageContext = currentInputAgedCount > 0
                 ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
                 : '';
@@ -3841,7 +3851,19 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             return;
         }
 
+        const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
+        
+        // If NAB code is already entered, skip confirmation and save immediately
+        if (allHaveRef) {
+            confirmSave('PAID', {
+                duplicateSignal: 'green',
+                detail: 'Special Instruction direct save triggered by presence of NAB reference.'
+            });
+            return;
+        }
+
         const nowIso = new Date().toISOString();
+
         const payloads = parsedTransactions.map((tx, idx) => {
             const selectedEmployee = selectedEmployees.get(tx.index);
             const typedName = String(employeeSearchQuery.get(tx.index) || '').trim();
