@@ -4187,6 +4187,34 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const hasTransactions = parsedTransactions.length > 0;
         const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
         setSaveStatus('idle');
+        setErrorMessage(null);
+
+        if (requestMode === 'solo') {
+            const combinedText = `${reimbursementFormText}\n${receiptDetailsText}`;
+            const tableHeaderRegex = /\|\s*Receipt\s*#\s*\|\s*Unique\s*ID\s*\/\s*Fallback\s*\|\s*Store\s*Name\s*\|\s*Date\s*&\s*Time\s*\|\s*Product\s*\(Per\s*Item\)\s*\|\s*Category\s*\|\s*Item\s*Amount\s*\|\s*Receipt\s*Total\s*\|\s*Notes\s*\|/i;
+            const hasReceiptTable = tableHeaderRegex.test(combinedText);
+            if (!hasReceiptTable) {
+                setErrorMessage('Receipt table is required for Solo Mode. Paste the full receipt table before saving.');
+                return;
+            }
+
+            const invalidReceiptRows = currentInputTransactions.filter((tx) => {
+                const storeKey = normalizeTextKey(tx.storeName || '');
+                const productKey = normalizeTextKey(tx.product || '');
+                const rawDate = String(tx.rawDate || '').trim();
+                const totalValue = Number(normalizeMoneyValue(String(tx.totalAmount), '0.00'));
+                if (!storeKey || storeKey === 'particulars') return true;
+                if (!productKey || productKey === '-') return true;
+                if (!rawDate) return true;
+                if (!Number.isFinite(totalValue) || totalValue <= 0) return true;
+                return false;
+            });
+
+            if (invalidReceiptRows.length > 0) {
+                setErrorMessage('Receipt table rows are incomplete. Please provide Store Name, Product, Date & Time, and Receipt Total for every row.');
+                return;
+            }
+        }
 
         if (requestMode === 'group' && hasTransactions && !allHaveRef) {
             setManualNabCodeError(null);
