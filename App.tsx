@@ -15,6 +15,8 @@ import ManualMode from './components/Dashboard/ManualMode';
 import LiquidationTracker from './components/Dashboard/LiquidationTracker';
 import ModeTabs, { DashboardMode } from './components/Dashboard/ModeTabs';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
+import * as ModeLogic from './logic/modes';
+
 
 import { hasSupabaseEnv, supabase } from './services/supabaseClient';
 
@@ -4221,236 +4223,53 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         try {
             setOcrStatus('Processing...');
 
-            const formText = reimbursementFormText.trim();
-            const receiptText = receiptDetailsText.trim();
+            const options: ModeLogic.ModeOptions = {
+                formText: reimbursementFormText.trim(),
+                receiptText: receiptDetailsText.trim(),
+                historyData,
+                outstandingLiquidations
+            };
 
-            let phase1 = '';
-            let phase2 = '';
-            let phase3 = '';
-            let phase4 = '';
-            let totalAmount = 0;
-            let receiptGrandTotal: number | null = null;
+            let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: any[] };
 
             if (requestMode === 'manual') {
-                phase1 = `<<<PHASE_1_START>>>\n## Manual Mode Active\nManual entry mode initialized for quick logging.\n<<<PHASE_1_END>>>`;
-                phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nManual entry standardization active.\n<<<PHASE_2_END>>>`;
-                phase3 = `<<<PHASE_3_START>>>\nManual Mode: Rules validation bypassed.\n<<<PHASE_3_END>>>`;
-                phase4 = `Hi,
+                result = ModeLogic.processManualMode(options);
+            } else if (requestMode === 'group') {
+                result = ModeLogic.processGroupMode(options);
+            } else {
+                result = ModeLogic.processSoloMode(options);
+            }
 
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** [Enter Staff Name]
-**Amount Transferred:** $0.00
-**NAB Reference:** Enter NAB Code
-
----
-
-**Summary of Expenses**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | MANUAL-ENTRY | Manual Entry | - | Manual Item | Other | $0.00 | $0.00 | Manual entry mode |
-
-**TOTAL AMOUNT: $0.00**
-`;
-
-                setResults({ phase1, phase2, phase3, phase4 });
-                setProcessingState(ProcessingState.COMPLETE);
-                setOcrStatus('Complete');
+            if (result.errorMessage) {
+                setErrorMessage(result.errorMessage);
+                setProcessingState(ProcessingState.IDLE);
                 return;
             }
 
-            // Group Mode Logic
-            if (requestMode === 'group') {
-                const groupPettyCashEntries = parseGroupPettyCashEntries(formText + '\n' + receiptText);
-                
-                if (groupPettyCashEntries.length === 0) {
-                    setErrorMessage('Group Mode could not detect any staff members. Use "Staff Member: [Name]" block format.');
-                    setProcessingState(ProcessingState.IDLE);
-                    return;
-                }
-
-                // CHECK FOR OUTSTANDING LIQUIDATIONS
-                const delinquentStaff = groupPettyCashEntries.find(entry => 
-                    outstandingLiquidations.some(ol => normalizeNameKey(ol.staffName) === normalizeNameKey(entry.staffName))
-                );
-
-                if (delinquentStaff) {
-                    setErrorMessage(`Blocked: ${delinquentStaff.staffName} has an outstanding liquidation. Please settle it first.`);
-                    setProcessingState(ProcessingState.IDLE);
-                    return;
-                }
-
-                totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
-                
-                const tableHeader = [
-                    '| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |',
-                    '| :--- | :--- | :--- | :--- | :--- |'
-                ].join('\n');
-
-                const tableRows = groupPettyCashEntries
-                    .map((entry) => `| ${entry.staffName} | ${entry.ypName || '-'} | ${entry.location || '-'} | $${entry.amount.toFixed(2)} | Enter NAB Code |`)
-                    .join('\n');
-
-                phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${groupPettyCashEntries.length} staff member(s).\n<<<PHASE_1_END>>>`;
-                phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nGroup processing active.\n<<<PHASE_2_END>>>`;
-                phase3 = `<<<PHASE_3_START>>>\nGroup Mode: Rules validation bypassed for multi-staff entry.\n<<<PHASE_3_END>>>`;
-                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your group reimbursement request has been prepared and processed today.\n\n${tableHeader}\n${tableRows}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n\n<!-- GROUP_TABLE_FORMAT -->`;
-
-                setResults({ phase1, phase2, phase3, phase4 });
-                setProcessingState(ProcessingState.COMPLETE);
-                setOcrStatus('Complete');
-                return;
-            }
-
-            // Solo Mode Logic (Original)
-            const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
-            const addressMatch = formText.match(/Address:\s*(.+)/i);
-            const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
-            const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
-            
-            const clientName = clientMatch ? clientMatch[1].trim() : '';
-            const address = addressMatch ? addressMatch[1].trim() : '';
-            const staffMember = staffMatch ? staffMatch[1].trim() : '';
-            const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
-            
-            const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
-            const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
-            totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
-                          receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
-            receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
-            
-            const allText = formText + '\n' + receiptText;
-            const lines = allText.split('\n');
-            const hasPipeTableInput = lines.some((line) => line.trim().startsWith('|'));
-            const items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }> = [];
-            
-            // Try to find block format: Particular / Date / Amount
-            const blockMatches = Array.from(formText.matchAll(/Particular:\s*(.*?)(?:\n|$)/gi));
-            if (blockMatches.length > 0) {
-                blockMatches.forEach((match, idx) => {
-                    const blockStart = (match as any).index || 0;
-                    const blockEnd = formText.indexOf('Particular:', blockStart + 1);
-                    const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
-                    
-                    const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
-                    const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
-                    const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
-                    const ocMatch = blockText.match(/On\s*Charge\s*Y\/N:\s*(.*?)(?:\n|$)/i);
-
-                    if (pMatch || aMatch) {
-                        items.push({
-                            receiptNum: String(idx + 1),
-                            uniqueId: `particular-${idx + 1}`,
-                            storeName: pMatch ? pMatch[1].trim() : 'Particulars',
-                            dateTime: dMatch ? dMatch[1].trim() : '',
-                            product: pMatch ? pMatch[1].trim() : '',
-                            category: 'Other',
-                            itemAmount: aMatch ? aMatch[1].replace(',', '') : '0',
-                            receiptTotal: aMatch ? aMatch[1].replace(',', '') : '0',
-                            notes: '',
-                            amount: aMatch ? aMatch[1].replace(',', '') : '0',
-                            onCharge: ocMatch ? ocMatch[1].trim() : 'N'
-                        });
+            // For Solo Mode specific issues and rules blocking
+            if (requestMode === 'solo' && result.issues) {
+                const issues = result.issues;
+                if (issues.length > 0 && !bypassManualAuditRef.current) {
+                    const blockingIssues = issues.filter((issue) => issue.level === 'error');
+                    if (blockingIssues.length > 0) {
+                        setErrorMessage(blockingIssues.map((issue) => issue.message).join(' | '));
+                        showWarningToast('Manual validation found blocking errors.');
+                        setProcessingState(ProcessingState.IDLE);
+                        setOcrStatus('Needs review');
+                        return;
                     }
-                });
-            }
-
-            if (items.length === 0) {
-                for (const line of lines) {
-                    if (line.trim().startsWith('|') && !line.includes('---') && 
-                        !line.includes('Receipt #') && !line.includes('GRAND TOTAL') && 
-                        !line.includes('Unique ID') && !line.includes('Store Name')) {
-                        
-                        const parts = line.split('|').map(p => p.trim()).filter(p => p);
-                        const normalized = normalizeReceiptRow(parts, String(totalAmount || '0.00'), '', '');
-                        if (!normalized) continue;
-
-                        items.push({ ...normalized, amount: normalized.receiptTotal, onCharge: '' });
-                    }
-                }
-            }
-
-            const particularAmountLines = parseParticularAmountLines(formText);
-            if (items.length === 0 && particularAmountLines.length > 0) {
-                particularAmountLines.forEach((entry, idx) => {
-                    items.push({
-                        receiptNum: String(idx + 1),
-                        uniqueId: `particular-${idx + 1}`,
-                        storeName: 'Particulars',
-                        dateTime: entry.date,
-                        product: entry.product,
-                        category: 'Other',
-                        itemAmount: entry.amount,
-                        receiptTotal: entry.amount,
-                        notes: '',
-                        amount: entry.amount,
-                        onCharge: 'N'
-                    });
-                });
-            }
-
-            if (!formTotalMatch && !receiptTotalMatch && (!hasPipeTableInput && items.length > 0)) {
-                totalAmount = items.reduce((sum, item) => {
-                    const itemTotal = Number(normalizeMoneyValue(item.receiptTotal || item.itemAmount || item.amount, '0.00'));
-                    return sum + (Number.isNaN(itemTotal) ? 0 : itemTotal);
-                }, 0);
-            }
-
-            const issues = buildManualAuditIssues(items, totalAmount, receiptGrandTotal, clientName, address, staffMember, approvedBy);
-
-            if (issues.length > 0 && !bypassManualAuditRef.current) {
-                const blockingIssues = issues.filter((issue) => issue.level === 'error');
-                const warningIssues = issues.filter((issue) => issue.level !== 'error');
-
-                if (blockingIssues.length > 0) {
-                    setErrorMessage(blockingIssues.map((issue) => issue.message).join(' | '));
-                    showWarningToast('Manual validation found blocking errors. Check Rules Status for more details.');
-                    setProcessingState(ProcessingState.IDLE);
-                    setOcrStatus('Needs review');
-                    return;
-                }
-
-                if (warningIssues.length > 0) {
-                    setManualAuditIssues(warningIssues);
-                    showWarningToast('Manual validation found warnings. Proceeding based on active rules.');
+                    setManualAuditIssues(issues.filter(i => i.level !== 'error'));
                 }
             }
             bypassManualAuditRef.current = false;
 
-            const reimbursementFormTotalValue = formTotalMatch ? Number(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
-            const receiptTotalValue = receiptGrandTotal !== null ? receiptGrandTotal : totalAmount;
-            const totalDifferenceValue = Number(Math.abs((reimbursementFormTotalValue || 0) - (receiptTotalValue || 0)).toFixed(2));
-
-            phase1 = `<<<PHASE_1_START>>>\n## Solo Mode Audit\nProcessing individual reimbursement request.\n<<<PHASE_1_END>>>`;
-            phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nForm and receipt data synced.\n<<<PHASE_2_END>>>`;
-            phase3 = `<<<PHASE_3_START>>>\n${issues.length > 0 ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n') : 'All manual validation checks passed.'}\n<<<PHASE_3_END>>>`;
+            setResults({
+                phase1: result.phase1,
+                phase2: result.phase2,
+                phase3: result.phase3,
+                phase4: result.phase4
+            });
             
-            phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Amount Transferred:** $${totalAmount.toFixed(2)}
-**NAB Reference:** Enter NAB Code
-<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
-
----
-
-**Summary of Expenses**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
-
-**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
-`;
-
-            setResults({ phase1, phase2, phase3, phase4 });
             setProcessingState(ProcessingState.COMPLETE);
             setOcrStatus('Complete');
         } catch (err: any) {
@@ -4460,6 +4279,7 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             setProcessingState(ProcessingState.IDLE);
         }
     };
+
 
 
     const handleSaveEdit = () => {
