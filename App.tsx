@@ -846,10 +846,11 @@ const upsertJulianApprovalSection = (
         `**Fraud Receipt Check:** ${fraudReceiptStatus}`,
         '',
         '### Reimbursement Details',
-        `*   **Staff Member:** ${staffMember || '-'}`,
-        `*   **Client Name:** ${clientName || '-'}`,
-        `*   **Amount:** ${amount || '-'}`,
-        `*   **Approved By:** ${approvedBy || '-'}`,
+        `**Staff Member:** ${staffMember || '-'}`,
+        `**Client Name:** ${clientName || '-'}`,
+        `**Amount:** ${amount || '-'}`,
+        `**Approved By:** ${approvedBy || '-'}`,
+
         '',
         '---',
         '',
@@ -4231,7 +4232,26 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 phase1 = `<<<PHASE_1_START>>>\n## Manual Mode Active\nManual entry mode initialized for quick logging.\n<<<PHASE_1_END>>>`;
                 phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nManual entry standardization active.\n<<<PHASE_2_END>>>`;
                 phase3 = `<<<PHASE_3_START>>>\nManual Mode: Rules validation bypassed.\n<<<PHASE_3_END>>>`;
-                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.\n\n**Staff Member:** [Enter Staff Name]\n**Amount Transferred:** $0.00\n**NAB Reference:** Enter NAB Code\n\n**Summary of Expenses:**\n\n| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n| 1 | MANUAL-ENTRY | Manual Entry | - | Manual Item | Other | $0.00 | $0.00 | Manual entry mode |\n\n**TOTAL AMOUNT: $0.00**\n`;
+                phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
+
+**Staff Member:** [Enter Staff Name]
+**Amount Transferred:** $0.00
+**NAB Reference:** Enter NAB Code
+
+---
+
+**Summary of Expenses**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | MANUAL-ENTRY | Manual Entry | - | Manual Item | Other | $0.00 | $0.00 | Manual entry mode |
+
+**TOTAL AMOUNT: $0.00**
+`;
 
                 setResults({ phase1, phase2, phase3, phase4 });
                 setProcessingState(ProcessingState.COMPLETE);
@@ -4288,11 +4308,6 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
             const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
             
-            const particularMatch = formText.match(/Particular:\s*(.+)/i);
-            const datePurchasedMatch = formText.match(/Date\s*Purchased:\s*(.+)/i);
-            const amountMatch = formText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i);
-            const onChargeMatch = formText.match(/On\s*Charge\s*Y\/N:\s*(.+)/i);
-            
             const clientName = clientMatch ? clientMatch[1].trim() : '';
             const address = addressMatch ? addressMatch[1].trim() : '';
             const staffMember = staffMatch ? staffMatch[1].trim() : '';
@@ -4303,29 +4318,60 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
                           receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
             receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
-            const particularAmountLines = parseParticularAmountLines(formText);
-            let usedParticularAmountLines = false;
-
+            
             const allText = formText + '\n' + receiptText;
             const lines = allText.split('\n');
             const hasPipeTableInput = lines.some((line) => line.trim().startsWith('|'));
             const items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }> = [];
             
-            for (const line of lines) {
-                if (line.trim().startsWith('|') && !line.includes('---') && 
-                    !line.includes('Receipt #') && !line.includes('GRAND TOTAL') && 
-                    !line.includes('Unique ID') && !line.includes('Store Name')) {
+            // Try to find block format: Particular / Date / Amount
+            const blockMatches = Array.from(formText.matchAll(/Particular:\s*(.*?)(?:\n|$)/gi));
+            if (blockMatches.length > 0) {
+                blockMatches.forEach((match, idx) => {
+                    const blockStart = (match as any).index || 0;
+                    const blockEnd = formText.indexOf('Particular:', blockStart + 1);
+                    const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
                     
-                    const parts = line.split('|').map(p => p.trim()).filter(p => p);
-                    const normalized = normalizeReceiptRow(parts, String(totalAmount || '0.00'), '', '');
-                    if (!normalized) continue;
+                    const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
+                    const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
+                    const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+                    const ocMatch = blockText.match(/On\s*Charge\s*Y\/N:\s*(.*?)(?:\n|$)/i);
 
-                    items.push({ ...normalized, amount: normalized.receiptTotal, onCharge: '' });
+                    if (pMatch || aMatch) {
+                        items.push({
+                            receiptNum: String(idx + 1),
+                            uniqueId: `particular-${idx + 1}`,
+                            storeName: pMatch ? pMatch[1].trim() : 'Particulars',
+                            dateTime: dMatch ? dMatch[1].trim() : '',
+                            product: pMatch ? pMatch[1].trim() : '',
+                            category: 'Other',
+                            itemAmount: aMatch ? aMatch[1].replace(',', '') : '0',
+                            receiptTotal: aMatch ? aMatch[1].replace(',', '') : '0',
+                            notes: '',
+                            amount: aMatch ? aMatch[1].replace(',', '') : '0',
+                            onCharge: ocMatch ? ocMatch[1].trim() : 'N'
+                        });
+                    }
+                });
+            }
+
+            if (items.length === 0) {
+                for (const line of lines) {
+                    if (line.trim().startsWith('|') && !line.includes('---') && 
+                        !line.includes('Receipt #') && !line.includes('GRAND TOTAL') && 
+                        !line.includes('Unique ID') && !line.includes('Store Name')) {
+                        
+                        const parts = line.split('|').map(p => p.trim()).filter(p => p);
+                        const normalized = normalizeReceiptRow(parts, String(totalAmount || '0.00'), '', '');
+                        if (!normalized) continue;
+
+                        items.push({ ...normalized, amount: normalized.receiptTotal, onCharge: '' });
+                    }
                 }
             }
 
+            const particularAmountLines = parseParticularAmountLines(formText);
             if (items.length === 0 && particularAmountLines.length > 0) {
-                usedParticularAmountLines = true;
                 particularAmountLines.forEach((entry, idx) => {
                     items.push({
                         receiptNum: String(idx + 1),
@@ -4343,23 +4389,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 });
             }
 
-            if (items.length === 0 && particularMatch) {
-                items.push({
-                    receiptNum: '1',
-                    uniqueId: '',
-                    storeName: particularMatch[1].trim(),
-                    dateTime: datePurchasedMatch ? datePurchasedMatch[1].trim() : '',
-                    product: '',
-                    category: 'Other',
-                    itemAmount: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
-                    receiptTotal: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
-                    notes: '',
-                    amount: amountMatch ? amountMatch[1].replace('$', '').replace(',', '').trim() : '0',
-                    onCharge: onChargeMatch ? onChargeMatch[1].trim() : 'N'
-                });
-            }
-
-            if (!formTotalMatch && !receiptTotalMatch && (usedParticularAmountLines || (!hasPipeTableInput && items.length > 0))) {
+            if (!formTotalMatch && !receiptTotalMatch && (!hasPipeTableInput && items.length > 0)) {
                 totalAmount = items.reduce((sum, item) => {
                     const itemTotal = Number(normalizeMoneyValue(item.receiptTotal || item.itemAmount || item.amount, '0.00'));
                     return sum + (Number.isNaN(itemTotal) ? 0 : itemTotal);
@@ -4395,7 +4425,27 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nForm and receipt data synced.\n<<<PHASE_2_END>>>`;
             phase3 = `<<<PHASE_3_START>>>\n${issues.length > 0 ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n') : 'All manual validation checks passed.'}\n<<<PHASE_3_END>>>`;
             
-            phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.\n\n**Staff Member:** ${staffMember || '[Enter Staff Name]'}\n**Amount Transferred:** $${totalAmount.toFixed(2)}\n**NAB Reference:** Enter NAB Code\n<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->\n\n**Summary of Expenses:**\n\n| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n`;
+            phase4 = `Hi,
+
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
+
+**Staff Member:** ${staffMember || '[Enter Staff Name]'}
+**Amount Transferred:** $${totalAmount.toFixed(2)}
+**NAB Reference:** Enter NAB Code
+<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
+
+---
+
+**Summary of Expenses**
+
+| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+
+**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+`;
 
             setResults({ phase1, phase2, phase3, phase4 });
             setProcessingState(ProcessingState.COMPLETE);
