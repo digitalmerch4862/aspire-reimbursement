@@ -668,7 +668,7 @@ const stripJulianApprovalSection = (content: string): string => {
 };
 
 const stripClaimantConfirmation = (content: string): string => {
-    return String(content || '').replace(/\n*Hi,\s*\n\nI hope this message finds you well\.[\s\S]*?(?=\n\n\*\*Summary of Expenses:\*\*|\n\n\*\*TOTAL AMOUNT:|$)/gi, '\n');
+    return String(content || '').replace(/\n*Hi,[\s\S]*?I hope this message finds you well\.[\s\S]*?(?=\*\*Summary of Expenses:\*\*|\*\*TOTAL AMOUNT:|$)/gi, '\n');
 };
 
 const isOver300Detail = (detail?: string): boolean => {
