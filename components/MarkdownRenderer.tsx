@@ -128,6 +128,10 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
         return;
     }
 
+    if (trimmed.startsWith('<!--') && trimmed.endsWith('-->')) {
+      return;
+    }
+
     // Headers
     if (trimmed.startsWith('### ')) {
       elements.push(<h3 key={index} className={`text-lg font-bold ${styles.h3} mt-6 mb-2 tracking-tight`}>{trimmed.replace('### ', '')}</h3>);

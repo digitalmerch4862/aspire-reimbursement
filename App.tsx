@@ -667,6 +667,10 @@ const stripJulianApprovalSection = (content: string): string => {
     return String(content || '').replace(/\n*<!--\s*JULIAN_APPROVAL_BLOCK_START\s*-->[\s\S]*?<!--\s*JULIAN_APPROVAL_BLOCK_END\s*-->\s*/gi, '\n');
 };
 
+const stripClaimantConfirmation = (content: string): string => {
+    return String(content || '').replace(/\n*Hi,\s*\n\nI hope this message finds you well\.[\s\S]*?(?=\n\n\*\*Summary of Expenses:\*\*|\n\n\*\*TOTAL AMOUNT:|$)/gi, '\n');
+};
+
 const isOver300Detail = (detail?: string): boolean => {
     const text = String(detail || '').toLowerCase();
     return text.includes('above $300')
@@ -793,7 +797,8 @@ const upsertJulianApprovalSection = (
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
 
-    return `${approvalSection}\n\n${stripped}`;
+    const cleanedContent = stripClaimantConfirmation(stripped).trim();
+    return `${approvalSection}\n\n${cleanedContent}`.trim();
 };
 
 const appendDuplicateAuditMeta = (
