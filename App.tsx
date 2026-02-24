@@ -9,7 +9,12 @@ import {
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import Logo from './components/Logo';
+import SoloMode from './components/Dashboard/SoloMode';
+import GroupMode from './components/Dashboard/GroupMode';
+import ManualMode from './components/Dashboard/ManualMode';
+import ModeTabs, { DashboardMode } from './components/Dashboard/ModeTabs';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
+
 import { hasSupabaseEnv, supabase } from './services/supabaseClient';
 
 // Default Data for Employee List
@@ -455,7 +460,8 @@ interface WarningToastState {
     message: string;
 }
 
-type RequestMode = 'solo' | 'group';
+type RequestMode = 'solo' | 'group' | 'manual';
+
 
 type QuickEditFieldKey =
     | 'staffMember'
@@ -510,6 +516,20 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
     const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
     const extracted: GroupPettyCashEntry[] = [];
 
+    // First, try to detect "Staff member to reimburse: [Name]" patterns
+    const staffMemberMatches = Array.from(rawText.matchAll(/Staff\s*member\s*to\s*reimburse:\s*(.+)/gi));
+    if (staffMemberMatches.length > 0) {
+        staffMemberMatches.forEach(match => {
+            const staffName = match[1].trim();
+            if (staffName) {
+                // Try to find an amount following this staff member if possible, otherwise 0
+                extracted.push({ staffName, amount: 0 });
+            }
+        });
+        return extracted;
+    }
+
+    // Fallback to table-like pattern detection
     for (const line of lines) {
         const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
         if (!match) continue;
@@ -523,6 +543,7 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
 
     return extracted;
 };
+
 
 interface ParticularAmountLine {
     product: string;
@@ -1161,14 +1182,21 @@ const [isEditing, setIsEditing] = useState(false);
     const [reimbursementFormText, setReimbursementFormText] = useState('');
     const [receiptDetailsText, setReceiptDetailsText] = useState('');
     const [requestMode, setRequestMode] = useState<RequestMode>('solo');
-    const [isSpecialInstructionMode, setIsSpecialInstructionMode] = useState(false);
     const reimbursementFormRef = useRef<HTMLTextAreaElement | null>(null);
+
 
     const [emailCopied, setEmailCopied] = useState<'julian' | 'claimant' | null>(null);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [reportCopied, setReportCopied] = useState<'nab' | 'eod' | 'analytics' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'generated' | null>(null);
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'database' | 'nab_log' | 'eod' | 'analytics' | 'settings'>('dashboard');
+
+    useEffect(() => {
+        if (requestMode === 'manual' && activeTab === 'dashboard') {
+            handleProcess();
+        }
+    }, [requestMode, activeTab]);
+
     const [loadingSplash, setLoadingSplash] = useState(true);
     const [nowTick, setNowTick] = useState(() => Date.now());
 
@@ -2346,9 +2374,6 @@ const [isEditing, setIsEditing] = useState(false);
         return days > 30;
     }).length, [currentInputTransactions]);
 
-    const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && !isSpecialInstructionMode;
-
-
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
         if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
@@ -2438,8 +2463,10 @@ const [isEditing, setIsEditing] = useState(false);
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
-    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && !isSpecialInstructionMode;
-    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && !isSpecialInstructionMode;
+    const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode !== 'manual';
+    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode !== 'manual';
+    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode !== 'manual';
+
 
     const isJulianApprovalRequired = isOver300ApprovalRequired || isOver30DaysApprovalRequired;
 
@@ -2448,7 +2475,7 @@ const [isEditing, setIsEditing] = useState(false);
         const receiptText = receiptDetailsText.trim();
         const hasInput = !!(formText || receiptText);
 
-        if (isSpecialInstructionMode) {
+        if (requestMode === 'manual') {
             return [{
                 id: 'special',
                 title: 'Special Instruction Active',
@@ -3258,8 +3285,8 @@ const [isEditing, setIsEditing] = useState(false);
         setReimbursementFormText('');
         setReceiptDetailsText('');
         setRequestMode('solo');
-        setIsSpecialInstructionMode(false);
         setSelectedEmployees(new Map());
+
         setEmployeeSearchQuery(new Map());
         setShowEmployeeDropdown(new Map());
         setAmountSelectionByTx(new Map());
@@ -3928,7 +3955,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
     };
 
     const handleProcess = async () => {
-        if (!reimbursementFormText.trim() && !receiptDetailsText.trim() && !isSpecialInstructionMode) {
+        if (!reimbursementFormText.trim() && !receiptDetailsText.trim() && requestMode === 'solo') {
             setErrorMessage("Please paste Reimbursement Form or Receipt Details first.");
             return;
         }
@@ -3959,43 +3986,11 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
             let totalAmount = 0;
             let receiptGrandTotal: number | null = null;
 
-            if (isSpecialInstructionMode) {
-                phase1 = `<<<PHASE_1_START>>>
-
-## Special Instruction
-
-Manual special instruction mode is active. This entry is intended for NAB/EOD logs only.
-<<<PHASE_1_END>>>`;
-
-                phase2 = `<<<PHASE_2_START>>>
-## Data Standardization
-
-Special instruction template initialized.
-<<<PHASE_2_END>>>`;
-
-                phase3 = `<<<PHASE_3_START>>>
-Special instruction mode: bypassed reimbursement and receipt parsing.
-<<<PHASE_3_END>>>`;
-
-                phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** [Enter Staff Name]
-**Amount Transferred:** $0.00
-**NAB Reference:** Enter NAB Code
-
-**Summary of Expenses:**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | SPECIAL-INSTRUCTION | Manual Entry | - | Special Instruction | Other | $0.00 | $0.00 | No reimbursement form/receipt |
-
-**TOTAL AMOUNT: $0.00**
-`;
-
+            if (requestMode === 'manual') {
+                phase1 = `<<<PHASE_1_START>>>\n## Manual Mode Active\nManual entry mode initialized for quick logging.\n<<<PHASE_1_END>>>`;
+                phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nManual entry standardization active.\n<<<PHASE_2_END>>>`;
+                phase3 = `<<<PHASE_3_START>>>\nManual Mode: Rules validation bypassed.\n<<<PHASE_3_END>>>`;
+                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.\n\n**Staff Member:** [Enter Staff Name]\n**Amount Transferred:** $0.00\n**NAB Reference:** Enter NAB Code\n\n**Summary of Expenses:**\n\n| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n| 1 | MANUAL-ENTRY | Manual Entry | - | Manual Item | Other | $0.00 | $0.00 | Manual entry mode |\n\n**TOTAL AMOUNT: $0.00**\n`;
 
                 setResults({ phase1, phase2, phase3, phase4 });
                 setProcessingState(ProcessingState.COMPLETE);
@@ -4003,13 +3998,47 @@ I am writing to confirm that your reimbursement request has been successfully pr
                 return;
             }
 
-            // Parse key-value pairs from Reimbursement Form
+            // Group Mode Logic
+            if (requestMode === 'group') {
+                const groupPettyCashEntries = parseGroupPettyCashEntries(formText + '\n' + receiptText);
+                
+                if (groupPettyCashEntries.length < 1) {
+                    // Try to detect staff from "Staff member to reimburse: ..." pattern
+                    const detectedStaff = Array.from(formText.matchAll(/Staff\s*member\s*to\s*reimburse:\s*(.+)/gi)).map(m => m[1].trim());
+                    if (detectedStaff.length > 0) {
+                        detectedStaff.forEach(name => groupPettyCashEntries.push({ staffName: name, amount: 0 }));
+                    }
+                }
+
+                if (groupPettyCashEntries.length === 0) {
+                    setErrorMessage('Group Mode could not detect any staff members. Use "Staff member to reimburse: [Name]" format.');
+                    setProcessingState(ProcessingState.IDLE);
+                    return;
+                }
+
+                totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
+                
+                const staffBlocks = groupPettyCashEntries
+                    .map((entry) => `**Staff Member:** ${entry.staffName}\n**Amount Transferred:** $${entry.amount.toFixed(2)}\n**NAB Reference:** Enter NAB Code`)
+                    .join('\n\n');
+
+                phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${groupPettyCashEntries.length} staff member(s).\n<<<PHASE_1_END>>>`;
+                phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nGroup processing active.\n<<<PHASE_2_END>>>`;
+                phase3 = `<<<PHASE_3_START>>>\nGroup Mode: Rules validation bypassed for multi-staff entry.\n<<<PHASE_3_END>>>`;
+                phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your group reimbursement request has been prepared and processed today.\n\n${staffBlocks}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n`;
+
+                setResults({ phase1, phase2, phase3, phase4 });
+                setProcessingState(ProcessingState.COMPLETE);
+                setOcrStatus('Complete');
+                return;
+            }
+
+            // Solo Mode Logic (Original)
             const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
             const addressMatch = formText.match(/Address:\s*(.+)/i);
             const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
             const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
             
-            // Key-value parsing for Reimbursement Form
             const particularMatch = formText.match(/Particular:\s*(.+)/i);
             const datePurchasedMatch = formText.match(/Date\s*Purchased:\s*(.+)/i);
             const amountMatch = formText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i);
@@ -4020,7 +4049,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
             const staffMember = staffMatch ? staffMatch[1].trim() : '';
             const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
             
-            // Get total amount from either box
             const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
             const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
             totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
@@ -4029,20 +4057,10 @@ I am writing to confirm that your reimbursement request has been successfully pr
             const particularAmountLines = parseParticularAmountLines(formText);
             let usedParticularAmountLines = false;
 
-            // Parse table from Receipt Details or Reimbursement Form
             const allText = formText + '\n' + receiptText;
             const lines = allText.split('\n');
             const hasPipeTableInput = lines.some((line) => line.trim().startsWith('|'));
             const items: Array<NormalizedReceiptRow & { amount: string; onCharge: string }> = [];
-            const groupPettyCashEntries = parseGroupPettyCashEntries(allText);
-            const isGroupPettyCashRequest = requestMode === 'group';
-
-            if (isGroupPettyCashRequest && groupPettyCashEntries.length < 2) {
-                setErrorMessage('Group Mode requires at least 2 staff entries (e.g., Name - 25.50).');
-                setProcessingState(ProcessingState.IDLE);
-                setOcrStatus('Needs review');
-                return;
-            }
             
             for (const line of lines) {
                 if (line.trim().startsWith('|') && !line.includes('---') && 
@@ -4050,15 +4068,10 @@ I am writing to confirm that your reimbursement request has been successfully pr
                     !line.includes('Unique ID') && !line.includes('Store Name')) {
                     
                     const parts = line.split('|').map(p => p.trim()).filter(p => p);
-                    
                     const normalized = normalizeReceiptRow(parts, String(totalAmount || '0.00'), '', '');
                     if (!normalized) continue;
 
-                    items.push({
-                        ...normalized,
-                        amount: normalized.receiptTotal,
-                        onCharge: ''
-                    });
+                    items.push({ ...normalized, amount: normalized.receiptTotal, onCharge: '' });
                 }
             }
 
@@ -4081,7 +4094,6 @@ I am writing to confirm that your reimbursement request has been successfully pr
                 });
             }
 
-            // If no items from table, use key-value from form
             if (items.length === 0 && particularMatch) {
                 items.push({
                     receiptNum: '1',
@@ -4105,22 +4117,7 @@ I am writing to confirm that your reimbursement request has been successfully pr
                 }, 0);
             }
 
-            if (isGroupPettyCashRequest) {
-                totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
-            }
-
-            const issues = (isGroupPettyCashRequest || isSpecialInstructionMode)
-                ? []
-                : buildManualAuditIssues(
-
-                    items,
-                    totalAmount,
-                    receiptGrandTotal,
-                    clientName,
-                    address,
-                    staffMember,
-                    approvedBy
-                );
+            const issues = buildManualAuditIssues(items, totalAmount, receiptGrandTotal, clientName, address, staffMember, approvedBy);
 
             if (issues.length > 0 && !bypassManualAuditRef.current) {
                 const blockingIssues = issues.filter((issue) => issue.level === 'error');
@@ -4141,228 +4138,15 @@ I am writing to confirm that your reimbursement request has been successfully pr
             }
             bypassManualAuditRef.current = false;
 
-            const reimbursementFormTotalValue = formTotalMatch
-                ? Number(formTotalMatch[1].replace(/,/g, ''))
-                : totalAmount;
-            const receiptTotalValue = receiptGrandTotal !== null
-                ? receiptGrandTotal
-                : totalAmount;
+            const reimbursementFormTotalValue = formTotalMatch ? Number(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
+            const receiptTotalValue = receiptGrandTotal !== null ? receiptGrandTotal : totalAmount;
             const totalDifferenceValue = Number(Math.abs((reimbursementFormTotalValue || 0) - (receiptTotalValue || 0)).toFixed(2));
 
-            // Determine which format is being used
-            const hasFormData = /Client(?:'|’)?s?\s*full\s*name\s*:/i.test(formText)
-                || /Staff\s*member/i.test(formText)
-                || /Particular/i.test(formText);
-            const hasReceiptTable = receiptText.includes('Receipt #') || receiptText.includes('GRAND TOTAL') || items.length > 0;
-
-            if (isGroupPettyCashRequest) {
-                const summaryLines = groupPettyCashEntries
-                    .map((entry, idx) => `${idx + 1}. ${entry.staffName} - $${entry.amount.toFixed(2)}`)
-                    .join('\n');
-
-                const staffBlocks = groupPettyCashEntries
-                    .map((entry, idx) => `**Staff Member:** ${entry.staffName}\n**Amount:** $${entry.amount.toFixed(2)}\n**Receipt ID:** GROUP-${Date.now()}-${idx + 1}\n**NAB Code:** Enter NAB Code`)
-                    .join('\n\n');
-
-                phase1 = `<<<PHASE_1_START>>>
-## Group Petty Cash Request Detected
-
-${summaryLines}
-
-**Total Amount:** $${totalAmount.toFixed(2)}
-
-**Source:** Manual Input (No AI/API Used)
-<<<PHASE_1_END>>>`;
-
-                phase2 = `<<<PHASE_2_START>>>
-## Data Standardization
-
-Request Type: Group Petty Cash
-Transaction Count: ${groupPettyCashEntries.length}
-Total Amount: $${totalAmount.toFixed(2)}
-
-${summaryLines}
-<<<PHASE_2_END>>>`;
-
-                phase3 = `<<<PHASE_3_START>>>
-Group petty cash request recognized. Separate NAB slot required per staff member.
-<<<PHASE_3_END>>>`;
-
-                phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your group petty cash reimbursement request has been prepared for processing.
-
-${staffBlocks}
-
-**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
-`;
-            } else if (hasFormData && hasReceiptTable) {
-
-                phase1 = `<<<PHASE_1_START>>>
-## Reimbursement Form Analysis
-
-**Client's Full Name:** ${clientName}
-**Address:** ${address}
-**Staff Member to Reimburse:** ${staffMember}
-**Approved by:** ${approvedBy}
-
-**Items:**
-${items.map((item, i) => `${i + 1}. ${item.storeName || item.product} - ${item.dateTime} - $${item.amount} (${item.category})`).join('\n')}
-
-**Total Amount:** $${totalAmount.toFixed(2)}
-
-**Source:** Manual Input (No AI/API Used)
-<<<PHASE_1_END>>>`;
-
-                phase2 = `<<<PHASE_2_START>>>
-## Data Standardization
-
-**Client's Full Name:** ${clientName}
-**Address:** ${address}
-**Staff Member to Reimburse:** ${staffMember}
-**Approved by:** ${approvedBy}
-
-**Total Amount:** $${totalAmount.toFixed(2)}
-
-**Items Summary:**
-${items.map((item, i) => `${i + 1}. ${item.storeName || item.product}: $${item.amount}`).join('\n')}
-<<<PHASE_2_END>>>`;
-
-                phase3 = `<<<PHASE_3_START>>>
-${issues.length > 0
-                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
-                    : 'All manual validation checks passed.'}
-<<<PHASE_3_END>>>`;
-
-                phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Amount Transferred:** ${totalAmount.toFixed(2)}
-**NAB Reference:** Enter NAB Code
-<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
-
-**Summary of Expenses:**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `${normalizeMoneyValue(item.itemAmount, item.amount)}`} | ${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
-
-**TOTAL AMOUNT: ${totalAmount.toFixed(2)}**
-`;
-
-
-            } else if (hasFormData) {
-
-                phase1 = `<<<PHASE_1_START>>>
-## Reimbursement Form Analysis
-
-**Client's Full Name:** ${clientName}
-**Address:** ${address}
-**Staff Member to Reimburse:** ${staffMember}
-**Approved by:** ${approvedBy}
-
-**Items:**
-${items.map((item, i) => `${i + 1}. ${item.storeName || item.product} - ${item.dateTime} - $${item.amount}`).join('\n')}
-
-**Total Amount:** $${totalAmount.toFixed(2)}
-
-**Source:** Manual Input (No AI/API Used)
-<<<PHASE_1_END>>>`;
-
-                phase2 = `<<<PHASE_2_START>>>
-## Data Standardization
-
-**Client's Full Name:** ${clientName}
-**Address:** ${address}
-**Staff Member to Reimburse:** ${staffMember}
-**Approved by:** ${approvedBy}
-
-**Total Amount:** $${totalAmount.toFixed(2)}
-<<<PHASE_2_END>>>`;
-
-                phase3 = `<<<PHASE_3_START>>>
-${issues.length > 0
-                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
-                    : 'All manual validation checks passed.'}
-<<<PHASE_3_END>>>`;
-
-                phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Amount Transferred:** ${totalAmount.toFixed(2)}
-**NAB Reference:** Enter NAB Code
-<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
-
-**Summary of Expenses:**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `${normalizeMoneyValue(item.itemAmount, item.amount)}`} | ${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
-
-**TOTAL AMOUNT: ${totalAmount.toFixed(2)}**
-`;
-
-
-            } else {
-                // Generic fallback - just show the raw text
-                const combined = [formText, receiptText].filter(t => t).join('\n\n---\n\n');
-                
-                phase1 = `<<<PHASE_1_START>>>
-## Manual Input
-
-${combined}
-
-**Source:** Manual Input (No AI/API Used)
-<<<PHASE_1_END>>>`;
-
-                phase2 = `<<<PHASE_2_START>>>
-## Data Standardization
-
-Please review the input data above.
-<<<PHASE_2_END>>>`;
-
-                phase3 = `<<<PHASE_3_START>>>
-${issues.length > 0
-                    ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n')
-                    : 'Manual validation skipped due to limited input.'}
-<<<PHASE_3_END>>>`;
-
-                phase4 = `Hi,
-
-I hope this message finds you well.
-
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
-
-**Staff Member:** [Enter Staff Name]
-**Amount Transferred:** [Enter Amount]
-**NAB Reference:** Enter NAB Code
-<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
-
-Please review the details below and confirm if everything is correct.
-
-${combined}
-
-**Summary of Expenses:**
-
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
-
----
-*Processed using manual input (no AI/API)*
-`;
-
-            }
+            phase1 = `<<<PHASE_1_START>>>\n## Solo Mode Audit\nProcessing individual reimbursement request.\n<<<PHASE_1_END>>>`;
+            phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nForm and receipt data synced.\n<<<PHASE_2_END>>>`;
+            phase3 = `<<<PHASE_3_START>>>\n${issues.length > 0 ? issues.map((issue, idx) => `${idx + 1}. [${issue.level.toUpperCase()}] ${issue.message}`).join('\n') : 'All manual validation checks passed.'}\n<<<PHASE_3_END>>>`;
+            
+            phase4 = `Hi,\n\nI hope this message finds you well.\n\nI am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.\n\n**Staff Member:** ${staffMember || '[Enter Staff Name]'}\n**Amount Transferred:** $${totalAmount.toFixed(2)}\n**NAB Reference:** Enter NAB Code\n<!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->\n\n**Summary of Expenses:**\n\n| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}\n\n**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**\n`;
 
             setResults({ phase1, phase2, phase3, phase4 });
             setProcessingState(ProcessingState.COMPLETE);
@@ -4374,6 +4158,7 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             setProcessingState(ProcessingState.IDLE);
         }
     };
+
 
     const handleSaveEdit = () => {
         if (results) {
@@ -4630,7 +4415,8 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
         if (saveStatus === 'success') return <><RefreshCw size={12} strokeWidth={2.5} /> Start New Audit</>;
         if (saveStatus === 'error') return <><CloudUpload size={12} strokeWidth={2.5} /> Retry Save</>;
         if (saveStatus === 'duplicate') return <><AlertCircle size={12} strokeWidth={2.5} /> Duplicate Found</>;
-        if (isSpecialInstructionMode) {
+        if (requestMode === 'manual') {
+
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save to NAB/EOD</>;
         }
         if (results?.phase4.toLowerCase().includes('discrepancy')) {
@@ -5108,136 +4894,49 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                         <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
                             <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
-                                <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden relative group">
-                                    <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-                                    <div className="px-6 py-5 border-b border-white/5 space-y-4">
-                                        <div className="flex justify-between items-center gap-3">
-                                            <h2 className={`text-lg font-semibold tracking-tight ${requestMode === 'solo' ? 'text-emerald-300' : 'text-amber-300'}`}>
-                                                {requestMode === 'solo' ? 'Solo Mode' : 'Group Mode'}
-                                            </h2>
-                                            {results && (
-                                                <button onClick={resetAll} className="text-slate-500 hover:text-white transition-colors bg-white/5 p-2 rounded-full hover:bg-white/10" title="Reset">
-                                                    <RefreshCw size={16} />
-                                                </button>
-                                            )}
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2 rounded-xl bg-black/25 border border-white/10 p-1">
-                                            <button
-                                                onClick={() => setRequestMode('solo')}
-                                                className={`relative overflow-hidden rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 ${requestMode === 'solo'
-                                                        ? 'text-emerald-100 bg-emerald-500/25 border border-emerald-400/40 shadow-[0_0_20px_rgba(16,185,129,0.45)] animate-pulse'
-                                                        : 'text-slate-400 bg-transparent border border-transparent hover:text-slate-200 hover:bg-white/5'
-                                                    }`}
-                                            >
-                                                Solo
-                                            </button>
-                                            <button
-                                                onClick={() => setRequestMode('group')}
-                                                className={`relative overflow-hidden rounded-lg px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 ${requestMode === 'group'
-                                                        ? 'text-amber-100 bg-amber-500/25 border border-amber-400/40 shadow-[0_0_20px_rgba(245,158,11,0.45)] animate-pulse'
-                                                        : 'text-slate-400 bg-transparent border border-transparent hover:text-slate-200 hover:bg-white/5'
-                                                    }`}
-                                            >
-                                                Group
-                                            </button>
-                                        </div>
-                                        <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-2 flex items-center justify-between gap-2">
-                                            <div>
-                                                <p className="text-[10px] uppercase tracking-wider font-bold text-cyan-200">Special Instruction</p>
-                                                <p className="text-[11px] text-cyan-100/80">Skip database save; include in NAB/EOD logs only.</p>
-                                            </div>
-                                            <button
-                                                onClick={() => {
-                                                    const nextMode = !isSpecialInstructionMode;
-                                                    setIsSpecialInstructionMode(nextMode);
-                                                    if (nextMode) {
-                                                        // Automatically trigger audit start logic to show boxes immediately
-                                                        setTimeout(() => handleProcess(), 0);
-                                                    } else {
-                                                        // Optionally reset when turned off
-                                                        resetAll();
-                                                    }
-                                                }}
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-colors ${isSpecialInstructionMode ? 'bg-cyan-400/20 text-cyan-100 border-cyan-300/60' : 'bg-black/30 text-slate-300 border-white/15'}`}
-                                            >
+                                <ModeTabs currentMode={requestMode} onModeChange={setRequestMode} />
+                                
+                                {requestMode === 'solo' && (
+                                    <SoloMode 
+                                        reimbursementFormText={reimbursementFormText}
+                                        setReimbursementFormText={setReimbursementFormText}
+                                        receiptDetailsText={receiptDetailsText}
+                                        setReceiptDetailsText={setReceiptDetailsText}
+                                        handleProcess={handleProcess}
+                                        processingState={processingState}
+                                        errorMessage={errorMessage}
+                                        results={results}
+                                        resetAll={resetAll}
+                                        reimbursementFormRef={reimbursementFormRef}
+                                    />
+                                )}
 
-                                                {isSpecialInstructionMode ? 'On' : 'Off'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="p-6 space-y-6">
-                                        <div className="space-y-4">
-                                            <h3 className="text-sm font-medium text-slate-400">Reimbursement Form</h3>
-                                            <textarea
-                                                ref={reimbursementFormRef}
-                                                value={reimbursementFormText}
-                                                onChange={(e) => setReimbursementFormText(e.target.value)}
-                                                placeholder={`Client's full name: Dylan Crane
-Address: 3A Acre Street, Oran Park
-Staff member to reimburse: Isaac Thompson
-Approved by: Isaac Thompson
+                                {requestMode === 'group' && (
+                                    <GroupMode 
+                                        reimbursementFormText={reimbursementFormText}
+                                        setReimbursementFormText={setReimbursementFormText}
+                                        handleProcess={handleProcess}
+                                        processingState={processingState}
+                                        errorMessage={errorMessage}
+                                        results={results}
+                                        resetAll={resetAll}
+                                        reimbursementFormRef={reimbursementFormRef}
+                                    />
+                                )}
 
-Particular | Date Purchased | Amount | On Charge Y/N
-Pocket Money | 15.2.25 | $20 | N
-Takeout | 12.2.26 | $19.45 | N
+                                {requestMode === 'manual' && (
+                                    <ManualMode 
+                                        handleProcess={handleProcess}
+                                        processingState={processingState}
+                                        errorMessage={errorMessage}
+                                        results={results}
+                                        resetAll={resetAll}
+                                    />
+                                )}
 
-Total Amount: $39.45`}
-                                                className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
-                                            />
-                                        </div>
-
-                                        <div className="relative">
-                                            <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                                <div className="w-full border-t border-white/5"></div>
-                                            </div>
-                                            <div className="relative flex justify-center">
-                                                <span className="bg-[#1c1e24] px-2 text-xs text-slate-500 uppercase tracking-widest">And/Or</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-4">
-                                            <h3 className="text-sm font-medium text-slate-400">Receipt Details</h3>
-                                            <textarea
-                                                value={receiptDetailsText}
-                                                onChange={(e) => setReceiptDetailsText(e.target.value)}
-                                                placeholder={`Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes
-1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Hills 1% Milk 3L | Groceries | Included in total | $6.00 | Walang visible OR number
-1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Bread Loaf 650g | Groceries | Included in total | $6.00 | Same receipt as above
-2 | 126302897245 | (Handwritten - not clear) | 31/01/2026 | Cool & Creamy - Lolly | Takeaway | $90.00 | $90.00 | Matches Incentive entry
-
-GRAND TOTAL: $39.45`}
-                                                className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
-                                            />
-                                        </div>
-                                        {errorMessage && (
-                                            <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
-                                                <AlertCircle className="text-red-400 mt-0.5 flex-shrink-0" size={18} />
-                                                <p className="text-sm text-red-200">{errorMessage}</p>
-                                            </div>
-                                        )}
-                                        <button
-                                            onClick={handleProcess}
-                                            disabled={processingState === ProcessingState.PROCESSING || (!isSpecialInstructionMode && !reimbursementFormText.trim() && !receiptDetailsText.trim())}
-                                            className={`w-full group relative flex justify-center items-center gap-3 py-4 px-6 rounded-2xl font-semibold text-white transition-all duration-300 shadow-[0_0_20px_rgba(79,70,229,0.1)]
-
-                        ${processingState === ProcessingState.PROCESSING
-                                                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                                    : 'bg-indigo-600 hover:bg-indigo-500 hover:shadow-[0_0_30px_rgba(79,70,229,0.4)] hover:scale-[1.02] active:scale-[0.98]'
-                                                }`}
-                                        >
-                                            {processingState === ProcessingState.PROCESSING ? (
-                                                <>Processing...</>
-                                            ) : (
-                                                <>
-                                                    <Send size={18} strokeWidth={2.5} />
-                                                    Start Audit
-                                                </>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
                                 {hasRuleInput && (
                                     <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
+
                                         <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
                                         <div className="space-y-3 pl-1">
                                             {rulesStatusItems.map((rule) => {
@@ -5362,7 +5061,8 @@ GRAND TOTAL: $39.45`}
                                                         <Plus size={12} strokeWidth={3} /> Add Box
                                                     </button>
                                                     <button
-                                                        onClick={saveStatus === 'success' ? handleStartNewAudit : (isSpecialInstructionMode ? handleSaveSpecialInstruction : handleSmartSave)}
+                                                        onClick={saveStatus === 'success' ? handleStartNewAudit : (requestMode === 'manual' ? handleSaveSpecialInstruction : handleSmartSave)}
+
 
                                                         disabled={isSaving || isEditing}
                                                         className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${saveStatus === 'success' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : saveStatus === 'error' || saveStatus === 'duplicate' ? 'bg-red-500 text-white shadow-red-500/20' : isEditing ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600 shadow-slate-900/20'}`}
