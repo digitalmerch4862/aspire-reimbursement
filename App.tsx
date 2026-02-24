@@ -329,15 +329,18 @@ const isPendingNabCodeValue = (value: string | null | undefined): boolean => {
     if (!value) return false;
     const normalized = value.trim().toLowerCase();
     if (!normalized) return false;
+    if (normalized === 'pending_liquidation') return false;
     return [
         'pending',
         'nab code is pending',
         'enter nab code',
         'enter nab reference',
         '[enter nab code]',
-        '[enter nab reference]'
-    ].includes(normalized);
+        'n/a',
+        '---'
+    ].some(p => normalized === p || normalized.includes(p));
 };
+
 
 const extractFieldValue = (content: string, patterns: RegExp[]): string => {
     for (const pattern of patterns) {
@@ -4486,7 +4489,9 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (content.includes("<!-- STATUS: PENDING -->")) {
+            if (content.includes("<!-- STATUS: PENDING_LIQUIDATION -->")) {
+                isDiscrepancy = false;
+            } else if (content.includes("<!-- STATUS: PENDING -->")) {
                 isDiscrepancy = true;
             } else if (content.includes("<!-- STATUS: PAID -->")) {
                 isDiscrepancy = false;
@@ -4496,6 +4501,7 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                     !content.toLowerCase().includes("successfully processed");
             }
 
+
             const clientName = clientMatch ? clientMatch[1].trim() : 'N/A';
             let nabRef = r.nab_code;
 
@@ -4504,8 +4510,13 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
             }
 
             if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
-                nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
+                if (content.includes("<!-- STATUS: PENDING_LIQUIDATION -->")) {
+                    nabRef = 'PENDING_LIQUIDATION';
+                } else {
+                    nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
+                }
             }
+
 
             let discrepancyReason = '';
             if (isDiscrepancy) {
@@ -5168,8 +5179,8 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{isPending ? '-' : row.youngPersonName}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.ypName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{row.youngPersonName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
