@@ -5108,7 +5108,15 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                         <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
                             <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
-                                <ModeTabs currentMode={requestMode} onModeChange={setRequestMode} />
+                                <ModeTabs 
+                                    currentMode={requestMode} 
+                                    onModeChange={(mode) => {
+                                        if (mode !== requestMode) {
+                                            resetAll();
+                                            setRequestMode(mode);
+                                        }
+                                    }} 
+                                />
                                 
                                 {requestMode === 'solo' && (
                                     <SoloMode 
