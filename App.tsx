@@ -2675,9 +2675,9 @@ const [isEditing, setIsEditing] = useState(false);
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
-    const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode !== 'manual';
-    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode !== 'manual';
-    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode !== 'manual';
+    const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
+    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode === 'solo';
+    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode === 'solo';
 
 
     const isJulianApprovalRequired = isOver300ApprovalRequired || isOver30DaysApprovalRequired;
@@ -5334,9 +5334,12 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                     >
                                                         {getSaveButtonText()}
                                                     </button>
-                                                    <button onClick={() => handleCopyEmail('julian')} disabled={isEditing || !isJulianApprovalRequired} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied === 'julian' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing || !isJulianApprovalRequired ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
-                                                        {emailCopied === 'julian' ? (<><Check size={12} strokeWidth={3} /> Copied Julian</>) : (<><Copy size={12} strokeWidth={3} /> Copy to Julian</>)}
-                                                    </button>
+                                                    {requestMode === 'solo' && (
+                                                        <button onClick={() => handleCopyEmail('julian')} disabled={isEditing || !isJulianApprovalRequired} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied === 'julian' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing || !isJulianApprovalRequired ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
+                                                            {emailCopied === 'julian' ? (<><Check size={12} strokeWidth={3} /> Copied Julian</>) : (<><Copy size={12} strokeWidth={3} /> Copy to Julian</>)}
+                                                        </button>
+                                                    )}
+
                                                     <button onClick={() => handleCopyEmail('claimant')} disabled={isEditing} className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${emailCopied === 'claimant' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : isEditing ? 'bg-indigo-500/50 text-white/50 cursor-not-allowed' : 'bg-indigo-500 text-white shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 active:scale-95'}`}>
                                                         {emailCopied === 'claimant' ? (<><Check size={12} strokeWidth={3} /> Copied Claimant</>) : (<><Copy size={12} strokeWidth={3} /> Copy to Claimant</>)}
                                                     </button>
