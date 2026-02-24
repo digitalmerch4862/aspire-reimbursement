@@ -1776,25 +1776,27 @@ const [isEditing, setIsEditing] = useState(false);
             let rowIndex = 0;
 
             for (const line of lines) {
-                if (line.includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                if (line.includes('| Staff Member | Client | Location | Type | Amount | NAB Reference |')) {
                     inTable = true;
                     continue;
                 }
                 if (inTable && line.includes('| :---')) continue;
                 if (inTable && line.startsWith('|')) {
                     const parts = line.split('|').map(p => p.trim()).filter(p => p !== '');
-                    if (parts.length >= 4) {
+                    if (parts.length >= 6) {
                         const staffName = parts[0];
                         const ypName = parts[1] === '-' ? '' : parts[1];
                         const location = parts[2] === '-' ? '' : parts[2];
-                        const amount = parts[3];
-                        const currentNabRef = parts[4] || '';
+                        const expenseType = parts[3];
+                        const amount = parts[4];
+                        const currentNabRef = parts[5] || '';
 
                         tableRows.push({
                             index: rowIndex++,
                             staffName,
                             formattedName: staffName, // Simplified for group table
                             amount,
+                            expenseType,
                             receiptId: 'N/A',
                             currentNabRef: isValidNabReference(currentNabRef) ? currentNabRef : '',
                             ypName,
@@ -1963,7 +1965,7 @@ const [isEditing, setIsEditing] = useState(false);
             let rowIndex = 0;
             let inTable = false;
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                if (lines[i].includes('| Staff Member | Client | Location | Type | Amount | NAB Reference |')) {
                     inTable = true;
                     continue;
                 }
@@ -1971,9 +1973,9 @@ const [isEditing, setIsEditing] = useState(false);
                 if (inTable && lines[i].startsWith('|')) {
                     if (rowIndex === index) {
                         const parts = lines[i].split('|');
-                        // Row format: | Staff | Client | Location | Amount | NAB |
-                        // Parts will be ["", " Staff ", " Client ", " Location ", " Amount ", " NAB ", ""]
-                        parts[5] = ` ${newVal} `;
+                        // Row format: | Staff | Client | Location | Type | Amount | NAB |
+                        // Parts will be ["", " Staff ", " Client ", " Location ", " Type ", " Amount ", " NAB ", ""]
+                        parts[6] = ` ${newVal} `;
                         lines[i] = parts.join('|');
                         return lines.join('\n');
                     }
@@ -2046,7 +2048,7 @@ const [isEditing, setIsEditing] = useState(false);
             let rowIndex = 0;
             let inTable = false;
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                if (lines[i].includes('| Staff Member | Client | Location | Type | Amount | NAB Reference |')) {
                     inTable = true;
                     continue;
                 }
@@ -2178,7 +2180,7 @@ const [isEditing, setIsEditing] = useState(false);
             let rowIndex = 0;
             let inTable = false;
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                if (lines[i].includes('| Staff Member | Client | Location | Type | Amount | NAB Reference |')) {
                     inTable = true;
                     continue;
                 }
@@ -2186,7 +2188,7 @@ const [isEditing, setIsEditing] = useState(false);
                 if (inTable && lines[i].startsWith('|')) {
                     if (rowIndex === index) {
                         const parts = lines[i].split('|');
-                        parts[4] = ` ${formattedAmount} `;
+                        parts[5] = ` ${formattedAmount} `;
                         lines[i] = parts.join('|');
                         
                         // Recalculate Total Amount for the table footer
@@ -2194,15 +2196,15 @@ const [isEditing, setIsEditing] = useState(false);
                         let innerRowIndex = 0;
                         let innerInTable = false;
                         for (let j = 0; j < lines.length; j++) {
-                            if (lines[j].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                            if (lines[j].includes('| Staff Member | Client | Location | Type | Amount | NAB Reference |')) {
                                 innerInTable = true;
                                 continue;
                             }
                             if (innerInTable && lines[j].includes('| :---')) continue;
                             if (innerInTable && lines[j].startsWith('|')) {
                                 const rowParts = lines[j].split('|');
-                                if (rowParts.length >= 5) {
-                                    const amtStr = rowParts[4].replace(/[^0-9.-]/g, '');
+                                if (rowParts.length >= 6) {
+                                    const amtStr = rowParts[5].replace(/[^0-9.-]/g, '');
                                     total += parseFloat(amtStr) || 0;
                                 }
                             }
