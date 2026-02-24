@@ -5032,41 +5032,45 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-white/5">
-                                                {filteredDatabaseRows.map((row, index) => (
-                                                    <tr
-                                                        key={row.id}
-                                                        onClick={() => handleRowClick(row)}
-                                                        className={`transition-colors group cursor-pointer hover:bg-white/10 ${index % 2 === 0 ? 'bg-transparent' : 'bg-white/[0.02]'} ${selectedIds.has(row.id) ? 'bg-indigo-500/10' : ''}`}
-                                                    >
-                                                        <td
-                                                            className="px-4 py-3 border-r border-white/5 whitespace-nowrap cursor-pointer"
-                                                            onMouseDown={(e) => {
-                                                                e.stopPropagation();
-                                                                handleMouseDown(row.id);
-                                                            }}
-                                                            onMouseEnter={() => handleMouseEnter(row.id)}
-                                                            onClick={(e) => e.stopPropagation()}
+                                                {filteredDatabaseRows.map((row, index) => {
+                                                    const isPending = row.nabCode === 'PENDING' || String(row.nabCode).toLowerCase().includes('pending');
+                                                    return (
+                                                        <tr
+                                                            key={row.id}
+                                                            onClick={() => handleRowClick(row)}
+                                                            className={`transition-colors group cursor-pointer hover:bg-white/10 ${index % 2 === 0 ? 'bg-transparent' : 'bg-white/[0.02]'} ${selectedIds.has(row.id) ? 'bg-indigo-500/10' : ''}`}
                                                         >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedIds.has(row.id)}
-                                                                readOnly
-                                                                className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500/50 pointer-events-none"
-                                                            />
-                                                        </td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.timestamp}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.nabCode}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200 bg-white/5">{row.totalAmount}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.ypName}>{row.ypName}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.youngPersonName}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase">{row.staffName}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.expenseType}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{row.product}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.receiptDate}</td>
-                                                        <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{row.amount}</td>
-                                                        <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{row.dateProcessed}</td>
-                                                    </tr>
-                                                ))}
+                                                            <td
+                                                                className="px-4 py-3 border-r border-white/5 whitespace-nowrap cursor-pointer"
+                                                                onMouseDown={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleMouseDown(row.id);
+                                                                }}
+                                                                onMouseEnter={() => handleMouseEnter(row.id)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selectedIds.has(row.id)}
+                                                                    readOnly
+                                                                    className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500/50 pointer-events-none"
+                                                                />
+                                                            </td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.ypName}>{isPending ? '-' : row.ypName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.youngPersonName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.receiptDate}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
+                                                            <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.dateProcessed}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+
                                             </tbody>
                                         </table>
                                     </div>
