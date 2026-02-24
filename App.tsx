@@ -532,7 +532,13 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
         
         // Extract Name (it's the first line of the block)
         const lines = block.trim().split('\n');
-        const staffName = lines[0].trim();
+        let staffName = lines[0].trim();
+        
+        // Format Name (Last, First -> First Last)
+        if (staffName.includes(',')) {
+            const p = staffName.split(',');
+            if (p.length >= 2) staffName = `${p[1].trim()} ${p[0].trim()}`;
+        }
         
         // Extract Amount
         const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
@@ -559,7 +565,12 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
             const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
             if (!match) continue;
 
-            const staffName = match[1].replace(/\s+/g, ' ').trim();
+            let staffName = match[1].replace(/\s+/g, ' ').trim();
+            // Format Name (Last, First -> First Last)
+            if (staffName.includes(',')) {
+                const p = staffName.split(',');
+                if (p.length >= 2) staffName = `${p[1].trim()} ${p[0].trim()}`;
+            }
             const amount = Number(match[2]);
             if (!staffName || Number.isNaN(amount) || amount <= 0) continue;
 
@@ -1844,6 +1855,9 @@ const [isEditing, setIsEditing] = useState(false);
             const p = staffName.split(',');
             if (p.length >= 2) formattedName = `${p[1].trim()} ${p[0].trim()}`;
         }
+        
+        // Final cleaning: remove any bold markers from name if they leaked in
+        formattedName = formattedName.replace(/\*\*/g, '').trim();
 
         return {
             index,
@@ -2168,7 +2182,29 @@ const [isEditing, setIsEditing] = useState(false);
                         const parts = lines[i].split('|');
                         parts[4] = ` ${formattedAmount} `;
                         lines[i] = parts.join('|');
-                        return lines.join('\n');
+                        
+                        // Recalculate Total Amount for the table footer
+                        let total = 0;
+                        let innerRowIndex = 0;
+                        let innerInTable = false;
+                        for (let j = 0; j < lines.length; j++) {
+                            if (lines[j].includes('| Staff Member | Client (YP Name) | Location | Amount | NAB Reference |')) {
+                                innerInTable = true;
+                                continue;
+                            }
+                            if (innerInTable && lines[j].includes('| :---')) continue;
+                            if (innerInTable && lines[j].startsWith('|')) {
+                                const rowParts = lines[j].split('|');
+                                if (rowParts.length >= 5) {
+                                    const amtStr = rowParts[4].replace(/[^0-9.-]/g, '');
+                                    total += parseFloat(amtStr) || 0;
+                                }
+                            }
+                        }
+                        
+                        let updatedContent = lines.join('\n');
+                        updatedContent = updatedContent.replace(/\*\*TOTAL AMOUNT:\s*\$?[0-9,.]+\*\*/i, `**TOTAL AMOUNT: $${total.toFixed(2)}**`);
+                        return updatedContent;
                     }
                     rowIndex++;
                 }
