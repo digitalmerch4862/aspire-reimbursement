@@ -5268,8 +5268,9 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                         </div>
                                     </div>
                                 )}
-                                {results && (
+                                {(results || requestMode === 'manual') && (
                                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-full content-start">
+
                                         <div className="bg-indigo-500/5 backdrop-blur-xl rounded-[32px] border border-indigo-500/20 overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.3)] xl:col-span-2 relative">
                                             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[80px] pointer-events-none"></div>
                                             <div className="px-6 py-4 border-b border-indigo-500/10 flex items-center justify-between bg-indigo-500/10">
