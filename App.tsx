@@ -923,6 +923,73 @@ const QUICK_EDIT_FIELD_CONFIGS: QuickEditFieldConfig[] = [
     { key: 'amount', label: 'Amount' }
 ];
 
+const GROUP_TABLE_HEADER = '| Staff Member | Client | Location | Type | Amount | NAB Reference |';
+
+const isGroupTableContent = (content: string): boolean => content.includes('<!-- GROUP_TABLE_FORMAT -->');
+
+const getGroupTableRowParts = (content: string): Array<{ lineIndex: number; parts: string[] }> => {
+    const lines = content.split('\n');
+    const rows: Array<{ lineIndex: number; parts: string[] }> = [];
+    let inTable = false;
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (line.includes(GROUP_TABLE_HEADER)) {
+            inTable = true;
+            continue;
+        }
+        if (inTable && line.includes('| :---')) continue;
+        if (inTable && line.startsWith('|')) {
+            rows.push({ lineIndex: i, parts: line.split('|') });
+            continue;
+        }
+        if (inTable) break;
+    }
+    return rows;
+};
+
+const isGroupTableCellMissing = (value: string): boolean => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return true;
+    if (normalized === '-') return true;
+    if (normalized === 'n/a' || normalized === 'na') return true;
+    if (normalized.startsWith('enter ')) return true;
+    return false;
+};
+
+const updateGroupTableColumnValues = (
+    content: string,
+    columnIndex: number,
+    nextValue: string,
+    options?: { onlyMissing?: boolean; recalcTotal?: boolean }
+): string => {
+    const rows = getGroupTableRowParts(content);
+    if (rows.length === 0) return content;
+
+    const lines = content.split('\n');
+    rows.forEach(({ lineIndex, parts }) => {
+        if (parts.length <= columnIndex) return;
+        if (options?.onlyMissing && !isGroupTableCellMissing(parts[columnIndex])) return;
+        parts[columnIndex] = ` ${nextValue} `;
+        lines[lineIndex] = parts.join('|');
+    });
+
+    let updatedContent = lines.join('\n');
+    if (options?.recalcTotal) {
+        let total = 0;
+        rows.forEach(({ parts }) => {
+            if (parts.length <= 5) return;
+            const amt = parts[5].replace(/[^0-9.-]/g, '');
+            total += parseFloat(amt) || 0;
+        });
+        updatedContent = updatedContent.replace(
+            /\*\*TOTAL AMOUNT:\s*\$?[0-9,.]+\*\*/i,
+            `**TOTAL AMOUNT: $${total.toFixed(2)}**`
+        );
+    }
+
+    return updatedContent;
+};
+
 const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
     const base = {
         staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i],
@@ -941,6 +1008,16 @@ const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
 };
 
 const getQuickEditFieldValue = (content: string, key: QuickEditFieldKey): string => {
+    if (isGroupTableContent(content)) {
+        const rows = getGroupTableRowParts(content);
+        if (rows.length > 0) {
+            const parts = rows[0].parts;
+            if (key === 'staffMember') return String(parts[1] || '').trim();
+            if (key === 'clientFullName') return String(parts[2] || '').trim();
+            if (key === 'address') return String(parts[3] || '').trim();
+            if (key === 'amount') return String(parts[5] || '').trim();
+        }
+    }
     const patterns = getQuickFieldPatterns(key);
     for (const pattern of patterns) {
         const match = content.match(pattern);
@@ -954,6 +1031,7 @@ const isQuickEditFieldMissing = (key: QuickEditFieldKey, rawValue: string): bool
     if (key === 'clientLocation') return false;
     const value = String(rawValue || '').trim();
     if (!value) return true;
+    if (value === '-') return true;
     if (/^\[.*\]$/.test(value)) return true;
     if (/^(n\/a|na)$/i.test(value)) return true;
     if (/^enter\b/i.test(value)) return true;
@@ -968,6 +1046,18 @@ const applyQuickEditFieldValue = (content: string, key: QuickEditFieldKey, nextR
     const formattedValue = key === 'amount'
         ? (nextValue.startsWith('$') ? nextValue : `$${nextValue}`)
         : nextValue;
+
+    if (isGroupTableContent(content)) {
+        if (key === 'clientFullName') {
+            return updateGroupTableColumnValues(content, 2, formattedValue, { onlyMissing: true });
+        }
+        if (key === 'address') {
+            return updateGroupTableColumnValues(content, 3, formattedValue, { onlyMissing: true });
+        }
+        if (key === 'amount') {
+            return updateGroupTableColumnValues(content, 5, formattedValue, { onlyMissing: true, recalcTotal: true });
+        }
+    }
 
     const patterns = getQuickFieldPatterns(key);
     for (const pattern of patterns) {
@@ -2291,6 +2381,7 @@ const [isEditing, setIsEditing] = useState(false);
         data.forEach((record) => {
             const content = record.full_email_content || "";
             const internalId = record.id;
+            const isGroupTable = content.includes('<!-- GROUP_TABLE_FORMAT -->');
 
             // Extract Unique Receipt ID from content
             const receiptIdMatch = content.match(/\*\*Receipt ID:\*\*\s*(.*?)(?:\n|$)/);
@@ -2336,8 +2427,8 @@ const [isEditing, setIsEditing] = useState(false);
             // Mapping rules:
             // - ypName: Hendrix (from Client: or Client's Full Name)
             // - youngPersonName: Illawarra (from Location: or Client / Location)
-            const ypName = clientValue || clientFullNameValue || addressValue || clientLocationValue || '-';
-            const youngPersonName = locationValue || locationFirstPart || '-';
+            const ypName = clientValue || clientFullNameValue || addressValue || clientLocationValue || record.yp_name || '-';
+            const youngPersonName = locationValue || locationFirstPart || record.location || '-';
 
 
             const dateProcessed = new Date(record.created_at).toLocaleDateString();
@@ -2347,6 +2438,55 @@ const [isEditing, setIsEditing] = useState(false);
             const lines = content.split('\n');
             let foundTable = false;
             let tableRowsFound = false;
+
+            if (isGroupTable) {
+                let inGroupTable = false;
+                let rowIndex = 0;
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line.includes(GROUP_TABLE_HEADER)) {
+                        inGroupTable = true;
+                        continue;
+                    }
+                    if (inGroupTable && line.startsWith('| :---')) continue;
+                    if (inGroupTable && line.startsWith('|')) {
+                        const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
+                        if (cols.length >= 6) {
+                            const staffMember = cols[0] || staffName;
+                            const clientCell = cols[1];
+                            const locationCell = cols[2];
+                            const typeCell = cols[3] || 'Petty Cash';
+                            const amountCell = cols[4] || '0.00';
+
+                            const normalizedAmount = normalizeMoneyValue(amountCell, '0.00');
+
+                            tableRowsFound = true;
+                            allRows.push({
+                                id: `${internalId}-group-${rowIndex}`,
+                                uid: uidFallbacks[rowIndex] || receiptId,
+                                internalId: internalId,
+                                timestamp,
+                                rawDate,
+                                ypName: clientCell && clientCell !== '-' ? clientCell : (record.yp_name || ypName),
+                                youngPersonName: locationCell && locationCell !== '-' ? locationCell : (record.location || youngPersonName),
+                                staffName: staffMember,
+                                storeName: '-',
+                                product: 'Group Petty Cash',
+                                expenseType: typeCell,
+                                receiptDateTime: dateProcessed,
+                                receiptDate: dateProcessed,
+                                amount: normalizedAmount,
+                                totalAmount: normalizedAmount,
+                                dateProcessed,
+                                nabCode: nabRefDisplay
+                            });
+                            rowIndex += 1;
+                        }
+                        continue;
+                    }
+                    if (inGroupTable && line === '') break;
+                }
+            }
 
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
@@ -2358,7 +2498,7 @@ const [isEditing, setIsEditing] = useState(false);
                 if (foundTable && line.startsWith('| :---')) {
                     continue; // Skip separator
                 }
-                if (foundTable && line.startsWith('|')) {
+                if (!tableRowsFound && foundTable && line.startsWith('|')) {
                     const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
 
                     const fallbackUid = uidFallbacks[uidIdx] || receiptId;
@@ -4975,7 +5115,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                             </thead>
                                             <tbody className="divide-y divide-white/5">
                                                 {filteredDatabaseRows.map((row, index) => {
-                                                    const isPending = row.nabCode === 'PENDING' || String(row.nabCode).toLowerCase().includes('pending');
+                                                    const isPending = String(row.nabCode || '').trim().toUpperCase() === 'PENDING';
                                                     return (
                                                         <tr
                                                             key={row.id}
