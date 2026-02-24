@@ -2076,7 +2076,9 @@ const [isEditing, setIsEditing] = useState(false);
             return content;
         }
 
-        const marker = '**Staff Member:**';
+        const useBoldLabels = content.includes('**Staff Member:**');
+        const marker = useBoldLabels ? '**Staff Member:**' : 'Staff Member:';
+        const nabLabel = useBoldLabels ? '**NAB Code:**' : 'NAB Code:';
 
         const parts = content.split(marker);
 
@@ -2090,12 +2092,12 @@ const [isEditing, setIsEditing] = useState(false);
 
         // Replace NAB line
         if (targetPart.match(/NAB (?:Code|Reference):/i)) {
-            targetPart = targetPart.replace(/NAB (?:Code|Reference):.*/i, `NAB Code: ${newVal}`);
+            targetPart = targetPart.replace(/NAB (?:Code|Reference):.*/i, `${nabLabel} ${newVal}`);
         } else {
             if (targetPart.includes('Amount:')) {
-                targetPart = targetPart.replace(/(Amount:.*)/, `$1\n**NAB Code:** ${newVal}`);
+                targetPart = targetPart.replace(/(Amount:.*)/, `$1\n${nabLabel} ${newVal}`);
             } else {
-                targetPart += `\n**NAB Code:** ${newVal}`;
+                targetPart += `\n${nabLabel} ${newVal}`;
             }
         }
 
