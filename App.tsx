@@ -1788,7 +1788,9 @@ const [isEditing, setIsEditing] = useState(false);
         const receiptId = receiptMatch ? receiptMatch[1].trim() : 'N/A';
 
         // Find YP Name
-        const ypMatch = part.match(/\*\*YP Name:\*\*\s*(.*)/i) || part.match(/YP Name:\s*(.*)/i);
+        const ypMatch = part.match(/\*\*Client:\*\*\s*(.*)/i) 
+            || part.match(/\*\*YP Name:\*\*\s*(.*)/i) 
+            || part.match(/YP Name:\s*(.*)/i);
         const ypName = ypMatch ? ypMatch[1].trim() : '';
 
         // Find Location
@@ -2150,6 +2152,12 @@ const [isEditing, setIsEditing] = useState(false);
                 totalAmount = totalAmount.replace('(Based on Receipts/Form Audit)', '').trim();
             }
 
+            const clientValue = extractFieldValue(content, [
+                /(?:\*\*\s*Client\s*:\s*\*\*|Client\s*:)\s*(.*?)(?:\n|$)/i
+            ]);
+            const locationValue = extractFieldValue(content, [
+                /(?:\*\*\s*Location\s*:\s*\*\*|Location\s*:)\s*(.*?)(?:\n|$)/i
+            ]);
             const addressValue = extractFieldValue(content, [
                 /(?:\*\*\s*Address\s*:\s*\*\*|Address\s*:)\s*(.*?)(?:\n|$)/i
             ]);
@@ -2165,10 +2173,11 @@ const [isEditing, setIsEditing] = useState(false);
                 : clientLocationValue;
 
             // Mapping rules:
-            // - Client / Location column: Address -> Client / Location
-            // - YP NAME column: Client's Full Name -> first part of Client / Location
-            const ypName = addressValue || clientLocationValue || '-';
-            const youngPersonName = clientFullNameValue || locationFirstPart || '-';
+            // - ypName: Hendrix (from Client: or Client's Full Name)
+            // - youngPersonName: Illawarra (from Location: or Client / Location)
+            const ypName = clientValue || clientFullNameValue || addressValue || clientLocationValue || '-';
+            const youngPersonName = locationValue || locationFirstPart || '-';
+
 
             const dateProcessed = new Date(record.created_at).toLocaleDateString();
             const nabRefDisplay = record.nab_code || 'PENDING';
@@ -4104,7 +4113,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     .map((entry) => [
                         `**Staff Member:** ${entry.staffName}`,
                         `**Amount Transferred:** $${entry.amount.toFixed(2)}`,
-                        entry.ypName ? `**YP Name:** ${entry.ypName}` : '',
+                        entry.ypName ? `**Client:** ${entry.ypName}` : '',
                         entry.location ? `**Location:** ${entry.location}` : '',
                         `**NAB Reference:** Enter NAB Code`
                     ].filter(Boolean).join('\n'))
@@ -4918,8 +4927,9 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Time Stamp</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Nab Code</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[120px] bg-white/5">Total Amount</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Client / Location</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Client's Full Name</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Location</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Client</th>
+
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Staff Name</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Type of expense</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Product</th>
@@ -4956,8 +4966,8 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.ypName}>{isPending ? '-' : row.ypName}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.youngPersonName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{isPending ? '-' : row.youngPersonName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
