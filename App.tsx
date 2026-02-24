@@ -3,7 +3,8 @@ import {
     Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
     Copy, CreditCard, ClipboardList, Calendar, BarChart3, PieChart, TrendingUp,
-    Users, Database, Search, Download, Save, CloudUpload, Trash2
+    Users, Database, Search, Download, Save, CloudUpload, Trash2, Plus
+
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
@@ -1856,9 +1857,33 @@ const [isEditing, setIsEditing] = useState(false);
 
     // Employee Selection Handlers for Banking Details
     const handleEmployeeSelect = (txIndex: number, employee: Employee) => {
+        const name = getEmployeeDisplayName(employee);
         setSelectedEmployees(prev => new Map(prev).set(txIndex, employee));
-        setEmployeeSearchQuery(prev => new Map(prev).set(txIndex, getEmployeeDisplayName(employee)));
+        setEmployeeSearchQuery(prev => new Map(prev).set(txIndex, name));
         setShowEmployeeDropdown(prev => new Map(prev).set(txIndex, false));
+
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+        const updated = setStaffMemberInContent(content, txIndex, name);
+        if (isEditing) {
+            setEditableContent(updated);
+        } else {
+            setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
+    };
+
+
+    const setStaffMemberInContent = (content: string, index: number, name: string): string => {
+        const marker = '**Staff Member:**';
+        const parts = content.split(marker);
+        const partIndex = index + 1;
+        if (parts.length <= partIndex) return content;
+
+        let targetPart = parts[partIndex];
+        const lines = targetPart.split('\n');
+        lines[0] = ` ${name}`; 
+        parts[partIndex] = lines.join('\n');
+        return parts.join(marker);
     };
 
     const handleEmployeeSearchChange = (txIndex: number, query: string) => {
@@ -1869,7 +1894,52 @@ const [isEditing, setIsEditing] = useState(false);
             return next;
         });
         setShowEmployeeDropdown(prev => new Map(prev).set(txIndex, true));
+
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+        const updated = setStaffMemberInContent(content, txIndex, query);
+        if (isEditing) {
+            setEditableContent(updated);
+        } else {
+            setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
     };
+
+    const handleAddBankingDetail = () => {
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+
+        const newBlock = `\n**Staff Member:** [New Staff Member]\n**Amount:** $0.00\n**NAB Reference:** PENDING\n`;
+        const updated = content + newBlock;
+
+        if (isEditing) {
+            setEditableContent(updated);
+        } else {
+            setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
+    };
+
+    const handleRemoveBankingDetail = (index: number) => {
+        const content = isEditing ? editableContent : results?.phase4;
+        if (!content) return;
+
+        const marker = '**Staff Member:**';
+        const parts = content.split(marker);
+        if (parts.length <= 1) return; 
+
+        const partIndex = index + 1;
+        if (parts.length <= partIndex) return;
+
+        parts.splice(partIndex, 1);
+        const updated = parts.join(marker);
+
+        if (isEditing) {
+            setEditableContent(updated);
+        } else {
+            setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
+    };
+
 
     const handleEmployeeSearchFocus = (txIndex: number) => {
         setShowEmployeeDropdown(prev => new Map(prev).set(txIndex, true));
@@ -3873,11 +3943,13 @@ Special instruction mode: bypassed reimbursement and receipt parsing.
 
                 phase4 = `Hi,
 
-Special instruction entry for logging.
+I hope this message finds you well.
+
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
 
 **Staff Member:** [Enter Staff Name]
-**Amount:** $0.00
-**NAB Code:** Enter NAB Code
+**Amount Transferred:** $0.00
+**NAB Reference:** Enter NAB Code
 
 **Summary of Expenses:**
 
@@ -3887,6 +3959,7 @@ Special instruction entry for logging.
 
 **TOTAL AMOUNT: $0.00**
 `;
+
 
                 setResults({ phase1, phase2, phase3, phase4 });
                 setProcessingState(ProcessingState.COMPLETE);
@@ -4130,27 +4203,22 @@ ${issues.length > 0
 
 I hope this message finds you well.
 
-I am writing to confirm that your reimbursement request has been successfully processed today.
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
 
 **Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Client's Full Name:** ${clientName || '[Enter Client Name]'}
-**Address:** ${address}
-**Approved By:** ${approvedBy || '[Enter Approver]'}
-**Amount:** $${totalAmount.toFixed(2)}
-Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
-Receipt total is ${receiptTotalValue.toFixed(2)}
-Difference amount is ${totalDifferenceValue.toFixed(2)}
-**NAB Code:** Enter NAB Code
+**Amount Transferred:** ${totalAmount.toFixed(2)}
+**NAB Reference:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
 **Summary of Expenses:**
 
 | Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `${normalizeMoneyValue(item.itemAmount, item.amount)}`} | ${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
 
-**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+**TOTAL AMOUNT: ${totalAmount.toFixed(2)}**
 `;
+
 
             } else if (hasFormData) {
 
@@ -4191,27 +4259,22 @@ ${issues.length > 0
 
 I hope this message finds you well.
 
-I am writing to confirm that your reimbursement request has been successfully processed today.
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
 
 **Staff Member:** ${staffMember || '[Enter Staff Name]'}
-**Client's Full Name:** ${clientName || '[Enter Client Name]'}
-**Address:** ${address}
-**Approved By:** ${approvedBy || '[Enter Approver]'}
-**Amount:** $${totalAmount.toFixed(2)}
-Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
-Receipt total is ${receiptTotalValue.toFixed(2)}
-Difference amount is ${totalDifferenceValue.toFixed(2)}
-**NAB Code:** Enter NAB Code
+**Amount Transferred:** ${totalAmount.toFixed(2)}
+**NAB Reference:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
 **Summary of Expenses:**
 
 | Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `${normalizeMoneyValue(item.itemAmount, item.amount)}`} | ${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
 
-**TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+**TOTAL AMOUNT: ${totalAmount.toFixed(2)}**
 `;
+
 
             } else {
                 // Generic fallback - just show the raw text
@@ -4241,17 +4304,11 @@ ${issues.length > 0
 
 I hope this message finds you well.
 
-I am writing to confirm that your reimbursement request has been successfully processed today.
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
 
 **Staff Member:** [Enter Staff Name]
-**Client's Full Name:** ${clientName || '[Enter Client Name]'}
-**Address:** ${address || '[Enter Address]'}
-**Approved By:** [Enter Approver Name]
-**Amount:** [Enter Amount]
-Reimbursement form total is ${reimbursementFormTotalValue.toFixed(2)}
-Receipt total is ${receiptTotalValue.toFixed(2)}
-Difference amount is ${totalDifferenceValue.toFixed(2)}
-**NAB Code:** Enter NAB Code
+**Amount Transferred:** [Enter Amount]
+**NAB Reference:** Enter NAB Code
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
 Please review the details below and confirm if everything is correct.
@@ -4267,6 +4324,7 @@ ${items.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '
 ---
 *Processed using manual input (no AI/API)*
 `;
+
             }
 
             setResults({ phase1, phase2, phase3, phase4 });
@@ -5243,8 +5301,16 @@ GRAND TOTAL: $39.45`}
                                                     </h3>
                                                 </div>
                                                 <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={handleAddBankingDetail}
+                                                        className="flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 transition-all"
+                                                        title="Add Banking Detail"
+                                                    >
+                                                        <Plus size={12} strokeWidth={3} /> Add Box
+                                                    </button>
                                                     <button
                                                         onClick={saveStatus === 'success' ? handleStartNewAudit : (isSpecialInstructionMode ? handleSaveSpecialInstruction : handleSmartSave)}
+
                                                         disabled={isSaving || isEditing}
                                                         className={`flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold shadow-lg transition-all duration-200 ${saveStatus === 'success' ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-600' : saveStatus === 'error' || saveStatus === 'duplicate' ? 'bg-red-500 text-white shadow-red-500/20' : isEditing ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600 shadow-slate-900/20'}`}
                                                     >
@@ -5275,10 +5341,22 @@ GRAND TOTAL: $39.45`}
                                                         <CreditCard size={80} className="text-white" />
                                                     </div>
                                                     <div className="relative z-10">
-                                                        <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                                            <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
-                                                            Banking Details ({idx + 1}/{parsedTransactions.length})
-                                                        </h4>
+                                                        <div className="flex justify-between items-center mb-4">
+                                                            <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                                Banking Details ({idx + 1}/{parsedTransactions.length})
+                                                            </h4>
+                                                            {parsedTransactions.length > 1 && (
+                                                                <button 
+                                                                    onClick={() => handleRemoveBankingDetail(txKey)}
+                                                                    className="text-red-400 hover:text-red-300 transition-colors p-1"
+                                                                    title="Remove this box"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                             {/* Payee Name with Searchable Dropdown */}
                                                             <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
@@ -5325,31 +5403,18 @@ GRAND TOTAL: $39.45`}
                                                             <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
                                                                 <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
                                                                 <div className="flex justify-between items-center">
-                                                                    {isSpecialInstructionMode ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={selectedAmount}
-                                                                            onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
-                                                                            placeholder="0.00"
-                                                                            className="w-24 bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
-                                                                        />
-                                                                    ) : (
-                                                                        <select
-                                                                            value={selectedAmount}
-                                                                            onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
-                                                                            className="bg-transparent text-emerald-400 font-bold text-lg border-none outline-none pr-6"
-                                                                        >
-                                                                            {amountOptions.map((amountOption) => (
-                                                                                <option key={amountOption} value={amountOption} className="bg-slate-900 text-emerald-300">
-                                                                                    {amountOption}
-                                                                                </option>
-                                                                            ))}
-                                                                        </select>
-                                                                    )}
-                                                                    <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={selectedAmount}
+                                                                        onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
+                                                                        placeholder="0.00"
+                                                                        className="w-full bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
+                                                                    />
+                                                                    <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors ml-2">
                                                                         {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
                                                                     </button>
                                                                 </div>
+
                                                             </div>
                                                         </div>
                                                         
