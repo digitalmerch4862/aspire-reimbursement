@@ -2346,7 +2346,8 @@ const [isEditing, setIsEditing] = useState(false);
         return days > 30;
     }).length, [currentInputTransactions]);
 
-    const isOver300ApprovalRequired = currentInputOverallAmount >= 300;
+    const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && !isSpecialInstructionMode;
+
 
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
         if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
@@ -2437,8 +2438,9 @@ const [isEditing, setIsEditing] = useState(false);
         return { signal: 'green', redMatches, yellowMatches };
     }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
-    const hasFraudDuplicate = duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow';
-    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate;
+    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && !isSpecialInstructionMode;
+    const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && !isSpecialInstructionMode;
+
     const isJulianApprovalRequired = isOver300ApprovalRequired || isOver30DaysApprovalRequired;
 
     const rulesStatusItems = useMemo<RuleStatusItem[]>(() => {
@@ -2446,7 +2448,18 @@ const [isEditing, setIsEditing] = useState(false);
         const receiptText = receiptDetailsText.trim();
         const hasInput = !!(formText || receiptText);
 
+        if (isSpecialInstructionMode) {
+            return [{
+                id: 'special',
+                title: 'Special Instruction Active',
+                detail: 'Manual validation rules are bypassed. Direct entry enabled.',
+                severity: 'info',
+                status: 'pass'
+            }];
+        }
+
         if (!hasInput) {
+
             return [{
                 id: 'ready',
                 title: 'Awaiting Input',
@@ -4073,9 +4086,10 @@ I am writing to confirm that your reimbursement request has been successfully pr
                 totalAmount = groupPettyCashEntries.reduce((sum, entry) => sum + entry.amount, 0);
             }
 
-            const issues = isGroupPettyCashRequest
+            const issues = (isGroupPettyCashRequest || isSpecialInstructionMode)
                 ? []
                 : buildManualAuditIssues(
+
                     items,
                     totalAmount,
                     receiptGrandTotal,
