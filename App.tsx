@@ -12,6 +12,7 @@ import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
 import ManualMode from './components/Dashboard/ManualMode';
+import LiquidationTracker from './components/Dashboard/LiquidationTracker';
 import ModeTabs, { DashboardMode } from './components/Dashboard/ModeTabs';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 
@@ -677,13 +678,11 @@ const isWithinWeekdayResetWindow = (createdAt: string | Date, now: Date): boolea
     return createdMs >= windowStart && createdMs < windowEnd;
 };
 
-const upsertStatusTag = (content: string, status: 'PENDING' | 'PAID'): string => {
-    const statusTag = `<!-- STATUS: ${status} -->`;
-    if (content.includes('<!-- STATUS:')) {
-        return content.replace(/<!--\s*STATUS:\s*(?:PENDING|PAID)\s*-->/gi, statusTag);
-    }
-    return `${content}${content.endsWith('\n') ? '' : '\n\n'}${statusTag}`;
+const upsertStatusTag = (content: string, status: 'PENDING' | 'PAID' | 'PENDING_LIQUIDATION'): string => {
+    const stripped = content.replace(/\n*<!--\s*STATUS:\s*\w+\s*-->\s*/gi, '\n');
+    return `<!-- STATUS: ${status} -->\n${stripped.trim()}`;
 };
+
 
 const stripJulianApprovalSection = (content: string): string => {
     return String(content || '').replace(/\n*<!--\s*JULIAN_APPROVAL_BLOCK_START\s*-->[\s\S]*?<!--\s*JULIAN_APPROVAL_BLOCK_END\s*-->\s*/gi, '\n');
@@ -1209,6 +1208,19 @@ const [isEditing, setIsEditing] = useState(false);
     const [historyData, setHistoryData] = useState<any[]>([]);
     const [specialInstructionLogs, setSpecialInstructionLogs] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [isSettlingLiquidation, setIsSettlingLiquidation] = useState<string | null>(null);
+
+    const outstandingLiquidations = useMemo(() => {
+        return historyData
+            .filter(row => String(row.nabCode).toUpperCase() === 'PENDING_LIQUIDATION')
+            .map(row => ({
+                id: String(row.id),
+                staffName: String(row.staffName || 'Unknown'),
+                amount: String(row.totalAmount || row.amount || '0.00'),
+                date: String(row.timestamp || row.dateProcessed || 'N/A')
+            }));
+    }, [historyData]);
+
     const [dismissedIds, setDismissedIds] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -3379,7 +3391,34 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         }
     };
 
+    const handleSettleLiquidation = async (id: string) => {
+        if (!hasSupabaseEnv) {
+            setErrorMessage('Supabase environment not configured. Cannot settle liquidation.');
+            return;
+        }
+
+        setIsSettlingLiquidation(id);
+        try {
+            const { error } = await supabase
+                .from('reimbursement_logs')
+                .update({ nab_code: 'PAID' })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // Refresh history
+            await fetchHistory();
+            showSavedToast([{ nab_code: 'PAID', amount: 0 }]);
+        } catch (err: any) {
+            console.error('Settlement error:', err);
+            setErrorMessage(`Failed to settle liquidation: ${err.message}`);
+        } finally {
+            setIsSettlingLiquidation(null);
+        }
+    };
+
     const handleSaveToCloud = async (contentOverride?: string) => {
+
         const contentToSave = contentOverride || (isEditing ? editableContent : results?.phase4);
         if (!contentToSave) return;
         const isPendingSave = contentToSave.includes('<!-- STATUS: PENDING -->');
@@ -3507,7 +3546,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
     };
 
     const confirmSaveWithContent = (
-        status: 'PENDING' | 'PAID',
+        status: 'PENDING' | 'PAID' | 'PENDING_LIQUIDATION',
         baseContent: string,
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
@@ -3543,12 +3582,15 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
     };
 
     const confirmSave = (
-        status: 'PENDING' | 'PAID',
+        status: 'PENDING' | 'PAID' | 'PENDING_LIQUIDATION',
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
         const baseContent = isEditing ? editableContent : results?.phase4 || '';
-        confirmSaveWithContent(status, baseContent, options);
+        // Group mode always uses PENDING_LIQUIDATION
+        const finalStatus = requestMode === 'group' ? 'PENDING_LIQUIDATION' : status;
+        confirmSaveWithContent(finalStatus, baseContent, options);
     };
+
 
     const handleSaveAsPaid = () => {
         const hasTransactions = parsedTransactions.length > 0;
@@ -4012,6 +4054,17 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
 
                 if (groupPettyCashEntries.length === 0) {
                     setErrorMessage('Group Mode could not detect any staff members. Use "Staff member to reimburse: [Name]" format.');
+                    setProcessingState(ProcessingState.IDLE);
+                    return;
+                }
+
+                // CHECK FOR OUTSTANDING LIQUIDATIONS
+                const delinquentStaff = groupPettyCashEntries.find(entry => 
+                    outstandingLiquidations.some(ol => normalizeNameKey(ol.staffName) === normalizeNameKey(entry.staffName))
+                );
+
+                if (delinquentStaff) {
+                    setErrorMessage(`Blocked: ${delinquentStaff.staffName} has an outstanding liquidation. Please settle it first.`);
                     setProcessingState(ProcessingState.IDLE);
                     return;
                 }
@@ -4936,7 +4989,6 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
 
                                 {hasRuleInput && (
                                     <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
-
                                         <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
                                         <div className="space-y-3 pl-1">
                                             {rulesStatusItems.map((rule) => {
@@ -5011,9 +5063,16 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                         )}
                                     </div>
                                 )}
+
+                                <LiquidationTracker 
+                                    items={outstandingLiquidations}
+                                    onSettle={handleSettleLiquidation}
+                                    isSettling={isSettlingLiquidation}
+                                />
                             </div>
 
                             <div className="flex-1 space-y-6 min-h-[600px]">
+
                                 {!results && processingState === ProcessingState.IDLE && (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] p-12 text-center backdrop-blur-sm">
                                         <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6">
