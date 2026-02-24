@@ -19,44 +19,106 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
     let totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
                   receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
-    const receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
-    const formTotalValue = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
-    const receiptTotalValue = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : totalAmount;
-    const differenceAmount = Math.abs((formTotalValue || 0) - (receiptTotalValue || 0));
-
+    let receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
     const allText = formText + '\n' + receiptText;
     const lines = allText.split('\n');
     const items: any[] = [];
-    
-    // Block-based parsing
-    const blockMatches = Array.from(formText.matchAll(/Particular:\s*(.*?)(?:\n|$)/gi));
-    if (blockMatches.length > 0) {
-        blockMatches.forEach((match, idx) => {
-            const blockStart = (match as any).index || 0;
-            const blockEnd = formText.indexOf('Particular:', blockStart + 1);
-            const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
-            
-            const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
-            const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
-            const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
-            const ocMatch = blockText.match(/On\s*Charge\s*Y\/N:\s*(.*?)(?:\n|$)/i);
 
-            if (pMatch || aMatch) {
-                items.push({
-                    receiptNum: String(idx + 1),
-                    uniqueId: `particular-${idx + 1}`,
-                    storeName: pMatch ? pMatch[1].trim() : 'Particulars',
-                    dateTime: dMatch ? dMatch[1].trim() : '',
-                    product: pMatch ? pMatch[1].trim() : '',
-                    category: 'Other',
-                    itemAmount: aMatch ? aMatch[1].replace(',', '') : '0',
-                    receiptTotal: aMatch ? aMatch[1].replace(',', '') : '0',
-                    notes: '',
-                    amount: aMatch ? aMatch[1].replace(',', '') : '0',
-                    onCharge: ocMatch ? ocMatch[1].trim() : 'N'
-                });
+    const parseReceiptTable = (text: string) => {
+        const tableLines = text.split('\n');
+        const tableItems: any[] = [];
+        let inTable = false;
+        let headerFound = false;
+        let grandTotal: number | null = null;
+
+        for (const line of tableLines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('|')) {
+                if (inTable) break;
+                continue;
             }
-        });
+
+            const cols = line.split('|').slice(1, -1).map(col => col.trim());
+            const headerCheck = cols.map(col => col.toLowerCase());
+
+            if (!headerFound) {
+                const isHeader = headerCheck[0] === 'receipt #' && headerCheck[1]?.includes('unique id') && headerCheck[2]?.includes('store name');
+                if (isHeader) {
+                    headerFound = true;
+                    inTable = true;
+                }
+                continue;
+            }
+
+            if (cols.every(col => col === '' || col.startsWith(':---') || col.startsWith('---'))) {
+                continue;
+            }
+
+            const firstCell = String(cols[0] || '').toLowerCase();
+            if (firstCell.includes('grand total')) {
+                const totalCell = [...cols].reverse().find(col => /[0-9]/.test(col));
+                if (totalCell) {
+                    grandTotal = parseFloat(normalizeMoneyValue(totalCell, '0.00'));
+                }
+                continue;
+            }
+
+            if (!cols[0]) continue;
+
+            tableItems.push({
+                receiptNum: cols[0],
+                uniqueId: cols[1] || '-',
+                storeName: cols[2] || '-',
+                dateTime: cols[3] || '-',
+                product: cols[4] || '-',
+                category: cols[5] || 'Other',
+                itemAmount: cols[6] || '0.00',
+                receiptTotal: cols[7] || '0.00',
+                notes: cols[8] || '',
+                amount: cols[7] || cols[6] || '0.00'
+            });
+        }
+
+        return { items: tableItems, grandTotal, hasTable: headerFound };
+    };
+    
+    const tableParse = parseReceiptTable(receiptText || allText);
+    if (tableParse.items.length > 0) {
+        items.push(...tableParse.items);
+        if (tableParse.grandTotal !== null) {
+            receiptGrandTotal = tableParse.grandTotal;
+        }
+    } else {
+        // Block-based parsing
+        const blockMatches = Array.from(formText.matchAll(/Particular:\s*(.*?)(?:\n|$)/gi));
+        if (blockMatches.length > 0) {
+            blockMatches.forEach((match, idx) => {
+                const blockStart = (match as any).index || 0;
+                const blockEnd = formText.indexOf('Particular:', blockStart + 1);
+                const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
+                
+                const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
+                const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
+                const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+                const ocMatch = blockText.match(/On\s*Charge\s*Y\/N:\s*(.*?)(?:\n|$)/i);
+
+                if (pMatch || aMatch) {
+                    items.push({
+                        receiptNum: String(idx + 1),
+                        uniqueId: `particular-${idx + 1}`,
+                        storeName: pMatch ? pMatch[1].trim() : 'Particulars',
+                        dateTime: dMatch ? dMatch[1].trim() : '',
+                        product: pMatch ? pMatch[1].trim() : '',
+                        category: 'Other',
+                        itemAmount: aMatch ? aMatch[1].replace(',', '') : '0',
+                        receiptTotal: aMatch ? aMatch[1].replace(',', '') : '0',
+                        notes: '',
+                        amount: aMatch ? aMatch[1].replace(',', '') : '0',
+                        onCharge: ocMatch ? ocMatch[1].trim() : 'N'
+                    });
+                }
+            });
+        }
     }
 
     if (items.length === 0) {
@@ -82,6 +144,14 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
             }
         }
     }
+
+    if (!formTotalMatch && receiptGrandTotal !== null) {
+        totalAmount = receiptGrandTotal;
+    }
+
+    const formTotalValue = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
+    const receiptTotalValue = receiptGrandTotal !== null ? receiptGrandTotal : totalAmount;
+    const differenceAmount = Math.abs((formTotalValue || 0) - (receiptTotalValue || 0));
 
     if (!formTotalMatch && !receiptTotalMatch && items.length > 0) {
         totalAmount = items.reduce((sum, item) => {
