@@ -258,9 +258,19 @@ const stripInternalAuditMeta = (text: string): string => {
 
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
 const SPECIAL_INSTRUCTION_LOGS_KEY = 'aspire_special_instruction_logs';
+const GROUP_LIQUIDATION_QUEUE_KEY = 'aspire_group_liquidation_queue';
 const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
 const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
 const JULIAN_APPROVER_NAME = 'Julian';
+
+interface GroupLiquidationQueueItem {
+    id: string;
+    staffName: string;
+    ypName: string;
+    location: string;
+    amount: string;
+    createdAt: string;
+}
 
 const loadLocalAuditLogs = (): any[] => {
     try {
@@ -297,6 +307,35 @@ const saveSpecialInstructionLogs = (records: any[]): void => {
         localStorage.setItem(SPECIAL_INSTRUCTION_LOGS_KEY, JSON.stringify(records));
     } catch (error) {
         console.warn('Failed to save special instruction logs', error);
+    }
+};
+
+const loadGroupLiquidationQueue = (): GroupLiquidationQueueItem[] => {
+    try {
+        const raw = localStorage.getItem(GROUP_LIQUIDATION_QUEUE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((item: any) => ({
+                id: String(item?.id || ''),
+                staffName: String(item?.staffName || 'Unknown').trim() || 'Unknown',
+                ypName: String(item?.ypName || '-').trim() || '-',
+                location: String(item?.location || '-').trim() || '-',
+                amount: normalizeMoneyValue(String(item?.amount || '0.00'), '0.00'),
+                createdAt: String(item?.createdAt || new Date().toISOString())
+            }))
+            .filter((item: GroupLiquidationQueueItem) => item.id.length > 0);
+    } catch {
+        return [];
+    }
+};
+
+const saveGroupLiquidationQueue = (records: GroupLiquidationQueueItem[]): void => {
+    try {
+        localStorage.setItem(GROUP_LIQUIDATION_QUEUE_KEY, JSON.stringify(records));
+    } catch (error) {
+        console.warn('Failed to save group liquidation queue', error);
     }
 };
 
@@ -1391,19 +1430,43 @@ const [isEditing, setIsEditing] = useState(false);
     // Database / History State
     const [historyData, setHistoryData] = useState<any[]>([]);
     const [specialInstructionLogs, setSpecialInstructionLogs] = useState<any[]>([]);
+    const [groupLiquidationQueue, setGroupLiquidationQueue] = useState<GroupLiquidationQueueItem[]>(() => loadGroupLiquidationQueue());
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [isSettlingLiquidation, setIsSettlingLiquidation] = useState<string | null>(null);
 
-    const outstandingLiquidations = useMemo(() => {
+    const dbOutstandingLiquidations = useMemo(() => {
         return historyData
-            .filter(row => String(row.nabCode).toUpperCase() === 'PENDING_LIQUIDATION')
+            .filter(row => String(row.nab_code || row.nabCode || '').toUpperCase() === 'PENDING_LIQUIDATION')
             .map(row => ({
-                id: String(row.id),
-                staffName: String(row.staffName || 'Unknown'),
-                amount: String(row.totalAmount || row.amount || '0.00'),
-                date: String(row.timestamp || row.dateProcessed || 'N/A')
+                id: `db-${String(row.id)}`,
+                staffName: String(row.staff_name || row.staffName || 'Unknown'),
+                amount: normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00'),
+                date: String(row.created_at || row.timestamp || row.dateProcessed || 'N/A')
             }));
     }, [historyData]);
+
+    const groupPendingLiquidations = useMemo(() => {
+        return groupLiquidationQueue.map((item) => ({
+            id: item.id,
+            staffName: item.staffName,
+            ypName: item.ypName,
+            location: item.location,
+            amount: item.amount,
+            date: item.createdAt
+        }));
+    }, [groupLiquidationQueue]);
+
+    const outstandingLiquidations = useMemo(() => {
+        return [
+            ...dbOutstandingLiquidations,
+            ...groupPendingLiquidations.map((item) => ({
+                id: item.id,
+                staffName: item.staffName,
+                amount: item.amount,
+                date: item.date
+            }))
+        ];
+    }, [dbOutstandingLiquidations, groupPendingLiquidations]);
 
     const [dismissedIds, setDismissedIds] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -3945,6 +4008,41 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         }
     };
 
+    const addGroupLiquidationsFromTransactions = (transactions: Array<{ staffName?: string; ypName?: string; location?: string; amount?: string | number }>) => {
+        if (requestMode !== 'group' || transactions.length === 0) return;
+
+        const nowIso = new Date().toISOString();
+        const pendingItems: GroupLiquidationQueueItem[] = transactions
+            .map((tx, idx) => {
+                const staffName = String(tx.staffName || '').trim();
+                if (!staffName) return null;
+                return {
+                    id: `groupliq-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+                    staffName,
+                    ypName: String(tx.ypName || '-').trim() || '-',
+                    location: String(tx.location || '-').trim() || '-',
+                    amount: normalizeMoneyValue(String(tx.amount || '0.00'), '0.00'),
+                    createdAt: nowIso
+                };
+            })
+            .filter((item): item is GroupLiquidationQueueItem => Boolean(item));
+
+        if (pendingItems.length === 0) return;
+        setGroupLiquidationQueue((prev) => {
+            const next = [...pendingItems, ...prev];
+            saveGroupLiquidationQueue(next);
+            return next;
+        });
+    };
+
+    const handleSettleGroupLiquidation = (id: string) => {
+        setGroupLiquidationQueue((prev) => {
+            const next = prev.filter((item) => item.id !== id);
+            saveGroupLiquidationQueue(next);
+            return next;
+        });
+    };
+
     const handleSettleLiquidation = async (id: string) => {
         if (!hasSupabaseEnv) {
             setErrorMessage('Supabase environment not configured. Cannot settle liquidation.');
@@ -4067,6 +4165,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 const merged = [...localPayloads, ...loadLocalAuditLogs()];
                 saveLocalAuditLogs(merged);
                 setHistoryData(merged);
+                addGroupLiquidationsFromTransactions(transactions);
                 setSaveStatus('success');
                 showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
                 resetAll();
@@ -4098,6 +4197,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
 
             if (errorResult.error) throw errorResult.error;
 
+            addGroupLiquidationsFromTransactions(transactions);
             setSaveStatus('success');
             showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
             fetchHistory();
@@ -5561,10 +5661,61 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                 )}
 
                                 <LiquidationTracker 
-                                    items={outstandingLiquidations}
+                                    items={dbOutstandingLiquidations}
                                     onSettle={handleSettleLiquidation}
                                     isSettling={isSettlingLiquidation}
                                 />
+
+                                {requestMode === 'group' && (
+                                    <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
+                                        <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
+                                            <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
+                                            <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
+                                                {groupPendingLiquidations.length} Pending
+                                            </span>
+                                        </div>
+
+                                        {groupPendingLiquidations.length === 0 ? (
+                                            <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
+                                        ) : (
+                                            <div className="max-h-[260px] overflow-auto custom-scrollbar">
+                                                <table className="w-full text-xs">
+                                                    <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider">
+                                                        <tr>
+                                                            <th className="px-3 py-2 text-left">Staff Name</th>
+                                                            <th className="px-3 py-2 text-left">YP Name</th>
+                                                            <th className="px-3 py-2 text-left">Location</th>
+                                                            <th className="px-3 py-2 text-right">Amount</th>
+                                                            <th className="px-3 py-2 text-right">Action</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {groupPendingLiquidations.map((item) => (
+                                                            <tr key={item.id} className="border-t border-white/5">
+                                                                <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
+                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
+                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
+                                                                <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
+                                                                <td className="px-3 py-2 text-right">
+                                                                    <button
+                                                                        onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white hover:bg-emerald-400 transition-colors"
+                                                                    >
+                                                                        Settle
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+
+                                        <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
+                                            Pending rows in this list block matching staff from new group requests until settled.
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="flex-1 space-y-6 min-h-[600px]">
