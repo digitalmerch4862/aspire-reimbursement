@@ -2519,9 +2519,12 @@ const [isEditing, setIsEditing] = useState(false);
 
                     const dateMatch = normalized.dateTime.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
                     const receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
-                    const amountForDb = normalized.itemAmount.toLowerCase() === 'included in total'
-                        ? normalized.receiptTotal
-                        : normalized.itemAmount;
+                    const manualAmountFromRecord = normalizeMoneyValue(String(record.amount || totalAmount || '0.00'), '0.00');
+                    const isManualEntryRow = String(normalized.uniqueId || '').trim().toUpperCase() === 'MANUAL-ENTRY';
+                    const amountForDb = isManualEntryRow
+                        ? manualAmountFromRecord
+                        : (normalized.itemAmount.toLowerCase() === 'included in total' ? normalized.receiptTotal : normalized.itemAmount);
+                    const receiptTotalForDb = isManualEntryRow ? manualAmountFromRecord : normalized.receiptTotal;
 
                     allRows.push({
                         id: `${internalId}-${i}`, // Unique key for React using DB ID
@@ -2538,7 +2541,7 @@ const [isEditing, setIsEditing] = useState(false);
                         receiptDateTime: normalized.dateTime || receiptDate,
                         receiptDate,
                         amount: amountForDb,
-                        totalAmount: normalized.receiptTotal,
+                        totalAmount: receiptTotalForDb,
                         dateProcessed,
                         nabCode: nabRefDisplay // Display Bank Ref in Nab Code column
                     });
@@ -3225,10 +3228,23 @@ const [isEditing, setIsEditing] = useState(false);
         // Regex: Look for "**Staff Member:**" followed by content until newline
         newContent = newContent.replace(/(\*\*Staff Member:\*\*\s*)(.*?)(\n|$)/, `$1${editedRowData.staffName}$3`);
 
-        // 2. Update Amount in Text Blob
-        const amountVal = String(editedRowData.totalAmount).replace(/[^0-9.]/g, '');
-        // Regex: Look for "**Amount:**" maybe followed by "$"
-        newContent = newContent.replace(/(\*\*Amount:\*\*\s*\$?)(.*?)(\n|$)/, `$1$${amountVal}$3`);
+        // 2. Update Amount in Text Blob (supports Manual Mode: Amount Transferred)
+        const amountVal = normalizeMoneyValue(String(editedRowData.totalAmount), '0.00');
+        const amountLabelRegex = /(\*\*Amount(?: Transferred)?:\*\*\s*)\$?(.*?)(\n|$)/i;
+        if (amountLabelRegex.test(newContent)) {
+            newContent = newContent.replace(amountLabelRegex, `$1$${amountVal}$3`);
+        } else {
+            newContent = newContent.replace(/(Amount(?: Transferred)?:\s*)\$?(.*?)(\n|$)/i, `$1$${amountVal}$3`);
+        }
+
+        // 2b. Keep Manual Mode summary table and total line in sync with edited amount
+        if (newContent.includes('MANUAL-ENTRY')) {
+            newContent = newContent.replace(
+                /(\|\s*1\s*\|\s*MANUAL-ENTRY\s*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|[^\n]*\n?)/i,
+                `$1$${amountVal}$2$${amountVal}$3`
+            );
+            newContent = newContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1$${amountVal}$2`);
+        }
 
         // 3. Update Client / Location (ypName) in Text Blob
         // Regex: Look for "**Client / Location:**"
