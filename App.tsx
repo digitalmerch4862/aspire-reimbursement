@@ -2320,16 +2320,26 @@ const [isEditing, setIsEditing] = useState(false);
         if (parts.length <= partIndex) return content;
 
         let targetPart = parts[partIndex];
-        if (/\*\*Amount:\*\*/i.test(targetPart)) {
-            targetPart = targetPart.replace(/(\*\*Amount:\*\*\s*)(.*)/i, `$1${formattedAmount}`);
-        } else if (/Amount:/i.test(targetPart)) {
-            targetPart = targetPart.replace(/(Amount:\s*)(.*)/i, `$1${formattedAmount}`);
+        if (/\*\*Amount(?: Transferred)?:\*\*/i.test(targetPart)) {
+            targetPart = targetPart.replace(/(\*\*Amount(?: Transferred)?:\*\*\s*)(.*)/i, `$1${formattedAmount}`);
+        } else if (/Amount(?: Transferred)?:/i.test(targetPart)) {
+            targetPart = targetPart.replace(/(Amount(?: Transferred)?:\s*)(.*)/i, `$1${formattedAmount}`);
         } else {
             targetPart += `\n**Amount:** ${formattedAmount}`;
         }
 
         parts[partIndex] = targetPart;
-        return parts.join(marker);
+        let updatedContent = parts.join(marker);
+
+        if (updatedContent.includes('MANUAL-ENTRY')) {
+            updatedContent = updatedContent.replace(
+                /(\|\s*1\s*\|\s*MANUAL-ENTRY\s*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|[^\n]*\n?)/i,
+                `$1${formattedAmount}$2${formattedAmount}$3`
+            );
+            updatedContent = updatedContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1${formattedAmount}$2`);
+        }
+
+        return updatedContent;
     };
 
 
@@ -3366,11 +3376,30 @@ const [isEditing, setIsEditing] = useState(false);
                         }
                     }
 
-                    if (massEditData.ypName) {
-                        if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
-                            newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${massEditData.ypName}$3`);
+                    const massClientValue = String(massEditData.ypName || '').trim();
+                    const massLocationValue = String(massEditData.youngPersonName || '').trim();
+
+                    if (massClientValue) {
+                        nextRecord.yp_name = massClientValue;
+                        if (newContent.match(/\*\*Client:\*\*/i)) {
+                            newContent = newContent.replace(/(\*\*Client:\*\*\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
+                        } else if (newContent.match(/(^|\n)Client:\s*/i)) {
+                            newContent = newContent.replace(/((?:^|\n)Client:\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
+                        } else if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
+                            newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${massClientValue}$3`);
                         } else {
-                            newContent += `\n**Client / Location:** ${massEditData.ypName}`;
+                            newContent += `\n**Client:** ${massClientValue}`;
+                        }
+                    }
+
+                    if (massLocationValue) {
+                        nextRecord.location = massLocationValue;
+                        if (newContent.match(/\*\*Location:\*\*/i)) {
+                            newContent = newContent.replace(/(\*\*Location:\*\*\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
+                        } else if (newContent.match(/(^|\n)Location:\s*/i)) {
+                            newContent = newContent.replace(/((?:^|\n)Location:\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
+                        } else {
+                            newContent += `\n**Location:** ${massLocationValue}`;
                         }
                     }
 
@@ -3446,12 +3475,31 @@ const [isEditing, setIsEditing] = useState(false);
                     }
                 }
 
-                // 4. Client / Location
-                if (massEditData.ypName) {
-                    if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
-                        newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${massEditData.ypName}$3`);
+                // 4. Client and Location
+                const massClientValue = String(massEditData.ypName || '').trim();
+                const massLocationValue = String(massEditData.youngPersonName || '').trim();
+
+                if (massClientValue) {
+                    dbUpdates.yp_name = massClientValue;
+                    if (newContent.match(/\*\*Client:\*\*/i)) {
+                        newContent = newContent.replace(/(\*\*Client:\*\*\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
+                    } else if (newContent.match(/(^|\n)Client:\s*/i)) {
+                        newContent = newContent.replace(/((?:^|\n)Client:\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
+                    } else if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
+                        newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${massClientValue}$3`);
                     } else {
-                        newContent += `\n**Client / Location:** ${massEditData.ypName}`;
+                        newContent += `\n**Client:** ${massClientValue}`;
+                    }
+                }
+
+                if (massLocationValue) {
+                    dbUpdates.location = massLocationValue;
+                    if (newContent.match(/\*\*Location:\*\*/i)) {
+                        newContent = newContent.replace(/(\*\*Location:\*\*\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
+                    } else if (newContent.match(/(^|\n)Location:\s*/i)) {
+                        newContent = newContent.replace(/((?:^|\n)Location:\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
+                    } else {
+                        newContent += `\n**Location:** ${massLocationValue}`;
                     }
                 }
 
@@ -6889,9 +6937,15 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                             <input type="text" value={massEditData.nabCode} onChange={(e) => setMassEditData({ ...massEditData, nabCode: e.target.value })} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-700" placeholder="(Keep Original)" />
                                         </div>
 
-                                        {/* Client / Location */}
+                                        {/* Location */}
                                         <div className="space-y-2">
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Client / Location</label>
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Location</label>
+                                            <input type="text" value={massEditData.youngPersonName} onChange={(e) => setMassEditData({ ...massEditData, youngPersonName: e.target.value })} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-700" placeholder="(Keep Original)" />
+                                        </div>
+
+                                        {/* Client */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Client</label>
                                             <input type="text" value={massEditData.ypName} onChange={(e) => setMassEditData({ ...massEditData, ypName: e.target.value })} className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-700" placeholder="(Keep Original)" />
                                         </div>
 
