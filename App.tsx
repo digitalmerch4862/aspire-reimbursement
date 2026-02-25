@@ -523,43 +523,94 @@ const normalizeMoneyValue = (value: string, fallback = '0.00'): string => {
 
 const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
     const extracted: GroupPettyCashEntry[] = [];
-    
-    // Extract Location/Client if present
-    const locationMatch = rawText.match(/Client\s*\/\s*Location:\s*(.+)/i);
+
+    // Extract common location if present
+    const locationMatch = rawText.match(/(?:Client\s*\/\s*Location|Location)\s*:\s*(.+)/i);
     const commonLocation = locationMatch ? locationMatch[1].trim() : '';
 
-    // Split by "Staff Member:" to get individual blocks
-    const blocks = rawText.split(/Staff\s*Member\s*:/gi);
-    
-    // Skip first part as it's usually the header/location
-    for (let i = 1; i < blocks.length; i++) {
-        const block = blocks[i];
-        
-        // Extract Name (it's the first line of the block)
-        const lines = block.trim().split('\n');
-        let staffName = lines[0].trim();
-        
-        // Format Name (Last, First -> First Last)
+    const normalizeStaffName = (value: string): string => {
+        let staffName = String(value || '').trim();
         if (staffName.includes(',')) {
             const p = staffName.split(',');
             if (p.length >= 2) staffName = `${p[1].trim()} ${p[0].trim()}`;
         }
-        
-        // Extract Amount
-        const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
-        const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
-        
-        // Extract YP Name
-        const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
-        const ypName = ypMatch ? ypMatch[1].trim() : '';
+        return staffName;
+    };
 
-        if (staffName) {
-            extracted.push({ 
-                staffName, 
-                amount,
-                ypName,
-                location: commonLocation
-            });
+    const parseAmount = (value: string): number => {
+        const parsed = Number(String(value || '').replace(/[^0-9.\-]/g, ''));
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    // New format support: Staff Name | YP Name | Amount
+    const allLines = rawText.split(/\r?\n/).map((line) => line.trim());
+    const headerIndex = allLines.findIndex((line) => {
+        if (!line.includes('|')) return false;
+        const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
+        const cols = normalized.split('|').map((c) => c.trim());
+        if (cols.length !== 3) return false;
+        return /^staff\s*name$/i.test(cols[0])
+            && /^(?:yp|yb)\s*name$/i.test(cols[1])
+            && /^amount$/i.test(cols[2]);
+    });
+
+    if (headerIndex >= 0) {
+        let startedRows = false;
+        for (let i = headerIndex + 1; i < allLines.length; i += 1) {
+            const line = allLines[i];
+            if (!line) {
+                if (startedRows) break;
+                continue;
+            }
+            if (!line.includes('|')) {
+                if (startedRows) break;
+                continue;
+            }
+
+            const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
+            if (!normalized || /^:?-{3,}/.test(normalized.replace(/\|/g, '').trim())) continue;
+
+            const cols = normalized.split('|').map((c) => c.trim());
+            if (cols.length < 3) continue;
+
+            const staffName = normalizeStaffName(cols[0]);
+            const ypName = String(cols[1] || '').trim();
+            const amount = parseAmount(cols[2]);
+            if (!staffName || amount <= 0) continue;
+
+            startedRows = true;
+            extracted.push({ staffName, amount, ypName, location: commonLocation });
+        }
+    }
+
+    // Existing format support: Staff Member block style
+    if (extracted.length === 0) {
+        const blocks = rawText.split(/Staff\s*Member\s*:/gi);
+
+        // Skip first part as it's usually the header/location
+        for (let i = 1; i < blocks.length; i++) {
+            const block = blocks[i];
+
+            // Extract Name (it's the first line of the block)
+            const lines = block.trim().split('\n');
+            const staffName = normalizeStaffName(lines[0] || '');
+
+            // Extract Amount
+            const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+            const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+
+            // Extract YP Name
+            const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
+            const ypName = ypMatch ? ypMatch[1].trim() : '';
+
+            if (staffName) {
+                extracted.push({
+                    staffName,
+                    amount,
+                    ypName,
+                    location: commonLocation
+                });
+            }
         }
     }
 
@@ -2455,8 +2506,10 @@ const [isEditing, setIsEditing] = useState(false);
             if (isGroupTable) {
                 let inGroupTable = false;
                 const recordStaffName = String(record.staff_name || staffName || '').trim();
-                let matchedClient = record.yp_name || ypName;
-                let matchedLocation = record.location || youngPersonName;
+                const hasDbClient = typeof record.yp_name === 'string' && record.yp_name.trim() !== '' && record.yp_name.trim() !== '-';
+                const hasDbLocation = typeof record.location === 'string' && record.location.trim() !== '' && record.location.trim() !== '-';
+                let matchedClient = hasDbClient ? record.yp_name : ypName;
+                let matchedLocation = hasDbLocation ? record.location : youngPersonName;
                 let matchedType = 'Petty Cash';
                 let matchedAmount = normalizeMoneyValue(String(record.amount || totalAmount || '0.00'), '0.00');
 
@@ -2472,8 +2525,12 @@ const [isEditing, setIsEditing] = useState(false);
                         if (cols.length >= 6) {
                             const staffCell = cols[0] || '';
                             if (normalizeNameKey(staffCell) === normalizeNameKey(recordStaffName)) {
-                                matchedClient = cols[1] && cols[1] !== '-' ? cols[1] : matchedClient;
-                                matchedLocation = cols[2] && cols[2] !== '-' ? cols[2] : matchedLocation;
+                                if (!hasDbClient && cols[1] && cols[1] !== '-') {
+                                    matchedClient = cols[1];
+                                }
+                                if (!hasDbLocation && cols[2] && cols[2] !== '-') {
+                                    matchedLocation = cols[2];
+                                }
                                 matchedType = cols[3] || matchedType;
                                 matchedAmount = normalizeMoneyValue(cols[4] || matchedAmount, matchedAmount);
                                 break;

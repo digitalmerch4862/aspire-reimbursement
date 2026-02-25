@@ -6,31 +6,81 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
     const rawText = formText + '\n' + receiptText;
 
     const extracted: any[] = [];
-    
-    const locationMatch = rawText.match(/Client\s*\/\s*Location:\s*(.+)/i);
+
+    const locationMatch = rawText.match(/(?:Client\s*\/\s*Location|Location)\s*:\s*(.+)/i);
     const commonLocation = locationMatch ? locationMatch[1].trim() : '';
 
-    const blocks = rawText.split(/Staff\s*Member\s*:/gi);
-    
-    for (let i = 1; i < blocks.length; i++) {
-        const block = blocks[i];
-        const lines = block.trim().split('\n');
-        let staffName = lines[0].trim();
-        
+    const normalizeStaffName = (value: string): string => {
+        let staffName = String(value || '').replace(/\*\*/g, '').trim();
         if (staffName.includes(',')) {
             const p = staffName.split(',');
             if (p.length >= 2) staffName = `${p[1].trim()} ${p[0].trim()}`;
         }
-        staffName = staffName.replace(/\*\*/g, '').trim();
+        return staffName;
+    };
 
-        const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
-        const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
-        
-        const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
-        const ypName = ypMatch ? ypMatch[1].trim() : '';
+    const normalizeAmount = (value: string): number => {
+        const numeric = String(value || '').replace(/[^0-9.\-]/g, '');
+        const parsed = Number(numeric);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
 
-        if (staffName) {
+    const allLines = rawText.split(/\r?\n/).map((line) => line.trim());
+    const headerIndex = allLines.findIndex((line) => {
+        if (!line.includes('|')) return false;
+        const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
+        const cols = normalized.split('|').map((c) => c.trim());
+        if (cols.length !== 3) return false;
+        return /^staff\s*name$/i.test(cols[0])
+            && /^(?:yp|yb)\s*name$/i.test(cols[1])
+            && /^amount$/i.test(cols[2]);
+    });
+
+    if (headerIndex >= 0) {
+        let startedRows = false;
+        for (let i = headerIndex + 1; i < allLines.length; i += 1) {
+            const line = allLines[i];
+            if (!line) {
+                if (startedRows) break;
+                continue;
+            }
+            if (!line.includes('|')) {
+                if (startedRows) break;
+                continue;
+            }
+            const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
+            if (!normalized || /^:?-{3,}/.test(normalized.replace(/\|/g, '').trim())) continue;
+
+            const cols = normalized.split('|').map((c) => c.trim());
+            if (cols.length < 3) continue;
+
+            const staffName = normalizeStaffName(cols[0]);
+            const ypName = String(cols[1] || '').trim();
+            const amount = normalizeAmount(cols[2]);
+            if (!staffName || amount <= 0) continue;
+
+            startedRows = true;
             extracted.push({ staffName, amount, ypName, location: commonLocation });
+        }
+    }
+
+    if (extracted.length === 0) {
+        const blocks = rawText.split(/Staff\s*Member\s*:/gi);
+
+        for (let i = 1; i < blocks.length; i++) {
+            const block = blocks[i];
+            const lines = block.trim().split('\n');
+            const staffName = normalizeStaffName(lines[0] || '');
+
+            const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+            const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+
+            const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
+            const ypName = ypMatch ? ypMatch[1].trim() : '';
+
+            if (staffName) {
+                extracted.push({ staffName, amount, ypName, location: commonLocation });
+            }
         }
     }
 
