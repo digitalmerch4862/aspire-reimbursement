@@ -92,32 +92,44 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
         };
     }
 
-    const delinquentStaff = extracted.find(entry => 
-        outstandingLiquidations.some(ol => normalizeNameKey(ol.staffName) === normalizeNameKey(entry.staffName))
+    const pendingStaffKeys = new Set(
+        outstandingLiquidations
+            .map((ol) => normalizeNameKey(String(ol.staffName || '')))
+            .filter((key) => key.length > 0)
     );
 
-    if (delinquentStaff) {
+    const excludedEntries = extracted.filter((entry) => pendingStaffKeys.has(normalizeNameKey(entry.staffName)));
+    const eligibleEntries = extracted.filter((entry) => !pendingStaffKeys.has(normalizeNameKey(entry.staffName)));
+
+    if (eligibleEntries.length === 0) {
         return {
             phase1: '', phase2: '', phase3: '', phase4: '',
             transactions: [],
-            errorMessage: `Blocked: ${delinquentStaff.staffName} has an outstanding liquidation. Please settle it first.`
+            errorMessage: 'All staff in this group are pending liquidation for this week. Settle at least one pending row to continue.'
         };
     }
 
-    const totalAmount = extracted.reduce((sum, entry) => sum + entry.amount, 0);
+    const totalAmount = eligibleEntries.reduce((sum, entry) => sum + entry.amount, 0);
 
     const tableHeader = [
         '| Staff Member | Client | Location | Type | Amount | NAB Reference |',
         '| :--- | :--- | :--- | :--- | :--- | :--- |'
     ].join('\n');
 
-    const tableRows = extracted
+    const tableRows = eligibleEntries
         .map((entry) => `| ${entry.staffName} | ${entry.ypName || '-'} | ${entry.location || '-'} | Petty Cash | $${entry.amount.toFixed(2)} | Enter NAB Code |`)
         .join('\n');
 
-    const phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${extracted.length} staff member(s).\n<<<PHASE_1_END>>>`;
+    const exclusionSection = excludedEntries.length > 0
+        ? `
+
+Excluded from this week's group reimbursement due to pending liquidation:
+${excludedEntries.map((entry) => `- ${entry.staffName} (${entry.ypName || '-'}) - Pending liquidation not yet settled`).join('\n')}`
+        : '';
+
+    const phase1 = `<<<PHASE_1_START>>>\n## Group Mode Audit\nDetected ${extracted.length} staff member(s). Included: ${eligibleEntries.length}. Excluded: ${excludedEntries.length}.\n<<<PHASE_1_END>>>`;
     const phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nGroup processing active.\n<<<PHASE_2_END>>>`;
-    const phase3 = `<<<PHASE_3_START>>>\nGroup Mode: Rules validation bypassed for multi-staff entry.\n<<<PHASE_3_END>>>`;
+    const phase3 = `<<<PHASE_3_START>>>\nGroup Mode: Rules validation bypassed for multi-staff entry.${excludedEntries.length > 0 ? `\nExcluded ${excludedEntries.length} staff due to pending liquidation.` : ''}\n<<<PHASE_3_END>>>`;
     const phase4 = `Hi,
 
 I hope this message finds you well.
@@ -128,11 +140,12 @@ ${tableHeader}
 ${tableRows}
 
 **TOTAL AMOUNT: $${totalAmount.toFixed(2)}**
+${exclusionSection}
 
 <!-- GROUP_TABLE_FORMAT -->
 <!-- STATUS: PENDING -->`;
 
-    const transactions: TransactionRecord[] = extracted.map(entry => ({
+    const transactions: TransactionRecord[] = eligibleEntries.map(entry => ({
         staffName: entry.staffName,
         formattedName: entry.staffName,
         amount: entry.amount,

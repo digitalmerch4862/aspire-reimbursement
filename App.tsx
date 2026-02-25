@@ -266,11 +266,30 @@ const JULIAN_APPROVER_NAME = 'Julian';
 interface GroupLiquidationQueueItem {
     id: string;
     staffName: string;
+    staffKey: string;
     ypName: string;
     location: string;
     amount: string;
+    weekKey: string;
     createdAt: string;
 }
+
+const getStartOfWeekLocal = (input: Date): Date => {
+    const date = new Date(input);
+    date.setHours(0, 0, 0, 0);
+    const day = date.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + diffToMonday);
+    return date;
+};
+
+const getWeekKeyLocal = (input: Date): string => {
+    const start = getStartOfWeekLocal(input);
+    const year = start.getFullYear();
+    const month = String(start.getMonth() + 1).padStart(2, '0');
+    const day = String(start.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 const loadLocalAuditLogs = (): any[] => {
     try {
@@ -320,12 +339,17 @@ const loadGroupLiquidationQueue = (): GroupLiquidationQueueItem[] => {
             .map((item: any) => ({
                 id: String(item?.id || ''),
                 staffName: String(item?.staffName || 'Unknown').trim() || 'Unknown',
+                staffKey: normalizeNameKey(String(item?.staffKey || item?.staffName || 'Unknown')),
                 ypName: String(item?.ypName || '-').trim() || '-',
                 location: String(item?.location || '-').trim() || '-',
                 amount: normalizeMoneyValue(String(item?.amount || '0.00'), '0.00'),
+                weekKey: String(item?.weekKey || (() => {
+                    const parsedDate = new Date(item?.createdAt || Date.now());
+                    return Number.isNaN(parsedDate.getTime()) ? getWeekKeyLocal(new Date()) : getWeekKeyLocal(parsedDate);
+                })()),
                 createdAt: String(item?.createdAt || new Date().toISOString())
             }))
-            .filter((item: GroupLiquidationQueueItem) => item.id.length > 0);
+            .filter((item: GroupLiquidationQueueItem) => item.id.length > 0 && item.staffKey.length > 0);
     } catch {
         return [];
     }
@@ -1449,6 +1473,8 @@ const [isEditing, setIsEditing] = useState(false);
         return groupLiquidationQueue.map((item) => ({
             id: item.id,
             staffName: item.staffName,
+            staffKey: item.staffKey,
+            weekKey: item.weekKey,
             ypName: item.ypName,
             location: item.location,
             amount: item.amount,
@@ -1456,17 +1482,17 @@ const [isEditing, setIsEditing] = useState(false);
         }));
     }, [groupLiquidationQueue]);
 
-    const outstandingLiquidations = useMemo(() => {
-        return [
-            ...dbOutstandingLiquidations,
-            ...groupPendingLiquidations.map((item) => ({
-                id: item.id,
-                staffName: item.staffName,
-                amount: item.amount,
-                date: item.date
-            }))
-        ];
-    }, [dbOutstandingLiquidations, groupPendingLiquidations]);
+    const groupPendingThisWeek = useMemo(() => {
+        const now = new Date(nowTick);
+        const currentWeekKey = getWeekKeyLocal(now);
+        return groupPendingLiquidations.filter((item) => item.weekKey === currentWeekKey);
+    }, [groupPendingLiquidations, nowTick]);
+
+    const groupPendingPreviousWeeks = useMemo(() => {
+        const now = new Date(nowTick);
+        const currentWeekKey = getWeekKeyLocal(now);
+        return groupPendingLiquidations.filter((item) => item.weekKey !== currentWeekKey);
+    }, [groupPendingLiquidations, nowTick]);
 
     const [dismissedIds, setDismissedIds] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -4011,25 +4037,49 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
     const addGroupLiquidationsFromTransactions = (transactions: Array<{ staffName?: string; ypName?: string; location?: string; amount?: string | number }>) => {
         if (requestMode !== 'group' || transactions.length === 0) return;
 
-        const nowIso = new Date().toISOString();
-        const pendingItems: GroupLiquidationQueueItem[] = transactions
-            .map((tx, idx) => {
+        const now = new Date();
+        const nowIso = now.toISOString();
+        const currentWeekKey = getWeekKeyLocal(now);
+        const pendingItems = transactions
+            .map((tx) => {
                 const staffName = String(tx.staffName || '').trim();
                 if (!staffName) return null;
+                const staffKey = normalizeNameKey(staffName);
+                if (!staffKey) return null;
                 return {
-                    id: `groupliq-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
                     staffName,
+                    staffKey,
                     ypName: String(tx.ypName || '-').trim() || '-',
                     location: String(tx.location || '-').trim() || '-',
                     amount: normalizeMoneyValue(String(tx.amount || '0.00'), '0.00'),
+                    weekKey: currentWeekKey,
                     createdAt: nowIso
                 };
             })
-            .filter((item): item is GroupLiquidationQueueItem => Boolean(item));
+            .filter((item): item is Omit<GroupLiquidationQueueItem, 'id'> => Boolean(item));
 
         if (pendingItems.length === 0) return;
         setGroupLiquidationQueue((prev) => {
-            const next = [...pendingItems, ...prev];
+            const next = [...prev];
+            pendingItems.forEach((incoming, idx) => {
+                const existingIndex = next.findIndex((item) => item.staffKey === incoming.staffKey && item.weekKey === incoming.weekKey);
+                if (existingIndex >= 0) {
+                    next[existingIndex] = {
+                        ...next[existingIndex],
+                        staffName: incoming.staffName,
+                        ypName: incoming.ypName,
+                        location: incoming.location,
+                        amount: incoming.amount,
+                        createdAt: incoming.createdAt
+                    };
+                    return;
+                }
+
+                next.unshift({
+                    ...incoming,
+                    id: `groupliq-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`
+                });
+            });
             saveGroupLiquidationQueue(next);
             return next;
         });
@@ -4726,11 +4776,20 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         try {
             setOcrStatus('Processing...');
 
+            const liquidationScope = requestMode === 'group'
+                ? groupPendingThisWeek.map((item) => ({
+                    id: item.id,
+                    staffName: item.staffName,
+                    amount: item.amount,
+                    date: item.date
+                }))
+                : dbOutstandingLiquidations;
+
             const options: ModeLogic.ModeOptions = {
                 formText: reimbursementFormText.trim(),
                 receiptText: receiptDetailsText.trim(),
                 historyData,
-                outstandingLiquidations
+                outstandingLiquidations: liquidationScope
             };
 
             let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: any[] };
@@ -5660,27 +5719,30 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                     </div>
                                 )}
 
-                                <LiquidationTracker 
-                                    items={dbOutstandingLiquidations}
-                                    onSettle={handleSettleLiquidation}
-                                    isSettling={isSettlingLiquidation}
-                                />
+                                {requestMode === 'solo' && (
+                                    <LiquidationTracker
+                                        items={dbOutstandingLiquidations}
+                                        onSettle={handleSettleLiquidation}
+                                        isSettling={isSettlingLiquidation}
+                                    />
+                                )}
 
                                 {requestMode === 'group' && (
                                     <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
                                         <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
                                             <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
                                             <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
-                                                {groupPendingLiquidations.length} Pending
+                                                {groupPendingThisWeek.length} This Week Pending
                                             </span>
                                         </div>
 
                                         {groupPendingLiquidations.length === 0 ? (
                                             <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
                                         ) : (
-                                            <div className="max-h-[260px] overflow-auto custom-scrollbar">
+                                            <div className="max-h-[320px] overflow-auto custom-scrollbar">
+                                                <div className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-amber-300 font-bold">This Week Pending</div>
                                                 <table className="w-full text-xs">
-                                                    <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider">
+                                                    <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider z-10">
                                                         <tr>
                                                             <th className="px-3 py-2 text-left">Staff Name</th>
                                                             <th className="px-3 py-2 text-left">YP Name</th>
@@ -5690,7 +5752,12 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {groupPendingLiquidations.map((item) => (
+                                                        {groupPendingThisWeek.length === 0 && (
+                                                            <tr className="border-t border-white/5">
+                                                                <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
+                                                            </tr>
+                                                        )}
+                                                        {groupPendingThisWeek.map((item) => (
                                                             <tr key={item.id} className="border-t border-white/5">
                                                                 <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
                                                                 <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
@@ -5708,11 +5775,37 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                         ))}
                                                     </tbody>
                                                 </table>
+
+                                                {groupPendingPreviousWeeks.length > 0 && (
+                                                    <>
+                                                        <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
+                                                        <table className="w-full text-xs">
+                                                            <tbody>
+                                                                {groupPendingPreviousWeeks.map((item) => (
+                                                                    <tr key={item.id} className="border-t border-white/5 opacity-75">
+                                                                        <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
+                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
+                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
+                                                                        <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
+                                                                        <td className="px-3 py-2 text-right">
+                                                                            <button
+                                                                                onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                                className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </>
+                                                )}
                                             </div>
                                         )}
 
                                         <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
-                                            Pending rows in this list block matching staff from new group requests until settled.
+                                            Only this week pending rows are used for group request exclusion and budget allocation checks.
                                         </div>
                                     </div>
                                 )}
