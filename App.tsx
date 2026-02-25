@@ -3246,13 +3246,28 @@ const [isEditing, setIsEditing] = useState(false);
             newContent = newContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1$${amountVal}$2`);
         }
 
-        // 3. Update Client / Location (ypName) in Text Blob
-        // Regex: Look for "**Client / Location:**"
-        if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
-            newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${editedRowData.ypName}$3`);
+        // 3. Update Client and Location in Text Blob
+        const clientValue = String(editedRowData.ypName || '').trim();
+        const locationValue = String(editedRowData.youngPersonName || '').trim();
+        const clientContentValue = clientValue || '-';
+        const locationContentValue = locationValue || '-';
+
+        if (newContent.match(/\*\*Client:\*\*/i)) {
+            newContent = newContent.replace(/(\*\*Client:\*\*\s*)(.*?)(\n|$)/i, `$1${clientContentValue}$3`);
+        } else if (newContent.match(/(^|\n)Client:\s*/i)) {
+            newContent = newContent.replace(/((?:^|\n)Client:\s*)(.*?)(\n|$)/i, `$1${clientContentValue}$3`);
+        } else if (newContent.match(/\*\*Client \/ Location:\*\*/)) {
+            newContent = newContent.replace(/(\*\*Client \/ Location:\*\*\s*)(.*?)(\n|$)/, `$1${clientContentValue}$3`);
         } else {
-            // If not found, append it securely
-            newContent += `\n**Client / Location:** ${editedRowData.ypName}`;
+            newContent += `\n**Client:** ${clientContentValue}`;
+        }
+
+        if (newContent.match(/\*\*Location:\*\*/i)) {
+            newContent = newContent.replace(/(\*\*Location:\*\*\s*)(.*?)(\n|$)/i, `$1${locationContentValue}$3`);
+        } else if (newContent.match(/(^|\n)Location:\s*/i)) {
+            newContent = newContent.replace(/((?:^|\n)Location:\s*)(.*?)(\n|$)/i, `$1${locationContentValue}$3`);
+        } else {
+            newContent += `\n**Location:** ${locationContentValue}`;
         }
 
         // 4. Update NAB Code in Text Blob
@@ -3270,6 +3285,8 @@ const [isEditing, setIsEditing] = useState(false);
                     ...item,
                     staff_name: editedRowData.staffName,
                     amount: parseFloat(amountVal),
+                    yp_name: clientValue || null,
+                    location: locationValue || null,
                     nab_code: editedRowData.nabCode,
                     full_email_content: newContent
                 };
@@ -3291,6 +3308,8 @@ const [isEditing, setIsEditing] = useState(false);
                 .update({
                     staff_name: editedRowData.staffName,
                     amount: parseFloat(amountVal),
+                    yp_name: clientValue || null,
+                    location: locationValue || null,
                     nab_code: editedRowData.nabCode,
                     full_email_content: newContent
                 })
@@ -5060,8 +5079,21 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                 <p className="text-emerald-400 font-bold text-lg">{selectedRow.totalAmount}</p>
                                             )}
                                         </div>
-                                        <div className="space-y-1 col-span-2">
-                                            <label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Client / Location</label>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Location</label>
+                                            {isRowEditMode ? (
+                                                <input
+                                                    type="text"
+                                                    value={editedRowData?.youngPersonName || ''}
+                                                    onChange={(e) => setEditedRowData({ ...editedRowData, youngPersonName: e.target.value })}
+                                                    className="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none"
+                                                />
+                                            ) : (
+                                                <p className="text-slate-300 text-sm">{selectedRow.youngPersonName}</p>
+                                            )}
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Client</label>
                                             {isRowEditMode ? (
                                                 <input
                                                     type="text"
