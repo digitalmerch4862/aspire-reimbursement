@@ -2584,7 +2584,7 @@ const [isEditing, setIsEditing] = useState(false);
             // - ypName: Hendrix (from Client: or Client's Full Name)
             // - youngPersonName: Illawarra (from Location: or Client / Location)
             const ypName = clientValue || clientFullNameValue || addressValue || clientLocationValue || record.yp_name || '-';
-            const youngPersonName = locationValue || locationFirstPart || record.location || '-';
+            const youngPersonName = record.location || locationValue || addressValue || locationFirstPart || '-';
 
 
             const dateProcessed = new Date(record.created_at).toLocaleDateString();
