@@ -2503,6 +2503,62 @@ const [isEditing, setIsEditing] = useState(false);
             let foundTable = false;
             let tableRowsFound = false;
 
+            const resolveReceiptBatchTotal = (): string => {
+                let inReceiptTable = false;
+                let runningTotal = 0;
+                let hasRunningTotal = false;
+                let parsedGrandTotal = '';
+
+                for (let i = 0; i < lines.length; i += 1) {
+                    const line = lines[i].trim();
+                    if (line.startsWith('| Receipt #') || line.startsWith('|Receipt #')) {
+                        inReceiptTable = true;
+                        continue;
+                    }
+                    if (!inReceiptTable) continue;
+                    if (inReceiptTable && line.startsWith('| :---')) continue;
+                    if (inReceiptTable && line === '') break;
+                    if (!line.startsWith('|')) continue;
+
+                    const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
+                    if (!cols.length) continue;
+
+                    const firstCol = String(cols[0] || '');
+                    if (/grand\s*total|\btotal\b/i.test(firstCol)) {
+                        let grandTotalCell = '';
+                        for (let k = cols.length - 1; k >= 0; k -= 1) {
+                            if (/[0-9]/.test(cols[k])) {
+                                grandTotalCell = cols[k];
+                                break;
+                            }
+                        }
+                        if (grandTotalCell) {
+                            parsedGrandTotal = normalizeMoneyValue(grandTotalCell, '');
+                        }
+                        continue;
+                    }
+
+                    const normalizedRow = normalizeReceiptRow(cols, String(totalAmount || '0.00'), 'Unknown Store', receiptId);
+                    if (!normalizedRow) continue;
+
+                    const rowAmount = normalizedRow.itemAmount.toLowerCase() === 'included in total'
+                        ? normalizedRow.receiptTotal
+                        : normalizedRow.itemAmount;
+                    const numericAmount = Number(normalizeMoneyValue(rowAmount, '0.00'));
+                    if (!Number.isNaN(numericAmount)) {
+                        runningTotal += numericAmount;
+                        hasRunningTotal = true;
+                    }
+                }
+
+                const fallbackBatchTotal = normalizeMoneyValue(String(totalAmount || '0.00'), '0.00');
+                if (parsedGrandTotal) return parsedGrandTotal;
+                if (hasRunningTotal) return normalizeMoneyValue(String(runningTotal), fallbackBatchTotal);
+                return fallbackBatchTotal;
+            };
+
+            const receiptBatchTotal = resolveReceiptBatchTotal();
+
             if (isGroupTable) {
                 let inGroupTable = false;
                 const recordStaffName = String(record.staff_name || staffName || '').trim();
@@ -2574,7 +2630,7 @@ const [isEditing, setIsEditing] = useState(false);
                 if (foundTable && line.startsWith('| :---')) {
                     continue; // Skip separator
                 }
-                if (!tableRowsFound && foundTable && line.startsWith('|')) {
+                if (foundTable && line.startsWith('|')) {
                     const cols = line.split('|').map((c: string) => c.trim()).filter((c: string) => c !== '');
 
                     const fallbackUid = uidFallbacks[uidIdx] || receiptId;
@@ -2592,6 +2648,7 @@ const [isEditing, setIsEditing] = useState(false);
                         ? manualAmountFromRecord
                         : (normalized.itemAmount.toLowerCase() === 'included in total' ? normalized.receiptTotal : normalized.itemAmount);
                     const receiptTotalForDb = isManualEntryRow ? manualAmountFromRecord : normalized.receiptTotal;
+                    const totalAmountForDb = isManualEntryRow ? receiptTotalForDb : receiptBatchTotal;
 
                     allRows.push({
                         id: `${internalId}-${i}`, // Unique key for React using DB ID
@@ -2608,7 +2665,7 @@ const [isEditing, setIsEditing] = useState(false);
                         receiptDateTime: normalized.dateTime || receiptDate,
                         receiptDate,
                         amount: amountForDb,
-                        totalAmount: receiptTotalForDb,
+                        totalAmount: totalAmountForDb,
                         dateProcessed,
                         nabCode: nabRefDisplay // Display Bank Ref in Nab Code column
                     });
