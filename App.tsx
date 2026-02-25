@@ -2084,8 +2084,11 @@ const [isEditing, setIsEditing] = useState(false);
             || part.match(/YP Name:\s*(.*)/i);
         const ypName = ypMatch ? ypMatch[1].trim() : '';
 
-        // Find Location
-        const locationMatch = part.match(/\*\*Location:\*\*\s*(.*)/i) || part.match(/Location:\s*(.*)/i);
+        // Find Location (Solo fallback: Address)
+        const locationMatch = part.match(/\*\*Location:\*\*\s*(.*)/i)
+            || part.match(/Location:\s*(.*)/i)
+            || part.match(/\*\*Address:\*\*\s*(.*)/i)
+            || part.match(/Address:\s*(.*)/i);
         const location = locationMatch ? locationMatch[1].trim() : '';
 
         // Format Name (Last, First -> First Last)
