@@ -977,7 +977,7 @@ const upsertJulianApprovalSection = (
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
 
-    const cleanedContent = stripClaimantConfirmation(stripped).trim();
+    const cleanedContent = stripped.trim();
     return `${approvalSection}\n\n${cleanedContent}`.trim();
 };
 
@@ -1392,7 +1392,7 @@ export const App = () => {
     const [results, setResults] = useState<ProcessingResult | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-const [isEditing, setIsEditing] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
     const [editableContent, setEditableContent] = useState('');
 
     const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error' | 'duplicate'>('idle');
@@ -1511,7 +1511,7 @@ const [isEditing, setIsEditing] = useState(false);
     const [csvImportMessage, setCsvImportMessage] = useState<string>('');
     const [saveEmployeeStatus, setSaveEmployeeStatus] = useState<'idle' | 'saved'>('idle');
     const employeeCsvInputRef = useRef<HTMLInputElement | null>(null);
-    
+
     // Employee Selection State for Banking Details
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
     const [employeeSearchQuery, setEmployeeSearchQuery] = useState<Map<number, string>>(new Map());
@@ -2064,8 +2064,8 @@ const [isEditing, setIsEditing] = useState(false);
         let staffName = lines[0].trim();
 
         // Find amount
-        const amountMatch = part.match(/\*\*Amount (?:Transferred):\*\*\s*(.*)/i) 
-            || part.match(/\*\*Amount:\*\*\s*(.*)/) 
+        const amountMatch = part.match(/\*\*Amount (?:Transferred):\*\*\s*(.*)/i)
+            || part.match(/\*\*Amount:\*\*\s*(.*)/)
             || part.match(/Amount:\s*(.*)/);
         let amount = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
 
@@ -2079,8 +2079,8 @@ const [isEditing, setIsEditing] = useState(false);
         const receiptId = receiptMatch ? receiptMatch[1].trim() : 'N/A';
 
         // Find YP Name
-        const ypMatch = part.match(/\*\*Client:\*\*\s*(.*)/i) 
-            || part.match(/\*\*YP Name:\*\*\s*(.*)/i) 
+        const ypMatch = part.match(/\*\*Client:\*\*\s*(.*)/i)
+            || part.match(/\*\*YP Name:\*\*\s*(.*)/i)
             || part.match(/YP Name:\s*(.*)/i);
         const ypName = ypMatch ? ypMatch[1].trim() : '';
 
@@ -2097,7 +2097,7 @@ const [isEditing, setIsEditing] = useState(false);
             const p = staffName.split(',');
             if (p.length >= 2) formattedName = `${p[1].trim()} ${p[0].trim()}`;
         }
-        
+
         // Final cleaning: remove any bold markers from name if they leaked in
         formattedName = formattedName.replace(/\*\*/g, '').trim();
 
@@ -2310,7 +2310,7 @@ const [isEditing, setIsEditing] = useState(false);
 
         let targetPart = parts[partIndex];
         const lines = targetPart.split('\n');
-        lines[0] = ` ${name}`; 
+        lines[0] = ` ${name}`;
         parts[partIndex] = lines.join('\n');
         return parts.join(marker);
     };
@@ -2354,7 +2354,7 @@ const [isEditing, setIsEditing] = useState(false);
 
         const marker = '**Staff Member:**';
         const parts = content.split(marker);
-        if (parts.length <= 1) return; 
+        if (parts.length <= 1) return;
 
         const partIndex = index + 1;
         if (parts.length <= partIndex) return;
@@ -2426,7 +2426,7 @@ const [isEditing, setIsEditing] = useState(false);
                         const parts = lines[i].split('|');
                         parts[5] = ` ${formattedAmount} `;
                         lines[i] = parts.join('|');
-                        
+
                         // Recalculate Total Amount for the table footer
                         let total = 0;
                         let innerRowIndex = 0;
@@ -2445,7 +2445,7 @@ const [isEditing, setIsEditing] = useState(false);
                                 }
                             }
                         }
-                        
+
                         let updatedContent = lines.join('\n');
                         updatedContent = updatedContent.replace(/\*\*TOTAL AMOUNT:\s*\$?[0-9,.]+\*\*/i, `**TOTAL AMOUNT: $${total.toFixed(2)}**`);
                         return updatedContent;
@@ -3967,7 +3967,7 @@ const [isEditing, setIsEditing] = useState(false);
         scrollToReimbursementForm();
     };
 
-const handleCopyEmail = async (target: 'julian' | 'claimant') => {
+    const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const rawContent = target === 'julian' ? julianEmailContent : claimantEmailContent;
         if (!rawContent) return;
 
@@ -4185,7 +4185,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                     /\*\*Client\s*\/\s*Location:\*\*\s*(.*)/i,
                     /Client\s*\/\s*Location:\s*(.*)/i
                 ]);
-                
+
                 const staffName = staffNameMatch ? staffNameMatch[1].trim() : 'Unknown';
                 const amountRaw = amountMatch ? amountMatch[1].replace('(Based on Receipts/Form Audit)', '').trim() : '0.00';
                 const amount = parseFloat(amountRaw.replace(/[^0-9.-]/g, '')) || 0;
@@ -4367,7 +4367,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         const approvedNabCode = pendingApprovalNabCode.trim();
         if (!approvedNabCode) return;
 
-        let updatedRecords: Array<{ id: any; nab_code: string; full_email_content: string }> = [];
+        let updatedRecords: Array<{ id: any; nab_code: string; full_email_content: string; staff_name?: string; amount?: number; yp_name?: string; location?: string }> = [];
         let combinedClaimantEmail = '';
 
         setIsApprovingPending(true);
@@ -4390,19 +4390,50 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 return {
                     id: record.id,
                     nab_code: approvedNabCode,
-                    full_email_content: updatedContent
+                    full_email_content: updatedContent,
+                    staff_name: record.staff_name,
+                    amount: record.amount,
+                    yp_name: record.yp_name,
+                    location: record.location
                 };
             });
 
             const claimantBlocks = updatedRecords
                 .map((record) => {
-                    const content = String(record.full_email_content || '');
-                    if (!content.trim()) return '';
-                    return stripClientLocationLine(
+                    const rawContent = String(record.full_email_content || '');
+                    if (!rawContent.trim()) return '';
+
+                    let content = stripClientLocationLine(
                         stripInternalAuditMeta(
-                            stripJulianApprovalSection(content)
+                            stripJulianApprovalSection(rawContent)
                         )
                     );
+
+                    // Recompose header if it was stripped or is missing
+                    if (!content.includes('Hi,') && !content.includes('I hope this message')) {
+                        const staffName = record.staff_name || 'Staff Member';
+                        const ypName = record.yp_name || 'Client Name';
+                        const address = record.location || 'Address';
+                        const amount = record.amount ? Number(record.amount).toFixed(2) : '0.00';
+
+                        const header = [
+                            'Hi,',
+                            '',
+                            'I hope this message finds you well.',
+                            '',
+                            'I am writing to confirm that your reimbursement request has been successfully processed today.',
+                            '',
+                            `**Staff Member:** ${staffName}`,
+                            `**Client's Full Name:** ${ypName}`,
+                            `**Address:** ${address}`,
+                            `**Amount:** $${amount}`,
+                            ''
+                        ].join('\n');
+
+                        content = header + '\n' + content.trim();
+                    }
+
+                    return content;
                 })
                 .filter(Boolean);
 
@@ -4682,7 +4713,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
         }
 
         const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
-        
+
         // If NAB code is already entered, skip confirmation and save immediately
         if (allHaveRef) {
             confirmSave('PAID', {
@@ -4834,7 +4865,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                 phase3: result.phase3,
                 phase4: result.phase4
             });
-            
+
             setProcessingState(ProcessingState.COMPLETE);
             setOcrStatus('Complete');
         } catch (err: any) {
@@ -5597,18 +5628,18 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                         <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
                             <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
-                                <ModeTabs 
-                                    currentMode={requestMode} 
+                                <ModeTabs
+                                    currentMode={requestMode}
                                     onModeChange={(mode) => {
                                         if (mode !== requestMode) {
                                             resetAll();
                                             setRequestMode(mode);
                                         }
-                                    }} 
+                                    }}
                                 />
-                                
+
                                 {requestMode === 'solo' && (
-                                    <SoloMode 
+                                    <SoloMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
                                         receiptDetailsText={receiptDetailsText}
@@ -5623,7 +5654,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                 )}
 
                                 {requestMode === 'group' && (
-                                    <GroupMode 
+                                    <GroupMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
                                         handleProcess={handleProcess}
@@ -5636,7 +5667,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                 )}
 
                                 {requestMode === 'manual' && (
-                                    <ManualMode 
+                                    <ManualMode
                                         handleProcess={handleProcess}
                                         processingState={processingState}
                                         errorMessage={errorMessage}
@@ -5834,7 +5865,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                         </div>
                                         <h2 className="text-xl font-bold text-white">Analyzing Documents...</h2>
                                         <p className="text-slate-400 mt-2 animate-pulse">{ocrStatus || 'Running compliance checks'}</p>
-                                        
+
                                         {/* Processing Indicator */}
                                         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
@@ -5850,13 +5881,13 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                             <div className="px-6 py-4 border-b border-indigo-500/10 flex items-center justify-between bg-indigo-500/10">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-2 h-8 bg-indigo-400 rounded-full shadow-[0_0_15px_rgba(129,140,248,0.8)]"></div>
-<h3 className="font-bold text-white text-lg flex items-center gap-2">
+                                                    <h3 className="font-bold text-white text-lg flex items-center gap-2">
                                                         <CheckCircle size={24} className="text-lime-400" />
                                                         Final Decision & Email
                                                     </h3>
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    <button 
+                                                    <button
                                                         onClick={handleAddBankingDetail}
                                                         className="flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-full uppercase tracking-wider font-bold bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-600 hover:scale-105 transition-all"
                                                         title="Add Banking Detail"
@@ -5893,134 +5924,135 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                 const amountOptionsRaw = Array.from(new Set(parsedTransactions.map((entry) => entry.amount.replace(/[^0-9.\-]/g, '')).filter(Boolean)));
                                                 const selectedAmount = amountSelectionByTx.get(txKey) || tx.amount.replace(/[^0-9.\-]/g, '') || '0.00';
                                                 const amountOptions = amountOptionsRaw.length > 0 ? amountOptionsRaw : [selectedAmount];
-                                                
-                                                return (
-                                                <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
-                                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                                        <CreditCard size={80} className="text-white" />
-                                                    </div>
-                                                    <div className="relative z-10">
-                                                        <div className="flex justify-between items-center mb-4">
-                                                            <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
-                                                                Banking Details ({idx + 1}/{parsedTransactions.length})
-                                                            </h4>
-                                                            {parsedTransactions.length > 1 && (
-                                                                <button 
-                                                                    onClick={() => handleRemoveBankingDetail(txKey)}
-                                                                    className="text-red-400 hover:text-red-300 transition-colors p-1"
-                                                                    title="Remove this box"
-                                                                >
-                                                                    <Trash2 size={16} />
-                                                                </button>
-                                                            )}
-                                                        </div>
 
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            {/* Payee Name with Searchable Dropdown */}
-                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
-                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <div className="flex-1 relative">
-                                                                        <input
-                                                                            type="text"
-                                                                            value={searchQuery}
-                                                                            onChange={(e) => handleEmployeeSearchChange(txKey, e.target.value)}
-                                                                            onFocus={() => handleEmployeeSearchFocus(txKey)}
-                                                                            onBlur={() => handleEmployeeSearchBlur(txKey)}
-                                                                            className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
-                                                                            placeholder="Search employee..."
-                                                                        />
-                                                                        {/* Dropdown */}
-                                                                        {showDropdown && filteredEmployees.length > 0 && (
-                                                                            <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
-                                                                                {filteredEmployees.map((emp) => (
-                                                                                    <button
-                                                                                        key={emp.id}
-                                                                                        onClick={() => handleEmployeeSelect(txKey, emp)}
-                                                                                        className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
-                                                                                    >
-                                                                                        {getEmployeeDisplayName(emp)}
-                                                                                    </button>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
-                                                                        {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
-                                                                    </button>
-                                                                </div>
-                                                                {selectedEmployee && normalizeEmployeeName(searchQuery) !== normalizeEmployeeName(selectedEmployee.fullName) && (
+                                                return (
+                                                    <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
+                                                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                                                            <CreditCard size={80} className="text-white" />
+                                                        </div>
+                                                        <div className="relative z-10">
+                                                            <div className="flex justify-between items-center mb-4">
+                                                                <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest flex items-center gap-2">
+                                                                    <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                                    Banking Details ({idx + 1}/{parsedTransactions.length})
+                                                                </h4>
+                                                                {parsedTransactions.length > 1 && (
                                                                     <button
-                                                                        onClick={() => createAliasFromQuery(txKey)}
-                                                                        className="mt-2 text-[10px] uppercase tracking-wider text-indigo-300 hover:text-indigo-100"
+                                                                        onClick={() => handleRemoveBankingDetail(txKey)}
+                                                                        className="text-red-400 hover:text-red-300 transition-colors p-1"
+                                                                        title="Remove this box"
                                                                     >
-                                                                        Save typed name as alias
+                                                                        <Trash2 size={16} />
                                                                     </button>
                                                                 )}
                                                             </div>
-                                                            <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
-                                                                <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <input
-                                                                        type="text"
-                                                                        value={selectedAmount}
-                                                                        onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
-                                                                        placeholder="0.00"
-                                                                        className="w-full bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
-                                                                    />
-                                                                    <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors ml-2">
-                                                                        {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
-                                                                    </button>
-                                                                </div>
 
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        {/* BSB and Account Number Row */}
-                                                        <div className="grid grid-cols-2 gap-4 mt-4">
-                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
-                                                                    <button 
-                                                                        onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${txKey}`)} 
-                                                                        className="text-slate-500 hover:text-white transition-colors"
-                                                                        disabled={!selectedEmployee?.bsb}
-                                                                    >
-                                                                        {copiedField === `bsb-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                    </button>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                {/* Payee Name with Searchable Dropdown */}
+                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
+                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <div className="flex-1 relative">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={searchQuery}
+                                                                                onChange={(e) => handleEmployeeSearchChange(txKey, e.target.value)}
+                                                                                onFocus={() => handleEmployeeSearchFocus(txKey)}
+                                                                                onBlur={() => handleEmployeeSearchBlur(txKey)}
+                                                                                className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
+                                                                                placeholder="Search employee..."
+                                                                            />
+                                                                            {/* Dropdown */}
+                                                                            {showDropdown && filteredEmployees.length > 0 && (
+                                                                                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c1e24] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto z-50">
+                                                                                    {filteredEmployees.map((emp) => (
+                                                                                        <button
+                                                                                            key={emp.id}
+                                                                                            onClick={() => handleEmployeeSelect(txKey, emp)}
+                                                                                            className="w-full text-left px-3 py-2 hover:bg-white/10 text-white text-sm uppercase transition-colors"
+                                                                                        >
+                                                                                            {getEmployeeDisplayName(emp)}
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <button onClick={() => handleCopyField(searchQuery, 'name')} className="text-indigo-400 hover:text-white transition-colors ml-2">
+                                                                            {copiedField === 'name' ? <Check size={14} /> : <Copy size={14} />}
+                                                                        </button>
+                                                                    </div>
+                                                                    {selectedEmployee && normalizeEmployeeName(searchQuery) !== normalizeEmployeeName(selectedEmployee.fullName) && (
+                                                                        <button
+                                                                            onClick={() => createAliasFromQuery(txKey)}
+                                                                            className="mt-2 text-[10px] uppercase tracking-wider text-indigo-300 hover:text-indigo-100"
+                                                                        >
+                                                                            Save typed name as alias
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                            </div>
-                                                            <div className="bg-black/20 rounded-xl p-3 border border-white/5">
-                                                                <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
-                                                                <div className="flex justify-between items-center">
-                                                                    <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
-                                                                    <button 
-                                                                        onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${txKey}`)} 
-                                                                        className="text-slate-500 hover:text-white transition-colors"
-                                                                        disabled={!selectedEmployee?.account}
-                                                                    >
-                                                                        {copiedField === `account-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
+                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={selectedAmount}
+                                                                            onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
+                                                                            placeholder="0.00"
+                                                                            className="w-full bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
+                                                                        />
+                                                                        <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors ml-2">
+                                                                            {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
+                                                                        </button>
+                                                                    </div>
 
-                                                        <div className="mt-4 bg-black/20 rounded-xl p-3 border border-indigo-500/25">
-                                                            <p className="text-[10px] uppercase text-indigo-300 font-bold mb-1">NAB Code</p>
-                                                            <input
-                                                                type="text"
-                                                                value={tx.currentNabRef || ''}
-                                                                onChange={(e) => handleTransactionNabChange(txKey, e.target.value)}
-                                                                placeholder="Enter NAB Code"
-                                                                className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
-                                                            />
+                                                                </div>
+                                                            </div>
+
+                                                            {/* BSB and Account Number Row */}
+                                                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
+                                                                        <button
+                                                                            onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${txKey}`)}
+                                                                            className="text-slate-500 hover:text-white transition-colors"
+                                                                            disabled={!selectedEmployee?.bsb}
+                                                                        >
+                                                                            {copiedField === `bsb-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="bg-black/20 rounded-xl p-3 border border-white/5">
+                                                                    <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
+                                                                        <button
+                                                                            onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${txKey}`)}
+                                                                            className="text-slate-500 hover:text-white transition-colors"
+                                                                            disabled={!selectedEmployee?.account}
+                                                                        >
+                                                                            {copiedField === `account-${txKey}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="mt-4 bg-black/20 rounded-xl p-3 border border-indigo-500/25">
+                                                                <p className="text-[10px] uppercase text-indigo-300 font-bold mb-1">NAB Code</p>
+                                                                <input
+                                                                    type="text"
+                                                                    value={tx.currentNabRef || ''}
+                                                                    onChange={(e) => handleTransactionNabChange(txKey, e.target.value)}
+                                                                    placeholder="Enter NAB Code"
+                                                                    className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            )})}
-<div className="p-8 space-y-5">
+                                                )
+                                            })}
+                                            <div className="p-8 space-y-5">
                                                 {missingQuickEditFields.length > 0 && (
                                                     <div className="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-5">
                                                         <div className="flex items-start justify-between gap-3 mb-4">
@@ -6123,10 +6155,10 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                     <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
                                                     <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
                                                     <span className={`inline-flex text-[11px] px-2 py-1 rounded-full border ${group.oldestAgeDays >= 8
-                                                            ? 'bg-red-500/15 text-red-200 border-red-400/25'
-                                                            : group.oldestAgeDays >= 3
-                                                                ? 'bg-amber-500/15 text-amber-200 border-amber-400/25'
-                                                                : 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25'
+                                                        ? 'bg-red-500/15 text-red-200 border-red-400/25'
+                                                        : group.oldestAgeDays >= 3
+                                                            ? 'bg-amber-500/15 text-amber-200 border-amber-400/25'
+                                                            : 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25'
                                                         }`}>
                                                         Oldest pending: {group.oldestAgeDays} day{group.oldestAgeDays === 1 ? '' : 's'}
                                                     </span>
@@ -6994,39 +7026,39 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                         ? 'This can proceed only as Pending and will be routed for Julian approval.'
                                                         : isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                             ? 'This is rejected for payment because reimbursement form total is higher than receipt total. Save as Pending to send claimant revision email.'
-                                                        : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
+                                                            : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
                                             </p>
                                             {(saveModalDecision.mode === 'red' || (saveModalDecision.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail))) && (
-                                            <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <p className="text-xs font-semibold text-red-200 uppercase tracking-wider">Matched NAB Code(s)</p>
-                                                    {duplicateNabCodesForModal.length > 1 && (
-                                                        <button
-                                                            onClick={handleCopyDuplicateNabCodes}
-                                                            className="text-[11px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center gap-1"
-                                                        >
-                                                            {copiedField === 'dup-nab-all' ? <Check size={12} /> : <Copy size={12} />}
-                                                            Copy All
-                                                        </button>
+                                                <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-semibold text-red-200 uppercase tracking-wider">Matched NAB Code(s)</p>
+                                                        {duplicateNabCodesForModal.length > 1 && (
+                                                            <button
+                                                                onClick={handleCopyDuplicateNabCodes}
+                                                                className="text-[11px] px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center gap-1"
+                                                            >
+                                                                {copiedField === 'dup-nab-all' ? <Check size={12} /> : <Copy size={12} />}
+                                                                Copy All
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {duplicateNabCodesForModal.length > 0 ? (
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {duplicateNabCodesForModal.map((code, idx) => (
+                                                                <button
+                                                                    key={`${code}-${idx}`}
+                                                                    onClick={() => handleCopyField(code, `dup-nab-${idx}`)}
+                                                                    className="px-2 py-1 rounded-md border border-white/15 bg-black/30 text-xs text-white font-mono hover:bg-white/10 flex items-center gap-1"
+                                                                >
+                                                                    <span>{code}</span>
+                                                                    {copiedField === `dup-nab-${idx}` ? <Check size={12} /> : <Copy size={12} />}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-slate-300">No valid NAB code found on matched history.</p>
                                                     )}
                                                 </div>
-                                                {duplicateNabCodesForModal.length > 0 ? (
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {duplicateNabCodesForModal.map((code, idx) => (
-                                                            <button
-                                                                key={`${code}-${idx}`}
-                                                                onClick={() => handleCopyField(code, `dup-nab-${idx}`)}
-                                                                className="px-2 py-1 rounded-md border border-white/15 bg-black/30 text-xs text-white font-mono hover:bg-white/10 flex items-center gap-1"
-                                                            >
-                                                                <span>{code}</span>
-                                                                {copiedField === `dup-nab-${idx}` ? <Check size={12} /> : <Copy size={12} />}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <p className="text-xs text-slate-300">No valid NAB code found on matched history.</p>
-                                                )}
-                                            </div>
                                             )}
                                             {duplicateMatchesForModal.length > 0 && (
                                                 <div className="space-y-2">
@@ -7097,7 +7129,7 @@ const handleCopyEmail = async (target: 'julian' | 'claimant') => {
                                                         : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
                                                     : isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                         ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
-                                                    : reviewerOverrideReason),
+                                                        : reviewerOverrideReason),
                                                 detail: saveModalDecision.detail
                                             })}
                                             disabled={!isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
