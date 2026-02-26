@@ -4601,7 +4601,7 @@ export const App = () => {
 
         if (requestMode === 'solo') {
             const combinedText = `${reimbursementFormText}\n${receiptDetailsText}`;
-            const tableHeaderRegex = /\|\s*Receipt\s*#\s*\|\s*Unique\s*ID\s*\/\s*Fallback\s*\|\s*Store\s*Name\s*\|\s*Date\s*&\s*Time\s*\|\s*Product\s*\(Per\s*Item\)\s*\|\s*Category\s*\|\s*Item\s*Amount\s*\|\s*Receipt\s*Total\s*\|\s*Notes\s*\|/i;
+            const tableHeaderRegex = /\|?\s*Receipt\s*#\s*\|\s*Unique\s*ID\s*\/\s*Fallback\s*\|\s*Store\s*Name\s*\|\s*Date\s*&\s*Time\s*\|\s*Product\s*\(Per\s*Item\)\s*\|\s*Category\s*\|\s*Item\s*Amount\s*\|\s*Receipt\s*Total\s*\|\s*Notes\s*\|?/i;
             const hasReceiptTable = tableHeaderRegex.test(combinedText);
             if (!hasReceiptTable) {
                 setErrorMessage('Receipt table is required for Solo Mode. Paste the full receipt table before saving.');

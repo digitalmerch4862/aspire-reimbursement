@@ -3,22 +3,22 @@ import { normalizeMoneyValue } from './helpers';
 
 export const processSoloMode = (options: ModeOptions): ProcessingResult & { errorMessage?: string, issues?: ManualAuditIssue[] } => {
     const { formText, receiptText } = options;
-    
+
     // Header parsing
     const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
     const addressMatch = formText.match(/Address:\s*(.+)/i);
     const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
     const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
-    
+
     const clientName = clientMatch ? clientMatch[1].trim() : '';
     const address = addressMatch ? addressMatch[1].trim() : '';
     const staffMember = staffMatch ? staffMatch[1].trim() : '';
     const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
-    
+
     const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
     const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
-    let totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : 
-                  receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
+    let totalAmount = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) :
+        receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : 0;
     let receiptGrandTotal = receiptTotalMatch ? parseFloat(receiptTotalMatch[1].replace(/,/g, '')) : null;
     const allText = formText + '\n' + receiptText;
     const lines = allText.split('\n');
@@ -33,12 +33,12 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
 
         for (const line of tableLines) {
             const trimmed = line.trim();
-            if (!trimmed.startsWith('|')) {
+            if (!trimmed.includes('|')) {
                 if (inTable) break;
                 continue;
             }
 
-            const cols = line.split('|').slice(1, -1).map(col => col.trim());
+            const cols = trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map(col => col.trim());
             const headerCheck = cols.map(col => col.toLowerCase());
 
             if (!headerFound) {
@@ -81,7 +81,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
 
         return { items: tableItems, grandTotal, hasTable: headerFound };
     };
-    
+
     const tableParse = parseReceiptTable(receiptText || allText);
     if (tableParse.items.length > 0) {
         items.push(...tableParse.items);
@@ -96,7 +96,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
                 const blockStart = (match as any).index || 0;
                 const blockEnd = formText.indexOf('Particular:', blockStart + 1);
                 const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
-                
+
                 const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
                 const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
                 const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
@@ -124,9 +124,10 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     if (items.length === 0) {
         // Table parsing fallback
         for (const line of lines) {
-            if (line.trim().startsWith('|') && !line.includes('---') && 
+            if (line.trim().includes('|') && !line.includes('---') &&
                 !line.includes('Receipt #') && !line.includes('GRAND TOTAL')) {
-                const parts = line.split('|').map(p => p.trim()).filter(p => p);
+                const trimmedLine = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+                const parts = trimmedLine.split('|').map(p => p.trim()).filter(p => p);
                 if (parts.length >= 5) {
                     items.push({
                         receiptNum: parts[0],
@@ -165,7 +166,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     if (!clientName) issues.push({ level: 'warning', message: "Missing 'Client Name' in Reimbursement Form." });
     if (!address) issues.push({ level: 'warning', message: "Missing 'Address' in Reimbursement Form." });
     if (!staffMember) issues.push({ level: 'warning', message: "Missing 'Staff Member' in Reimbursement Form." });
-    
+
     if (items.length === 0) {
         issues.push({ level: 'error', message: 'No valid receipt rows found. Check table format.' });
     } else {
@@ -180,8 +181,8 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     // Compose Result
     const phase1 = `<<<PHASE_1_START>>>\n## Solo Mode Audit\nProcessing individual reimbursement request.\n<<<PHASE_1_END>>>`;
     const phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nForm and receipt data synced.\n<<<PHASE_2_END>>>`;
-    const phase3 = `<<<PHASE_3_START>>>\n${issues.length > 0 ? issues.map((iss, i) => `${i+1}. [${iss.level.toUpperCase()}] ${iss.message}`).join('\n') : 'All rules passed.'}\n<<<PHASE_3_END>>>`;
-    
+    const phase3 = `<<<PHASE_3_START>>>\n${issues.length > 0 ? issues.map((iss, i) => `${i + 1}. [${iss.level.toUpperCase()}] ${iss.message}`).join('\n') : 'All rules passed.'}\n<<<PHASE_3_END>>>`;
+
     const phase4 = `Hi,
 
 I hope this message finds you well.
