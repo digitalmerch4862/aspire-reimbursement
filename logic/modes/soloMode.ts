@@ -106,7 +106,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
                     items.push({
                         receiptNum: String(idx + 1),
                         uniqueId: `particular-${idx + 1}`,
-                        storeName: pMatch ? pMatch[1].trim() : 'Particulars',
+                        storeName: pMatch ? pMatch[1].trim() : 'reimbursement',
                         dateTime: dMatch ? dMatch[1].trim() : '',
                         product: pMatch ? pMatch[1].trim() : '',
                         category: 'Other',

@@ -2870,6 +2870,39 @@ export const App = () => {
 
         if (parsed.length > 0) return parsed;
 
+        const blockMatches = Array.from(formText.matchAll(/Particular:\s*(.*?)(?:\n|$)/gi));
+        if (blockMatches.length > 0) {
+            return blockMatches.map((match, idx) => {
+                const blockStart = (match as any).index || 0;
+                const blockEnd = formText.indexOf('Particular:', blockStart + 1);
+                const blockText = formText.substring(blockStart, blockEnd === -1 ? formText.length : blockEnd);
+
+                const pMatch = blockText.match(/Particular:\s*(.*?)(?:\n|$)/i);
+                const dMatch = blockText.match(/Date\s*Purchased:\s*(.*?)(?:\n|$)/i);
+                const aMatch = blockText.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
+
+                const product = pMatch ? pMatch[1].trim() : 'Reimbursement Item';
+                const date = dMatch ? dMatch[1].trim() : '';
+                const numericAmount = aMatch ? Number(normalizeMoneyValue(aMatch[1].replace(/,/g, ''), '0.00')) : 0;
+
+                return {
+                    staffName: fallbackStaff,
+                    amount: numericAmount,
+                    totalAmount: numericAmount,
+                    uid: `particular-${idx + 1}`,
+                    storeName: 'reimbursement',
+                    product: product,
+                    rawDate: date,
+                    dateKey: toDateKey(date),
+                    signatureKey: [
+                        'reimbursement',
+                        normalizeTextKey(product),
+                        normalizeMoneyValue(String(numericAmount), '0.00')
+                    ].join('|')
+                };
+            });
+        }
+
         const particularAmountLines = parseParticularAmountLines(formText);
         if (particularAmountLines.length > 0) {
             return particularAmountLines.map((entry, idx) => {
@@ -2879,12 +2912,12 @@ export const App = () => {
                     amount: numericAmount,
                     totalAmount: numericAmount,
                     uid: `particular-${idx + 1}`,
-                    storeName: 'particulars',
+                    storeName: 'reimbursement',
                     product: entry.product,
                     rawDate: entry.date,
                     dateKey: toDateKey(entry.date),
                     signatureKey: [
-                        'particulars',
+                        'reimbursement',
                         normalizeTextKey(entry.product),
                         normalizeMoneyValue(String(numericAmount), '0.00')
                     ].join('|')
