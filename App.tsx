@@ -438,6 +438,7 @@ interface PendingStaffGroup {
     staffName: string;
     records: any[];
     count: number;
+    totalAmount: number;
     latestDate: string;
     oldestAgeDays: number;
 }
@@ -5119,6 +5120,7 @@ export const App = () => {
                     staffName,
                     records: [record],
                     count: 1,
+                    totalAmount: Number(record.amount || 0),
                     latestDate: currentDate,
                     oldestAgeDays: record.pendingAgeDays || 0
                 });
@@ -5128,6 +5130,7 @@ export const App = () => {
             const existing = grouped.get(key)!;
             existing.records.push(record);
             existing.count += 1;
+            existing.totalAmount += Number(record.amount || 0);
             existing.oldestAgeDays = Math.max(existing.oldestAgeDays, record.pendingAgeDays || 0);
 
             const currentTimestamp = new Date(record.created_at || 0).getTime();
@@ -6191,7 +6194,10 @@ export const App = () => {
                                         {pendingApprovalStaffGroups.length > 0 ? pendingApprovalStaffGroups.map((group) => (
                                             <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                                 <div className="space-y-1">
-                                                    <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
+                                                        <span className="text-sm font-bold text-emerald-400">(${group.totalAmount.toFixed(2)})</span>
+                                                    </div>
                                                     <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
                                                     <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
                                                     <span className={`inline-flex text-[11px] px-2 py-1 rounded-full border ${group.oldestAgeDays >= 8
