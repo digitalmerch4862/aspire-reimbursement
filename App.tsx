@@ -926,7 +926,7 @@ const isNetworkFetchError = (error: unknown): boolean => {
 
 const upsertJulianApprovalSection = (
     content: string,
-    options?: { approvalReason?: string; fraudReceiptStatus?: string }
+    options?: { approvalReason?: string; fraudReceiptStatus?: string; onlyBlock?: boolean }
 ): string => {
     const stripped = stripJulianApprovalSection(content).trimEnd();
     const staffMember = extractFieldValue(stripped, [
@@ -976,6 +976,10 @@ const upsertJulianApprovalSection = (
         '',
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
+
+    if (options?.onlyBlock) {
+        return approvalSection.trim();
+    }
 
     const cleanedContent = stripped.trim();
     return `${approvalSection}\n\n${cleanedContent}`.trim();
@@ -5202,12 +5206,15 @@ export const App = () => {
 
     const julianEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
-        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantBaseEmailContent, julianApprovalContext));
+        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantBaseEmailContent, { ...julianApprovalContext, onlyBlock: true }));
     }, [claimantBaseEmailContent, julianApprovalContext]);
 
     const displayEmailContent = useMemo(() => {
         if (formVsReceiptTotals.isFormHigherMismatch) return claimantEmailContent;
-        return isJulianApprovalRequired ? julianEmailContent : claimantEmailContent;
+        if (isJulianApprovalRequired) {
+            return julianEmailContent + "\n\n" + claimantEmailContent;
+        }
+        return claimantEmailContent;
     }, [formVsReceiptTotals.isFormHigherMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
