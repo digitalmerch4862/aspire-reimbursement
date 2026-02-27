@@ -848,6 +848,24 @@ const stripClaimantConfirmation = (content: string): string => {
     return String(content || '').replace(/\n*Hi,[\s\S]*?I hope this message finds you well\.[\s\S]*?(?=\*\*Summary of Expenses\*\*|Summary of Expenses:|\*\*TOTAL AMOUNT:|TOTAL AMOUNT:|$)/gi, '\n');
 };
 
+const extractSummaryExpensesSection = (content: string): string => {
+    const text = String(content || '');
+    if (!text.trim()) return '';
+
+    const markerMatch = text.match(/(?:\*\*Summary of Expenses\*\*|Summary of Expenses:)\s*/i);
+    if (!markerMatch || markerMatch.index === undefined) return '';
+
+    const start = markerMatch.index;
+    const totalMatch = text.slice(start).match(/(?:\*\*TOTAL AMOUNT:\s*\$?[0-9,.]+\*\*|TOTAL AMOUNT:\s*\$?[0-9,.]+)/i);
+
+    if (!totalMatch || totalMatch.index === undefined) {
+        return text.slice(start).trim();
+    }
+
+    const end = start + totalMatch.index + totalMatch[0].length;
+    return text.slice(start, end).trim();
+};
+
 const isOver300Detail = (detail?: string): boolean => {
     const text = String(detail || '').toLowerCase();
     return text.includes('above $300')
@@ -962,18 +980,15 @@ const upsertJulianApprovalSection = (
         '',
         'I am seeking your approval for this reimbursement request prior to payment release.',
         '',
-        `**Subject:** ${subjectLine}`,
-        `**Approval Reason:** ${approvalReason}`,
-        `**Fraud Receipt Check:** ${fraudReceiptStatus}`,
+        `Subject: ${subjectLine}`,
+        `Approval Reason: ${approvalReason}`,
+        `Fraud Receipt Check: ${fraudReceiptStatus}`,
         '',
-        '### Reimbursement Details',
-        `**Staff Member:** ${staffMember || '-'}`,
-        `**Client Name:** ${clientName || '-'}`,
-        `**Amount:** ${amount || '-'}`,
-        `**Approved By:** ${approvedBy || '-'}`,
-
-        '',
-        '---',
+        'Reimbursement Details',
+        `Staff Member: ${staffMember || '-'}`,
+        `Client Name: ${clientName || '-'}`,
+        `Amount: ${amount || '-'}`,
+        `Approved By: ${approvedBy || '-'}`,
         '',
         '<!-- JULIAN_APPROVAL_BLOCK_END -->'
     ].join('\n');
@@ -5242,7 +5257,11 @@ export const App = () => {
 
     const julianEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
-        return stripInternalAuditMeta(upsertJulianApprovalSection(claimantBaseEmailContent, { ...julianApprovalContext, onlyBlock: true }));
+        const approvalBlock = stripInternalAuditMeta(
+            upsertJulianApprovalSection(claimantBaseEmailContent, { ...julianApprovalContext, onlyBlock: true })
+        );
+        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent);
+        return summarySection ? `${approvalBlock}\n\n${summarySection}`.trim() : approvalBlock;
     }, [claimantBaseEmailContent, julianApprovalContext]);
 
     const displayEmailContent = useMemo(() => {
