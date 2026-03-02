@@ -258,6 +258,7 @@ const stripInternalAuditMeta = (text: string): string => {
 
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
 const SPECIAL_INSTRUCTION_LOGS_KEY = 'aspire_special_instruction_logs';
+const SPECIAL_INSTRUCTION_SYNC_KEY = 'aspire_special_instruction_synced_to_audit_logs_v1';
 const GROUP_LIQUIDATION_QUEUE_KEY = 'aspire_group_liquidation_queue';
 const EMPLOYEE_PENDING_DEACTIVATION_KEY = 'aspire_employee_pending_deactivation';
 const EMPLOYEE_ALIAS_MAP_KEY = 'aspire_employee_alias_map';
@@ -1440,6 +1441,7 @@ export const App = () => {
     const [manualAuditIssues, setManualAuditIssues] = useState<ManualAuditIssue[]>([]);
     const [showManualAuditModal, setShowManualAuditModal] = useState(false);
     const bypassManualAuditRef = useRef(false);
+    const specialInstructionSyncAttemptedRef = useRef(false);
 
     // Processing status state
     const [ocrStatus, setOcrStatus] = useState<string>('');
@@ -1663,6 +1665,167 @@ export const App = () => {
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (loadingHistory) return;
+        if (specialInstructionSyncAttemptedRef.current) return;
+        specialInstructionSyncAttemptedRef.current = true;
+
+        if (specialInstructionLogs.length === 0) {
+            localStorage.setItem(SPECIAL_INSTRUCTION_SYNC_KEY, 'done');
+            return;
+        }
+
+        const indexedUnsynced = specialInstructionLogs
+            .map((entry, index) => ({ entry, index }))
+            .filter(({ entry }) => !entry?.synced_to_audit_logs);
+
+        if (indexedUnsynced.length === 0) {
+            localStorage.setItem(SPECIAL_INSTRUCTION_SYNC_KEY, 'done');
+            return;
+        }
+
+        const resolveStatusTag = (record: any): 'PENDING' | 'PAID' => {
+            const content = String(record?.full_email_content || '');
+            if (/<!--\s*STATUS:\s*PENDING\s*-->/i.test(content)) return 'PENDING';
+            if (/<!--\s*STATUS:\s*PAID\s*-->/i.test(content)) return 'PAID';
+            return isPendingNabCodeValue(String(record?.nab_code || '')) ? 'PENDING' : 'PAID';
+        };
+
+        const buildSyncFingerprint = (record: any): string => {
+            const staff = normalizeNameKey(String(record?.staff_name || record?.staffName || 'Unknown'));
+            const amount = normalizeMoneyValue(String(record?.amount || '0.00'), '0.00');
+            const status = resolveStatusTag(record);
+            const dateKey = String(record?.created_at || '').slice(0, 10) || 'unknown-date';
+            const contentSnippet = normalizeTextKey(String(record?.full_email_content || '').replace(/\s+/g, ' ').slice(0, 140));
+            return `${staff}|${amount}|${status}|${dateKey}|${contentSnippet}`;
+        };
+
+        const existingFingerprints = new Set<string>(historyData.map((row) => buildSyncFingerprint(row)));
+        const alreadySyncedIndexes = new Set<number>();
+        const candidateIndexes = new Set<number>();
+        const batchFingerprints = new Set<string>();
+
+        const payloads = indexedUnsynced
+            .map(({ entry, index }) => {
+                const amount = Number(normalizeMoneyValue(String(entry?.amount || '0.00'), '0.00'));
+                if (!Number.isFinite(amount) || amount <= 0) return null;
+
+                const fullEmailContent = String(entry?.full_email_content || '').trim();
+                if (!fullEmailContent) return null;
+
+                const fingerprint = buildSyncFingerprint(entry);
+                if (existingFingerprints.has(fingerprint) || batchFingerprints.has(fingerprint)) {
+                    alreadySyncedIndexes.add(index);
+                    return null;
+                }
+
+                batchFingerprints.add(fingerprint);
+                candidateIndexes.add(index);
+
+                const statusTag = resolveStatusTag(entry);
+                const rawNabCode = String(entry?.nab_code || '').trim();
+                const nabCode = statusTag === 'PENDING'
+                    ? 'PENDING'
+                    : isValidNabReference(rawNabCode)
+                        ? rawNabCode.toUpperCase()
+                        : null;
+
+                return {
+                    staff_name: String(entry?.staff_name || entry?.staffName || 'Unknown').trim() || 'Unknown',
+                    amount,
+                    nab_code: nabCode,
+                    yp_name: null,
+                    location: null,
+                    full_email_content: fullEmailContent,
+                    created_at: String(entry?.created_at || new Date().toISOString())
+                };
+            })
+            .filter((payload): payload is {
+                staff_name: string;
+                amount: number;
+                nab_code: string | null;
+                yp_name: null;
+                location: null;
+                full_email_content: string;
+                created_at: string;
+            } => payload !== null);
+
+        const markSpecialInstructionSynced = (indexes: Set<number>) => {
+            if (indexes.size === 0) return;
+            const syncedAt = new Date().toISOString();
+            setSpecialInstructionLogs((prev) => {
+                const next = prev.map((item, idx) => {
+                    if (!indexes.has(idx)) return item;
+                    return {
+                        ...item,
+                        synced_to_audit_logs: true,
+                        synced_to_audit_logs_at: syncedAt
+                    };
+                });
+                saveSpecialInstructionLogs(next);
+                return next;
+            });
+        };
+
+        const runSync = async () => {
+            if (!hasSupabaseEnv) {
+                if (payloads.length > 0) {
+                    const now = Date.now();
+                    const localPayloads = payloads.map((payload, idx) => ({
+                        ...payload,
+                        id: `local-special-sync-${now}-${idx}-${Math.floor(Math.random() * 1000)}`
+                    }));
+                    const merged = [...localPayloads, ...loadLocalAuditLogs()];
+                    saveLocalAuditLogs(merged);
+                    setHistoryData(merged);
+                }
+                const toMark = new Set<number>([...Array.from(alreadySyncedIndexes), ...Array.from(candidateIndexes)]);
+                markSpecialInstructionSynced(toMark);
+                localStorage.setItem(SPECIAL_INSTRUCTION_SYNC_KEY, 'done');
+                return;
+            }
+
+            markSpecialInstructionSynced(alreadySyncedIndexes);
+
+            if (payloads.length === 0) {
+                localStorage.setItem(SPECIAL_INSTRUCTION_SYNC_KEY, 'done');
+                return;
+            }
+
+            try {
+                let errorResult = await supabase.from('audit_logs').insert(payloads);
+
+                if (errorResult.error && errorResult.error.code === '23505') {
+                    const { data: maxIdData } = await supabase
+                        .from('audit_logs')
+                        .select('id')
+                        .order('id', { ascending: false })
+                        .limit(1)
+                        .single();
+
+                    let nextId = (maxIdData?.id || 0) + 1;
+                    const manualPayloads = payloads.map((payload, index) => ({
+                        ...payload,
+                        id: nextId + index
+                    }));
+                    errorResult = await supabase.from('audit_logs').insert(manualPayloads);
+                }
+
+                if (errorResult.error) throw errorResult.error;
+
+                markSpecialInstructionSynced(candidateIndexes);
+                localStorage.setItem(SPECIAL_INSTRUCTION_SYNC_KEY, 'done');
+                fetchHistory();
+            } catch (error) {
+                console.error('Failed to sync special instruction logs into audit history:', error);
+                showWarningToast('Some legacy manual records could not sync to database automatically. Please refresh and retry.');
+                specialInstructionSyncAttemptedRef.current = false;
+            }
+        };
+
+        void runSync();
+    }, [loadingHistory, specialInstructionLogs, historyData, hasSupabaseEnv]);
 
     useEffect(() => {
         const isRedPopup = showSaveModal && saveModalDecision?.mode === 'red';
@@ -4202,12 +4365,15 @@ export const App = () => {
                     nabCode = null;
                 }
 
+                const selectedAmountRaw = String(amountSelectionByTx.get(tx.index) ?? tx.amount ?? '0').trim();
+                const resolvedAmount = Number(normalizeMoneyValue(selectedAmountRaw, '0.00'));
+
                 const ypNameValue = normalizeOptionalText(tx.ypName);
                 const locationValue = normalizeOptionalText(tx.location);
 
                 return {
                     staff_name: tx.staffName,
-                    amount: parseFloat(String(tx.amount).replace(/[^0-9.-]/g, '')) || 0,
+                    amount: Number.isFinite(resolvedAmount) ? resolvedAmount : 0,
                     nab_code: nabCode,
                     yp_name: ypNameValue,
                     location: locationValue,
@@ -4765,7 +4931,8 @@ export const App = () => {
         }
 
         const hasInvalidAmount = parsedTransactions.some((tx) => {
-            const numericAmount = Number(normalizeMoneyValue(String(tx.amount || '0'), '0.00'));
+            const selectedAmountRaw = String(amountSelectionByTx.get(tx.index) ?? tx.amount ?? '0').trim();
+            const numericAmount = Number(normalizeMoneyValue(selectedAmountRaw, '0.00'));
             return !Number.isFinite(numericAmount) || numericAmount <= 0;
         });
 
