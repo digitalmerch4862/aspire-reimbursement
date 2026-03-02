@@ -2538,10 +2538,25 @@ export const App = () => {
                 .select('*')
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
+            if (error) {
+                console.error("Supabase fetch error, falling back to local storage:", error);
+                const localRows = loadLocalAuditLogs().sort((a, b) => {
+                    const aTs = new Date(a.created_at || 0).getTime();
+                    const bTs = new Date(b.created_at || 0).getTime();
+                    return bTs - aTs;
+                });
+                setHistoryData(localRows);
+                return;
+            }
             setHistoryData(data || []);
         } catch (e) {
-            console.error("Error fetching history:", e);
+            console.error("Error fetching history, falling back to local storage:", e);
+            const localRows = loadLocalAuditLogs().sort((a, b) => {
+                const aTs = new Date(a.created_at || 0).getTime();
+                const bTs = new Date(b.created_at || 0).getTime();
+                return bTs - aTs;
+            });
+            setHistoryData(localRows);
         } finally {
             setLoadingHistory(false);
         }
