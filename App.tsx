@@ -3367,7 +3367,7 @@ export const App = () => {
     const hasPayeeAlarm = useMemo(() => {
         const builtInRuleIds = new Set(['r1', 'r2', 'r3', 'r4', 'r5', 'r7']);
         return rulesStatusItems.some((item) =>
-            builtInRuleIds.has(item.id) && (item.status === 'warning' || item.status === 'blocked')
+            builtInRuleIds.has(item.id) && item.status === 'blocked'
         );
     }, [rulesStatusItems]);
 
