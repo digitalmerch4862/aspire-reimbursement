@@ -5145,7 +5145,8 @@ export const App = () => {
                 const content = r.full_email_content || '';
                 const hasPendingStatusTag = /<!--\s*STATUS:\s*PENDING\s*-->/i.test(content);
                 const hasPendingNab = isPendingNabCodeValue(r.nab_code) || isPendingNabCodeValue(r.nabRef);
-                return hasPendingStatusTag || hasPendingNab;
+                const flaggedDiscrepancy = Boolean(r.isDiscrepancy);
+                return hasPendingStatusTag || hasPendingNab || flaggedDiscrepancy;
             })
             .map((record: any) => {
                 const pendingAgeDays = getPendingAgeDays(record);
