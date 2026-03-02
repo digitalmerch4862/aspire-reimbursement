@@ -2139,22 +2139,36 @@ export const App = () => {
     useEffect(() => {
         if (parsedTransactions.length === 0 || employeeList.length === 0) return;
 
-        setEmployeeSearchQuery((previous) => {
-            const next = new Map(previous);
-            parsedTransactions.forEach((tx) => {
-                if (next.has(tx.index)) return;
-                const rawName = tx.formattedName || tx.staffName || '';
-                const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
-                if (aliasHit) {
-                    const aliasEmployee = employeeList.find((employee) => employee.id === aliasHit)
-                        || employeeList.find((employee) => normalizeEmployeeName(getEmployeeDisplayName(employee)) === normalizeEmployeeName(aliasHit));
-                    next.set(tx.index, aliasEmployee ? getEmployeeDisplayName(aliasEmployee) : rawName);
-                    return;
-                }
-                next.set(tx.index, rawName);
-            });
-            return next;
+        let hasNewSelections = false;
+        const newSelectedEmployees = new Map(selectedEmployees);
+        const newQueries = new Map(employeeSearchQuery);
+
+        parsedTransactions.forEach((tx) => {
+            if (newQueries.has(tx.index)) return;
+
+            const rawName = tx.formattedName || tx.staffName || '';
+            const normalizedRaw = normalizeEmployeeName(rawName);
+
+            // Try to find matching employee
+            const aliasId = employeeAliasMap[normalizedRaw];
+            let matchedEmployee = employeeList.find(e => normalizeEmployeeName(e.fullName) === normalizedRaw);
+            if (!matchedEmployee && aliasId) {
+                matchedEmployee = employeeList.find(e => e.id === aliasId);
+            }
+
+            if (matchedEmployee) {
+                newSelectedEmployees.set(tx.index, matchedEmployee);
+                newQueries.set(tx.index, getEmployeeDisplayName(matchedEmployee));
+                hasNewSelections = true;
+            } else {
+                newQueries.set(tx.index, rawName);
+            }
         });
+
+        if (hasNewSelections) {
+            setSelectedEmployees(newSelectedEmployees);
+        }
+        setEmployeeSearchQuery(newQueries);
 
         setAmountSelectionByTx((previous) => {
             const next = new Map(previous);
