@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
@@ -4666,10 +4666,11 @@ export const App = () => {
                 const productKey = normalizeTextKey(tx.product || '');
                 const rawDate = String(tx.rawDate || '').trim();
                 const totalValue = Number(normalizeMoneyValue(String(tx.totalAmount), '0.00'));
+                // Skip $0 rows -- these are supporting approval evidence / message confirmation rows
+                if (!Number.isFinite(totalValue) || totalValue <= 0) return false;
                 if (!storeKey || storeKey === 'particulars') return true;
                 if (!productKey || productKey === '-') return true;
                 if (!rawDate) return true;
-                if (!Number.isFinite(totalValue) || totalValue <= 0) return true;
                 return false;
             });
 
