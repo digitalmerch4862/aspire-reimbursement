@@ -913,23 +913,27 @@ const stripClaimantRevisionSection = (content: string): string => {
 
 const upsertClaimantRevisionSection = (content: string): string => {
     const stripped = stripClaimantRevisionSection(content).trimEnd();
+    const totals = parseFormReceiptTotalsFromContent(stripped);
+    const formDisplay = totals.formTotal !== null && Number.isFinite(totals.formTotal) ? totals.formTotal.toFixed(2) : '0.00';
+    const receiptDisplay = totals.receiptTotal !== null && Number.isFinite(totals.receiptTotal) ? totals.receiptTotal.toFixed(2) : '0.00';
+    const differenceDisplay = totals.difference !== null && Number.isFinite(totals.difference) ? totals.difference.toFixed(2) : '0.00';
+    const isFormHigher = totals.formTotal !== null && totals.receiptTotal !== null && totals.formTotal > totals.receiptTotal + 0.01;
+
     const revisionSection = [
         '<!-- CLAIMANT_REVISION_BLOCK_START -->',
+        isFormHigher
+            ? 'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.'
+            : 'Please revise the reimbursement form or provide receipt details equal to the reimbursement amount for audit purpose.',
+        `Reimbursement form total is ${formDisplay}`,
+        `Receipt total is ${receiptDisplay}`,
+        `Difference amount is ${differenceDisplay}`,
         '<!-- CLAIMANT_REVISION_BLOCK_END -->'
     ].join('\n');
 
-    const normalizedBody = stripped
-        .replace(/^\s*Please revise the reimbursement form because the reimbursement form total is higher than the receipt total\.\s*$/gim, '')
-        .replace(/^\s*Please revise the reimbursement form or provide receipt details equal to the reimbursement amount for audit purpose\.\s*$/gim, '')
-        .replace(/^\s*Reimbursement form total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
-        .replace(/^\s*Receipt total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
-        .replace(/^\s*(?:\*\*)?\s*Difference amount is\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:\*\*)?\s*$/gim, '')
-        .replace(
-            /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
-            'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
-        )
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+    const normalizedBody = stripped.replace(
+        /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
+        'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
+    );
 
     return `${revisionSection}\n\n${normalizedBody}`;
 };
