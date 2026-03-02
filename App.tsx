@@ -917,13 +917,10 @@ const upsertClaimantRevisionSection = (content: string): string => {
     const formDisplay = totals.formTotal !== null && Number.isFinite(totals.formTotal) ? totals.formTotal.toFixed(2) : '0.00';
     const receiptDisplay = totals.receiptTotal !== null && Number.isFinite(totals.receiptTotal) ? totals.receiptTotal.toFixed(2) : '0.00';
     const differenceDisplay = totals.difference !== null && Number.isFinite(totals.difference) ? totals.difference.toFixed(2) : '0.00';
-    const isFormHigher = totals.formTotal !== null && totals.receiptTotal !== null && totals.formTotal > totals.receiptTotal + 0.01;
 
     const revisionSection = [
         '<!-- CLAIMANT_REVISION_BLOCK_START -->',
-        isFormHigher
-            ? 'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.'
-            : 'Please revise the reimbursement form or provide receipt details equal to the reimbursement amount for audit purpose.',
+        'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.',
         `Reimbursement form total is ${formDisplay}`,
         `Receipt total is ${receiptDisplay}`,
         `Difference amount is ${differenceDisplay}`,
@@ -3019,8 +3016,7 @@ export const App = () => {
             formTotal,
             receiptTotal,
             difference,
-            isFormHigherMismatch: Boolean(hasBoth && (formTotal as number) > (receiptTotal as number) + 0.01),
-            isAnyMismatch: Boolean(hasBoth && Math.abs((formTotal as number) - (receiptTotal as number)) > 0.01)
+            isFormHigherMismatch: Boolean(hasBoth && (formTotal as number) > (receiptTotal as number) + 0.01)
         };
     }, [reimbursementFormText, receiptDetailsText]);
 
@@ -5265,10 +5261,10 @@ export const App = () => {
 
     const claimantEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
-        return formVsReceiptTotals.isAnyMismatch
+        return formVsReceiptTotals.isFormHigherMismatch
             ? stripInternalAuditMeta(upsertClaimantRevisionSection(claimantBaseEmailContent))
             : stripInternalAuditMeta(stripClaimantRevisionSection(claimantBaseEmailContent));
-    }, [claimantBaseEmailContent, formVsReceiptTotals.isAnyMismatch]);
+    }, [claimantBaseEmailContent, formVsReceiptTotals.isFormHigherMismatch]);
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
@@ -5291,12 +5287,12 @@ export const App = () => {
     }, [claimantBaseEmailContent, julianApprovalContext]);
 
     const displayEmailContent = useMemo(() => {
-        if (formVsReceiptTotals.isAnyMismatch) return claimantEmailContent;
+        if (formVsReceiptTotals.isFormHigherMismatch) return claimantEmailContent;
         if (isJulianApprovalRequired) {
             return julianEmailContent + "\n\n" + claimantEmailContent;
         }
         return claimantEmailContent;
-    }, [formVsReceiptTotals.isAnyMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
+    }, [formVsReceiptTotals.isFormHigherMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
