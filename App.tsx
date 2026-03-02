@@ -897,50 +897,18 @@ const isFormHigherMismatchDetail = (detail?: string): boolean => {
     return text.includes('reimbursement form total is higher than receipt total');
 };
 
-const parseFormReceiptTotalsFromContent = (content: string): { formTotal: number | null; receiptTotal: number | null; difference: number | null } => {
-    const formMatch = content.match(/Reimbursement\s*form\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
-    const receiptMatch = content.match(/Receipt\s*total\s*is\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
-
-    const formTotal = formMatch ? Number(formMatch[1].replace(/,/g, '')) : null;
-    const receiptTotal = receiptMatch ? Number(receiptMatch[1].replace(/,/g, '')) : null;
-
-    if (formTotal === null || receiptTotal === null || Number.isNaN(formTotal) || Number.isNaN(receiptTotal)) {
-        return { formTotal, receiptTotal, difference: null };
-    }
-
-    return {
-        formTotal,
-        receiptTotal,
-        difference: Number(Math.abs(formTotal - receiptTotal).toFixed(2))
-    };
-};
-
 const stripClaimantRevisionSection = (content: string): string => {
     return String(content || '').replace(/\n*<!--\s*CLAIMANT_REVISION_BLOCK_START\s*-->[\s\S]*?<!--\s*CLAIMANT_REVISION_BLOCK_END\s*-->\s*/gi, '\n');
 };
 
 const upsertClaimantRevisionSection = (content: string): string => {
     const stripped = stripClaimantRevisionSection(content).trimEnd();
-    const totals = parseFormReceiptTotalsFromContent(stripped);
-    const formDisplay = totals.formTotal !== null && Number.isFinite(totals.formTotal) ? totals.formTotal.toFixed(2) : '0.00';
-    const receiptDisplay = totals.receiptTotal !== null && Number.isFinite(totals.receiptTotal) ? totals.receiptTotal.toFixed(2) : '0.00';
-    const differenceDisplay = totals.difference !== null && Number.isFinite(totals.difference) ? totals.difference.toFixed(2) : '0.00';
-
-    const revisionSection = [
-        '<!-- CLAIMANT_REVISION_BLOCK_START -->',
-        'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.',
-        `Reimbursement form total is ${formDisplay}`,
-        `Receipt total is ${receiptDisplay}`,
-        `Difference amount is ${differenceDisplay}`,
-        '<!-- CLAIMANT_REVISION_BLOCK_END -->'
-    ].join('\n');
-
     const normalizedBody = stripped.replace(
         /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
         'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
     );
 
-    return `${revisionSection}\n\n${normalizedBody}`;
+    return normalizedBody;
 };
 
 const isNetworkFetchError = (error: unknown): boolean => {

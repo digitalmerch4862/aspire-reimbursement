@@ -199,7 +199,7 @@ Reimbursement form total is ${formTotalValue.toFixed(2)}
 Receipt total is ${receiptTotalValue.toFixed(2)}
 Difference amount is ${differenceAmount.toFixed(2)}
 
-NAB Code: Enter NAB Code
+NAB Code:
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
 
 Summary of Expenses:
