@@ -2559,40 +2559,16 @@ export const App = () => {
                 return;
             }
 
-            const candidateTables = ['audit_logs', 'reimbursement_logs', 'reimbursements'];
-            let resolvedRows: any[] = [];
-            let lastError: any = null;
+            // Use 'audit_logs' as originally designed, not 'reimbursements'
+            const { data, error } = await supabase
+                .from('audit_logs')
+                .select('*')
+                .order('created_at', { ascending: false });
 
-            for (const tableName of candidateTables) {
-                const { data, error } = await supabase
-                    .from(tableName)
-                    .select('*')
-                    .order('created_at', { ascending: false });
-
-                if (error) {
-                    lastError = error;
-                    continue;
-                }
-
-                if (Array.isArray(data) && data.length > 0) {
-                    resolvedRows = data;
-                    break;
-                }
-            }
-
-            if (resolvedRows.length > 0) {
-                setHistoryData(resolvedRows);
-                return;
-            }
-
-            if (lastError) {
-                throw lastError;
-            }
-
-            setHistoryData([]);
+            if (error) throw error;
+            setHistoryData(data || []);
         } catch (e) {
             console.error("Error fetching history:", e);
-            setErrorMessage('Unable to load records from cloud database. Please refresh and verify Supabase table access.');
         } finally {
             setLoadingHistory(false);
         }
