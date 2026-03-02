@@ -737,25 +737,36 @@ const parseDateValue = (value: string): Date | null => {
     const raw = String(value || '').trim();
     if (!raw) return null;
 
+    const numericMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (numericMatch) {
+        const day = Number(numericMatch[1]);
+        const month = Number(numericMatch[2]);
+        const yearRaw = Number(numericMatch[3]);
+        const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+
+        if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+            const parsed = new Date(year, month - 1, day);
+            const isValid = !Number.isNaN(parsed.getTime())
+                && parsed.getFullYear() === year
+                && parsed.getMonth() === (month - 1)
+                && parsed.getDate() === day;
+            if (isValid) return parsed;
+        }
+    }
+
     const direct = new Date(raw);
     if (!Number.isNaN(direct.getTime())) return direct;
 
-    const slashMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-    if (!slashMatch) return null;
-
-    const day = Number(slashMatch[1]);
-    const month = Number(slashMatch[2]);
-    const yearRaw = Number(slashMatch[3]);
-    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-    const parsed = new Date(year, month - 1, day);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed;
+    return null;
 };
 
 const toDateKey = (value: string): string => {
     const parsed = parseDateValue(value);
     if (!parsed) return String(value || '').trim().toLowerCase();
-    return parsed.toISOString().slice(0, 10);
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
 
 const normalizeNameKey = (value: string): string => {
@@ -913,24 +924,26 @@ const stripClaimantRevisionSection = (content: string): string => {
 
 const upsertClaimantRevisionSection = (content: string): string => {
     const stripped = stripClaimantRevisionSection(content).trimEnd();
-    const totals = parseFormReceiptTotalsFromContent(stripped);
-    const formDisplay = totals.formTotal !== null && Number.isFinite(totals.formTotal) ? totals.formTotal.toFixed(2) : '0.00';
-    const receiptDisplay = totals.receiptTotal !== null && Number.isFinite(totals.receiptTotal) ? totals.receiptTotal.toFixed(2) : '0.00';
-    const differenceDisplay = totals.difference !== null && Number.isFinite(totals.difference) ? totals.difference.toFixed(2) : '0.00';
-
     const revisionSection = [
         '<!-- CLAIMANT_REVISION_BLOCK_START -->',
-        'Please revise the reimbursement form because the reimbursement form total is higher than the receipt total.',
-        `Reimbursement form total is ${formDisplay}`,
-        `Receipt total is ${receiptDisplay}`,
-        `Difference amount is ${differenceDisplay}`,
         '<!-- CLAIMANT_REVISION_BLOCK_END -->'
     ].join('\n');
 
-    const normalizedBody = stripped.replace(
-        /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
-        'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
-    );
+    const normalizedBody = stripped
+        .replace(/^\s*Please revise the reimbursement form because the reimbursement form total is higher than the receipt total\.\s*$/gim, '')
+        .replace(/^\s*Please revise the reimbursement form or provide receipt details equal to the reimbursement amount for audit purpose\.\s*$/gim, '')
+        .replace(/^\s*Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total\.\s*$/gim, '')
+        .replace(/^\s*Your reimbursement request cannot be finalized yet because the reimbursement form amount is higher than the receipt total\.\s*$/gim, '')
+        .replace(/^\s*Please provide additional receipt details to cover the difference amount before we can proceed\.\s*$/gim, '')
+        .replace(/^\s*Reimbursement form total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
+        .replace(/^\s*Receipt total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
+        .replace(/^\s*(?:\*\*)?\s*Difference amount is\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:\*\*)?\s*$/gim, '')
+        .replace(
+            /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
+            'Your reimbursement request cannot be finalized yet because the reimbursement form amount is higher than the receipt total.\nPlease provide additional receipt details to cover the difference amount before we can proceed.'
+        )
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 
     return `${revisionSection}\n\n${normalizedBody}`;
 };
@@ -1391,7 +1404,7 @@ const buildManualAuditIssues = (
     });
 
     if (receiptGrandTotal !== null && formTotal > 0) {
-        const diff = Math.abs(formTotal - receiptGrandTotal);
+        const diff = formTotal - receiptGrandTotal;
         if (diff > 0.01) {
             issues.push({
                 level: 'warning',
@@ -2139,22 +2152,36 @@ export const App = () => {
     useEffect(() => {
         if (parsedTransactions.length === 0 || employeeList.length === 0) return;
 
-        setEmployeeSearchQuery((previous) => {
-            const next = new Map(previous);
-            parsedTransactions.forEach((tx) => {
-                if (next.has(tx.index)) return;
-                const rawName = tx.formattedName || tx.staffName || '';
-                const aliasHit = employeeAliasMap[normalizeEmployeeName(rawName)];
-                if (aliasHit) {
-                    const aliasEmployee = employeeList.find((employee) => employee.id === aliasHit)
-                        || employeeList.find((employee) => normalizeEmployeeName(getEmployeeDisplayName(employee)) === normalizeEmployeeName(aliasHit));
-                    next.set(tx.index, aliasEmployee ? getEmployeeDisplayName(aliasEmployee) : rawName);
-                    return;
-                }
-                next.set(tx.index, rawName);
-            });
-            return next;
+        let hasNewSelections = false;
+        const newSelectedEmployees = new Map(selectedEmployees);
+        const newQueries = new Map(employeeSearchQuery);
+
+        parsedTransactions.forEach((tx) => {
+            if (newQueries.has(tx.index)) return;
+
+            const rawName = tx.formattedName || tx.staffName || '';
+            const normalizedRaw = normalizeEmployeeName(rawName);
+
+            // Try to find matching employee
+            const aliasId = employeeAliasMap[normalizedRaw];
+            let matchedEmployee = employeeList.find(e => normalizeEmployeeName(e.fullName) === normalizedRaw);
+            if (!matchedEmployee && aliasId) {
+                matchedEmployee = employeeList.find(e => e.id === aliasId);
+            }
+
+            if (matchedEmployee) {
+                newSelectedEmployees.set(tx.index, matchedEmployee);
+                newQueries.set(tx.index, getEmployeeDisplayName(matchedEmployee));
+                hasNewSelections = true;
+            } else {
+                newQueries.set(tx.index, rawName);
+            }
         });
+
+        if (hasNewSelections) {
+            setSelectedEmployees(newSelectedEmployees);
+        }
+        setEmployeeSearchQuery(newQueries);
 
         setAmountSelectionByTx((previous) => {
             const next = new Map(previous);
@@ -2532,16 +2559,40 @@ export const App = () => {
                 return;
             }
 
-            // Use 'audit_logs' as originally designed, not 'reimbursements'
-            const { data, error } = await supabase
-                .from('audit_logs')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const candidateTables = ['audit_logs', 'reimbursement_logs', 'reimbursements'];
+            let resolvedRows: any[] = [];
+            let lastError: any = null;
 
-            if (error) throw error;
-            setHistoryData(data || []);
+            for (const tableName of candidateTables) {
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    lastError = error;
+                    continue;
+                }
+
+                if (Array.isArray(data) && data.length > 0) {
+                    resolvedRows = data;
+                    break;
+                }
+            }
+
+            if (resolvedRows.length > 0) {
+                setHistoryData(resolvedRows);
+                return;
+            }
+
+            if (lastError) {
+                throw lastError;
+            }
+
+            setHistoryData([]);
         } catch (e) {
             console.error("Error fetching history:", e);
+            setErrorMessage('Unable to load records from cloud database. Please refresh and verify Supabase table access.');
         } finally {
             setLoadingHistory(false);
         }
@@ -3002,7 +3053,8 @@ export const App = () => {
             formTotal,
             receiptTotal,
             difference,
-            isFormHigherMismatch: Boolean(hasBoth && (formTotal as number) > (receiptTotal as number) + 0.01)
+            isFormHigherMismatch: Boolean(hasBoth && (formTotal as number) > (receiptTotal as number) + 0.01),
+            isAnyMismatch: Boolean(hasBoth && Math.abs((formTotal as number) - (receiptTotal as number)) > 0.01)
         };
     }, [reimbursementFormText, receiptDetailsText]);
 
@@ -3289,7 +3341,7 @@ export const App = () => {
                 : formVsReceiptTotals.isFormHigherMismatch
                     ? `Reimbursement form total is higher than receipt total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}.`
                     : receiptTotal! > formTotal! + 0.01
-                        ? `Receipt total is higher than reimbursement form total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}. Proceed based on reimbursement form total.`
+                        ? `Receipt total is higher than reimbursement form total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}. Clear and good to go based on reimbursement form total.`
                         : `Form and receipt totals are aligned. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}.`;
 
             const status: RuleStatusItem['status'] = !hasBothTotals
@@ -3297,7 +3349,7 @@ export const App = () => {
                 : formVsReceiptTotals.isFormHigherMismatch
                     ? 'blocked'
                     : receiptTotal! > formTotal! + 0.01
-                        ? 'warning'
+                        ? 'pass'
                         : 'pass';
 
             items.push({
@@ -3335,6 +3387,13 @@ export const App = () => {
 
         return items;
     }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals]);
+
+    const hasPayeeAlarm = useMemo(() => {
+        const builtInRuleIds = new Set(['r1', 'r2', 'r3', 'r4', 'r5', 'r7']);
+        return rulesStatusItems.some((item) =>
+            builtInRuleIds.has(item.id) && item.status === 'blocked'
+        );
+    }, [rulesStatusItems]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -4687,15 +4746,6 @@ export const App = () => {
             return;
         }
 
-        // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
-        if (hasTransactions && allHaveRef) {
-            confirmSave('PAID', {
-                duplicateSignal: 'green',
-                detail: 'Direct save triggered by presence of NAB reference.'
-            });
-            return;
-        }
-
         if (duplicateCheckResult.signal === 'red') {
 
             const ageContext = currentInputAgedCount > 0
@@ -4743,6 +4793,15 @@ export const App = () => {
             setManualNabCodeError(null);
             setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required before saving as PAID. Enter bank-provided NAB code manually.' });
             setShowSaveModal(true);
+            return;
+        }
+
+        // If NAB code is present and no blocking checks were hit above, save immediately.
+        if (hasTransactions && allHaveRef) {
+            confirmSave('PAID', {
+                duplicateSignal: 'green',
+                detail: 'Direct save triggered by presence of NAB reference.'
+            });
             return;
         }
 
@@ -4959,9 +5018,9 @@ export const App = () => {
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (content.includes("<!-- STATUS: PENDING -->")) {
+            if (/<!--\s*STATUS:\s*PENDING\s*-->/i.test(content)) {
                 isDiscrepancy = true;
-            } else if (content.includes("<!-- STATUS: PAID -->")) {
+            } else if (/<!--\s*STATUS:\s*PAID\s*-->/i.test(content)) {
                 isDiscrepancy = false;
             } else {
                 isDiscrepancy = content.toLowerCase().includes("discrepancy was found") ||
@@ -5108,7 +5167,10 @@ export const App = () => {
             .filter(r => {
                 if (dismissedIds.includes(r.id)) return false;
                 const content = r.full_email_content || '';
-                return content.includes('<!-- STATUS: PENDING -->') || isPendingNabCodeValue(r.nab_code);
+                const hasPendingStatusTag = /<!--\s*STATUS:\s*PENDING\s*-->/i.test(content);
+                const hasPendingNab = isPendingNabCodeValue(r.nab_code) || isPendingNabCodeValue(r.nabRef);
+                const flaggedDiscrepancy = Boolean(r.isDiscrepancy);
+                return hasPendingStatusTag || hasPendingNab || flaggedDiscrepancy;
             })
             .map((record: any) => {
                 const pendingAgeDays = getPendingAgeDays(record);
@@ -6012,8 +6074,8 @@ export const App = () => {
 
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                 {/* Payee Name with Searchable Dropdown */}
-                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
-                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
+                                                                <div className={`bg-black/30 rounded-xl p-3 border transition-colors relative ${hasPayeeAlarm ? 'border-red-500/40 hover:border-red-400/60' : 'border-white/5 hover:border-white/10'}`}>
+                                                                    <p className={`text-[10px] uppercase font-bold mb-1 ${hasPayeeAlarm ? 'text-red-300' : 'text-slate-400'}`}>Payee Name</p>
                                                                     <div className="flex justify-between items-center">
                                                                         <div className="flex-1 relative">
                                                                             <input
@@ -6022,7 +6084,7 @@ export const App = () => {
                                                                                 onChange={(e) => handleEmployeeSearchChange(txKey, e.target.value)}
                                                                                 onFocus={() => handleEmployeeSearchFocus(txKey)}
                                                                                 onBlur={() => handleEmployeeSearchBlur(txKey)}
-                                                                                className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
+                                                                                className={`w-full bg-transparent font-semibold uppercase border-none outline-none placeholder:text-slate-600 ${hasPayeeAlarm ? 'text-red-300' : 'text-white'}`}
                                                                                 placeholder="Search employee..."
                                                                             />
                                                                             {/* Dropdown */}
