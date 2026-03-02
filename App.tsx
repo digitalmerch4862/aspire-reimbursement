@@ -4994,9 +4994,9 @@ export const App = () => {
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (content.includes("<!-- STATUS: PENDING -->")) {
+            if (/<!--\s*STATUS:\s*PENDING\s*-->/i.test(content)) {
                 isDiscrepancy = true;
-            } else if (content.includes("<!-- STATUS: PAID -->")) {
+            } else if (/<!--\s*STATUS:\s*PAID\s*-->/i.test(content)) {
                 isDiscrepancy = false;
             } else {
                 isDiscrepancy = content.toLowerCase().includes("discrepancy was found") ||
@@ -5143,7 +5143,9 @@ export const App = () => {
             .filter(r => {
                 if (dismissedIds.includes(r.id)) return false;
                 const content = r.full_email_content || '';
-                return content.includes('<!-- STATUS: PENDING -->') || isPendingNabCodeValue(r.nab_code);
+                const hasPendingStatusTag = /<!--\s*STATUS:\s*PENDING\s*-->/i.test(content);
+                const hasPendingNab = isPendingNabCodeValue(r.nab_code) || isPendingNabCodeValue(r.nabRef);
+                return hasPendingStatusTag || hasPendingNab;
             })
             .map((record: any) => {
                 const pendingAgeDays = getPendingAgeDays(record);
