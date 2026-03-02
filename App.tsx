@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
-    Copy, CreditCard, ClipboardList, Calendar, BarChart3, PieChart, TrendingUp,
+    Copy, CreditCard, ClipboardList, ClipboardPaste, Calendar, BarChart3, PieChart, TrendingUp,
     Users, Database, Search, Download, Save, CloudUpload, Trash2, Plus
 
 } from 'lucide-react';
@@ -405,6 +405,13 @@ const isPendingNabCodeValue = (value: string | null | undefined): boolean => {
         'n/a',
         '---'
     ].some(p => normalized === p || normalized.includes(p));
+};
+
+const normalizeParsedNabValue = (value: string | null | undefined): string => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+    if (isPendingNabCodeValue(normalized)) return '';
+    return normalized;
 };
 
 
@@ -2203,7 +2210,7 @@ export const App = () => {
                         const location = parts[2] === '-' ? '' : parts[2];
                         const expenseType = parts[3];
                         const amount = parts[4];
-                        const currentNabRef = String(parts[5] || '').trim();
+                        const currentNabRef = normalizeParsedNabValue(parts[5]);
 
                         tableRows.push({
                             index: rowIndex++,
@@ -2254,7 +2261,7 @@ export const App = () => {
 
         // Find NAB code
         const nabMatch = part.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
-        const currentNabRef = nabMatch ? nabMatch[1].trim() : '';
+        const currentNabRef = normalizeParsedNabValue(nabMatch ? nabMatch[1].trim() : '');
 
         // Find Receipt ID (if exists)
         const receiptMatch = part.match(/\*\*Receipt ID:\*\*\s*(.*)/) || part.match(/Receipt ID:\s*(.*)/);
@@ -4235,6 +4242,28 @@ export const App = () => {
         navigator.clipboard.writeText(text);
         setCopiedField(fieldName);
         setTimeout(() => setCopiedField(null), 2000);
+    };
+
+    const handlePasteNabCode = async (index: number) => {
+        if (!navigator.clipboard?.readText) {
+            showWarningToast('Clipboard paste is not supported on this browser.');
+            return;
+        }
+
+        try {
+            const pasted = String(await navigator.clipboard.readText()).trim();
+            if (!pasted) {
+                showWarningToast('Clipboard is empty.');
+                return;
+            }
+
+            handleTransactionNabChange(index, pasted.toUpperCase());
+            setCopiedField(`nab-paste-${index}`);
+            setTimeout(() => setCopiedField(null), 1200);
+        } catch (error) {
+            console.error('Failed to paste NAB code from clipboard:', error);
+            showWarningToast('Clipboard access was blocked. Allow permission and try again.');
+        }
     };
 
     const handleCopyTable = async (elementId: string, type: 'nab' | 'eod') => {
@@ -6229,13 +6258,23 @@ export const App = () => {
 
                                                             <div className="mt-4 bg-black/20 rounded-xl p-3 border border-indigo-500/25">
                                                                 <p className="text-[10px] uppercase text-indigo-300 font-bold mb-1">NAB Code</p>
-                                                                <input
-                                                                    type="text"
-                                                                    value={tx.currentNabRef || ''}
-                                                                    onChange={(e) => handleTransactionNabChange(txKey, e.target.value)}
-                                                                    placeholder="Enter NAB Code"
-                                                                    className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
-                                                                />
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={tx.currentNabRef || ''}
+                                                                        onChange={(e) => handleTransactionNabChange(txKey, e.target.value)}
+                                                                        placeholder=""
+                                                                        className="w-full bg-transparent border-none outline-none text-sm font-mono text-indigo-100 placeholder:text-indigo-300/60"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => void handlePasteNabCode(txKey)}
+                                                                        className="text-indigo-300 hover:text-white transition-colors p-1"
+                                                                        title="Paste NAB Code"
+                                                                    >
+                                                                        {copiedField === `nab-paste-${txKey}` ? <Check size={14} /> : <ClipboardPaste size={14} />}
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
