@@ -2040,7 +2040,7 @@ export const App = () => {
                         const location = parts[2] === '-' ? '' : parts[2];
                         const expenseType = parts[3];
                         const amount = parts[4];
-                        const currentNabRef = parts[5] || '';
+                        const currentNabRef = String(parts[5] || '').trim();
 
                         tableRows.push({
                             index: rowIndex++,
@@ -2049,7 +2049,7 @@ export const App = () => {
                             amount,
                             expenseType,
                             receiptId: 'N/A',
-                            currentNabRef: isValidNabReference(currentNabRef) ? currentNabRef : '',
+                            currentNabRef,
                             ypName,
                             location
                         });
@@ -2091,8 +2091,7 @@ export const App = () => {
 
         // Find NAB code
         const nabMatch = part.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
-        let currentNabRef = nabMatch ? nabMatch[1].trim() : '';
-        if (!isValidNabReference(currentNabRef)) currentNabRef = ''; // Clear placeholders/pending for input value
+        const currentNabRef = nabMatch ? nabMatch[1].trim() : '';
 
         // Find Receipt ID (if exists)
         const receiptMatch = part.match(/\*\*Receipt ID:\*\*\s*(.*)/) || part.match(/Receipt ID:\s*(.*)/);
@@ -4765,68 +4764,29 @@ export const App = () => {
             return;
         }
 
-        const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
-
-        // If NAB code is already entered, skip confirmation and save immediately
-        if (allHaveRef) {
-            confirmSave('PAID', {
-                duplicateSignal: 'green',
-                detail: 'Special Instruction direct save triggered by presence of NAB reference.'
-            });
-            return;
-        }
-
-        const nowIso = new Date().toISOString();
-
-        const payloads = parsedTransactions.map((tx, idx) => {
-            const selectedEmployee = selectedEmployees.get(tx.index);
-            const typedName = String(employeeSearchQuery.get(tx.index) || '').trim();
-            const staffName = selectedEmployee
-                ? getEmployeeDisplayName(selectedEmployee)
-                : typedName || tx.formattedName || tx.staffName || 'Unknown';
-
-            const selectedAmount = String(amountSelectionByTx.get(tx.index) || tx.amount || '0').trim();
-            const amount = Number(normalizeMoneyValue(selectedAmount, '0.00'));
-            const nabCode = String(tx.currentNabRef || '').trim();
-            const hasValidNab = isValidNabReference(nabCode);
-            const normalizedNab = hasValidNab ? nabCode.toUpperCase() : 'Nab code is pending';
-            const statusTag = hasValidNab ? '<!-- STATUS: PAID -->' : '<!-- STATUS: PENDING -->';
-
-            const content = [
-                'Hi,',
-                '',
-                'Special instruction entry recorded for NAB/EOD logging.',
-                '',
-                `**Staff Member:** ${staffName}`,
-                `**Amount:** $${amount.toFixed(2)}`,
-                `**NAB Code:** ${hasValidNab ? normalizedNab : 'Enter NAB Code'}`,
-                statusTag,
-                '<!-- SPECIAL_INSTRUCTION -->'
-            ].join('\n');
-
-            return {
-                id: `special-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
-                staff_name: staffName,
-                amount,
-                nab_code: normalizedNab,
-                full_email_content: content,
-                created_at: nowIso,
-                is_special_instruction: true
-            };
+        const hasInvalidAmount = parsedTransactions.some((tx) => {
+            const numericAmount = Number(normalizeMoneyValue(String(tx.amount || '0'), '0.00'));
+            return !Number.isFinite(numericAmount) || numericAmount <= 0;
         });
 
-        if (payloads.some((p) => !Number.isFinite(p.amount) || p.amount <= 0)) {
+        if (hasInvalidAmount) {
             setErrorMessage('Special Instruction amount must be greater than 0.');
             return;
         }
 
-        const next = [...payloads, ...specialInstructionLogs];
-        setSpecialInstructionLogs(next);
-        saveSpecialInstructionLogs(next);
-        showSavedToast(payloads as Array<{ nab_code?: string | null; amount?: number }>);
-        setSaveStatus('success');
-        resetAll();
-        scrollToReimbursementForm();
+        const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
+        if (allHaveRef) {
+            confirmSave('PAID', {
+                duplicateSignal: 'green',
+                detail: 'Manual mode save recorded with valid NAB reference.'
+            });
+            return;
+        }
+
+        confirmSave('PENDING', {
+            duplicateSignal: 'green',
+            detail: 'Saved as pending due to incomplete NAB reference.'
+        });
     };
 
     const handleApproveManualAudit = () => {
