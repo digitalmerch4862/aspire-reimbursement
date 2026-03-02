@@ -3350,13 +3350,6 @@ export const App = () => {
         return items;
     }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals]);
 
-    const hasPayeeAlarm = useMemo(() => {
-        const builtInRuleIds = new Set(['r1', 'r2', 'r3', 'r4', 'r5', 'r7']);
-        return rulesStatusItems.some((item) =>
-            builtInRuleIds.has(item.id) && (item.status === 'warning' || item.status === 'blocked')
-        );
-    }, [rulesStatusItems]);
-
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
     const [dragStartId, setDragStartId] = useState<string | null>(null);
@@ -4708,6 +4701,15 @@ export const App = () => {
             return;
         }
 
+        // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
+        if (hasTransactions && allHaveRef) {
+            confirmSave('PAID', {
+                duplicateSignal: 'green',
+                detail: 'Direct save triggered by presence of NAB reference.'
+            });
+            return;
+        }
+
         if (duplicateCheckResult.signal === 'red') {
 
             const ageContext = currentInputAgedCount > 0
@@ -4755,15 +4757,6 @@ export const App = () => {
             setManualNabCodeError(null);
             setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required before saving as PAID. Enter bank-provided NAB code manually.' });
             setShowSaveModal(true);
-            return;
-        }
-
-        // If NAB code is present and no blocking checks were hit above, save immediately.
-        if (hasTransactions && allHaveRef) {
-            confirmSave('PAID', {
-                duplicateSignal: 'green',
-                detail: 'Direct save triggered by presence of NAB reference.'
-            });
             return;
         }
 
@@ -6033,8 +6026,8 @@ export const App = () => {
 
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                 {/* Payee Name with Searchable Dropdown */}
-                                                                <div className={`bg-black/30 rounded-xl p-3 border transition-colors relative ${hasPayeeAlarm ? 'border-red-500/40 hover:border-red-400/60' : 'border-white/5 hover:border-white/10'}`}>
-                                                                    <p className={`text-[10px] uppercase font-bold mb-1 ${hasPayeeAlarm ? 'text-red-300' : 'text-slate-400'}`}>Payee Name</p>
+                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-white/10 transition-colors relative">
+                                                                    <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Payee Name</p>
                                                                     <div className="flex justify-between items-center">
                                                                         <div className="flex-1 relative">
                                                                             <input
@@ -6043,7 +6036,7 @@ export const App = () => {
                                                                                 onChange={(e) => handleEmployeeSearchChange(txKey, e.target.value)}
                                                                                 onFocus={() => handleEmployeeSearchFocus(txKey)}
                                                                                 onBlur={() => handleEmployeeSearchBlur(txKey)}
-                                                                                className={`w-full bg-transparent font-semibold uppercase border-none outline-none placeholder:text-slate-600 ${hasPayeeAlarm ? 'text-red-300' : 'text-white'}`}
+                                                                                className="w-full bg-transparent text-white font-semibold uppercase border-none outline-none placeholder:text-slate-600"
                                                                                 placeholder="Search employee..."
                                                                             />
                                                                             {/* Dropdown */}
