@@ -737,36 +737,25 @@ const parseDateValue = (value: string): Date | null => {
     const raw = String(value || '').trim();
     if (!raw) return null;
 
-    const numericMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-    if (numericMatch) {
-        const day = Number(numericMatch[1]);
-        const month = Number(numericMatch[2]);
-        const yearRaw = Number(numericMatch[3]);
-        const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-
-        if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-            const parsed = new Date(year, month - 1, day);
-            const isValid = !Number.isNaN(parsed.getTime())
-                && parsed.getFullYear() === year
-                && parsed.getMonth() === (month - 1)
-                && parsed.getDate() === day;
-            if (isValid) return parsed;
-        }
-    }
-
     const direct = new Date(raw);
     if (!Number.isNaN(direct.getTime())) return direct;
 
-    return null;
+    const slashMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (!slashMatch) return null;
+
+    const day = Number(slashMatch[1]);
+    const month = Number(slashMatch[2]);
+    const yearRaw = Number(slashMatch[3]);
+    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+    const parsed = new Date(year, month - 1, day);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
 };
 
 const toDateKey = (value: string): string => {
     const parsed = parseDateValue(value);
     if (!parsed) return String(value || '').trim().toLowerCase();
-    const year = parsed.getFullYear();
-    const month = String(parsed.getMonth() + 1).padStart(2, '0');
-    const day = String(parsed.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return parsed.toISOString().slice(0, 10);
 };
 
 const normalizeNameKey = (value: string): string => {
