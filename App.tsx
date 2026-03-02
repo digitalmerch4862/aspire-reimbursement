@@ -921,12 +921,15 @@ const upsertClaimantRevisionSection = (content: string): string => {
     const normalizedBody = stripped
         .replace(/^\s*Please revise the reimbursement form because the reimbursement form total is higher than the receipt total\.\s*$/gim, '')
         .replace(/^\s*Please revise the reimbursement form or provide receipt details equal to the reimbursement amount for audit purpose\.\s*$/gim, '')
+        .replace(/^\s*Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total\.\s*$/gim, '')
+        .replace(/^\s*Your reimbursement request cannot be finalized yet because the reimbursement form amount is higher than the receipt total\.\s*$/gim, '')
+        .replace(/^\s*Please provide additional receipt details to cover the difference amount before we can proceed\.\s*$/gim, '')
         .replace(/^\s*Reimbursement form total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
         .replace(/^\s*Receipt total is\s*\$?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/gim, '')
         .replace(/^\s*(?:\*\*)?\s*Difference amount is\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:\*\*)?\s*$/gim, '')
         .replace(
             /I am writing to confirm that your reimbursement request has been successfully processed today\./i,
-            'Your reimbursement request cannot be finalized yet because the reimbursement form amount does not match the receipt total.'
+            'Your reimbursement request cannot be finalized yet because the reimbursement form amount is higher than the receipt total.\nPlease provide additional receipt details to cover the difference amount before we can proceed.'
         )
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -1390,7 +1393,7 @@ const buildManualAuditIssues = (
     });
 
     if (receiptGrandTotal !== null && formTotal > 0) {
-        const diff = Math.abs(formTotal - receiptGrandTotal);
+        const diff = formTotal - receiptGrandTotal;
         if (diff > 0.01) {
             issues.push({
                 level: 'warning',
@@ -3303,7 +3306,7 @@ export const App = () => {
                 : formVsReceiptTotals.isFormHigherMismatch
                     ? `Reimbursement form total is higher than receipt total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}.`
                     : receiptTotal! > formTotal! + 0.01
-                        ? `Receipt total is higher than reimbursement form total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}. Proceed based on reimbursement form total.`
+                        ? `Receipt total is higher than reimbursement form total. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}. Difference amount is ${(difference || 0).toFixed(2)}. Clear and good to go based on reimbursement form total.`
                         : `Form and receipt totals are aligned. Reimbursement form total is ${formTotal!.toFixed(2)}. Receipt total is ${receiptTotal!.toFixed(2)}.`;
 
             const status: RuleStatusItem['status'] = !hasBothTotals
@@ -3311,7 +3314,7 @@ export const App = () => {
                 : formVsReceiptTotals.isFormHigherMismatch
                     ? 'blocked'
                     : receiptTotal! > formTotal! + 0.01
-                        ? 'warning'
+                        ? 'pass'
                         : 'pass';
 
             items.push({
@@ -5261,10 +5264,10 @@ export const App = () => {
 
     const claimantEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
-        return formVsReceiptTotals.isAnyMismatch
+        return formVsReceiptTotals.isFormHigherMismatch
             ? stripInternalAuditMeta(upsertClaimantRevisionSection(claimantBaseEmailContent))
             : stripInternalAuditMeta(stripClaimantRevisionSection(claimantBaseEmailContent));
-    }, [claimantBaseEmailContent, formVsReceiptTotals.isAnyMismatch]);
+    }, [claimantBaseEmailContent, formVsReceiptTotals.isFormHigherMismatch]);
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
@@ -5287,12 +5290,12 @@ export const App = () => {
     }, [claimantBaseEmailContent, julianApprovalContext]);
 
     const displayEmailContent = useMemo(() => {
-        if (formVsReceiptTotals.isAnyMismatch) return claimantEmailContent;
+        if (formVsReceiptTotals.isFormHigherMismatch) return claimantEmailContent;
         if (isJulianApprovalRequired) {
             return julianEmailContent + "\n\n" + claimantEmailContent;
         }
         return claimantEmailContent;
-    }, [formVsReceiptTotals.isAnyMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
+    }, [formVsReceiptTotals.isFormHigherMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();

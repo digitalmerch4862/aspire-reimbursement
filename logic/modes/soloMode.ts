@@ -172,7 +172,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     } else {
         // Amount Mismatch Rule
         if (receiptGrandTotal !== null && totalAmount > 0) {
-            if (Math.abs(totalAmount - receiptGrandTotal) > 0.01) {
+            if ((totalAmount - receiptGrandTotal) > 0.01) {
                 issues.push({ level: 'warning', message: `Total mismatch: Form $${totalAmount.toFixed(2)} vs Receipt $${receiptGrandTotal.toFixed(2)}.` });
             }
         }
