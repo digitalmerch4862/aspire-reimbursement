@@ -1710,8 +1710,8 @@ export const App = () => {
                     staff_name: String(entry?.staff_name || entry?.staffName || 'Unknown').trim() || 'Unknown',
                     amount,
                     nab_code: nabCode,
-                    yp_name: null,
-                    location: null,
+                    // yp_name: null,
+                    // location: null,
                     full_email_content: fullEmailContent,
                     created_at: String(entry?.created_at || new Date().toISOString())
                 };
@@ -1720,8 +1720,8 @@ export const App = () => {
                 staff_name: string;
                 amount: number;
                 nab_code: string | null;
-                yp_name: null;
-                location: null;
+                // yp_name: null;
+                // location: null;
                 full_email_content: string;
                 created_at: string;
             } => payload !== null);
@@ -3744,8 +3744,8 @@ export const App = () => {
                     ...item,
                     staff_name: editedRowData.staffName,
                     amount: parseFloat(amountVal),
-                    yp_name: clientValue || null,
-                    location: locationValue || null,
+                    // yp_name: clientValue || null,
+                    // location: locationValue || null,
                     nab_code: editedRowData.nabCode,
                     full_email_content: newContent
                 };
@@ -3767,8 +3767,8 @@ export const App = () => {
                 .update({
                     staff_name: editedRowData.staffName,
                     amount: parseFloat(amountVal),
-                    yp_name: clientValue || null,
-                    location: locationValue || null,
+                    // yp_name: clientValue || null,
+                    // location: locationValue || null,
                     nab_code: editedRowData.nabCode,
                     full_email_content: newContent
                 })
@@ -3829,7 +3829,7 @@ export const App = () => {
                     const massLocationValue = String(massEditData.youngPersonName || '').trim();
 
                     if (massClientValue) {
-                        nextRecord.yp_name = massClientValue;
+                        // nextRecord.yp_name = massClientValue;
                         if (newContent.match(/\*\*Client:\*\*/i)) {
                             newContent = newContent.replace(/(\*\*Client:\*\*\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
                         } else if (newContent.match(/(^|\n)Client:\s*/i)) {
@@ -3842,7 +3842,7 @@ export const App = () => {
                     }
 
                     if (massLocationValue) {
-                        nextRecord.location = massLocationValue;
+                        // nextRecord.location = massLocationValue;
                         if (newContent.match(/\*\*Location:\*\*/i)) {
                             newContent = newContent.replace(/(\*\*Location:\*\*\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
                         } else if (newContent.match(/(^|\n)Location:\s*/i)) {
@@ -3929,7 +3929,7 @@ export const App = () => {
                 const massLocationValue = String(massEditData.youngPersonName || '').trim();
 
                 if (massClientValue) {
-                    dbUpdates.yp_name = massClientValue;
+                    // dbUpdates.yp_name = massClientValue;
                     if (newContent.match(/\*\*Client:\*\*/i)) {
                         newContent = newContent.replace(/(\*\*Client:\*\*\s*)(.*?)(\n|$)/i, `$1${massClientValue}$3`);
                     } else if (newContent.match(/(^|\n)Client:\s*/i)) {
@@ -3942,7 +3942,7 @@ export const App = () => {
                 }
 
                 if (massLocationValue) {
-                    dbUpdates.location = massLocationValue;
+                    // dbUpdates.location = massLocationValue;
                     if (newContent.match(/\*\*Location:\*\*/i)) {
                         newContent = newContent.replace(/(\*\*Location:\*\*\s*)(.*?)(\n|$)/i, `$1${massLocationValue}$3`);
                     } else if (newContent.match(/(^|\n)Location:\s*/i)) {
@@ -4425,8 +4425,8 @@ export const App = () => {
                     staff_name: tx.staffName,
                     amount: Number.isFinite(resolvedAmount) ? resolvedAmount : 0,
                     nab_code: nabCode,
-                    yp_name: ypNameValue,
-                    location: locationValue,
+                    // yp_name: ypNameValue,
+                    // location: locationValue,
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 };
@@ -4469,8 +4469,8 @@ export const App = () => {
                     staff_name: staffName,
                     amount: amount,
                     nab_code: nabCode,
-                    yp_name: normalizeOptionalText(fallbackClient),
-                    location: normalizeOptionalText(fallbackLocation),
+                    // yp_name: normalizeOptionalText(fallbackClient),
+                    // location: normalizeOptionalText(fallbackLocation),
                     full_email_content: contentToSave,
                     created_at: new Date().toISOString()
                 });
