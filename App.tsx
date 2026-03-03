@@ -2669,14 +2669,67 @@ export const App = () => {
                 return;
             }
 
-            // Use 'audit_logs' as originally designed, not 'reimbursements'
-            const { data, error } = await supabase
-                .from('audit_logs')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const candidateTables = ['audit_logs', 'reimbursement_logs', 'reimbursements'];
+            let lastError: any = null;
 
-            if (error) throw error;
-            setHistoryData(data || []);
+            const normalizeHistoryRow = (row: any) => {
+                const createdAt = row?.created_at || row?.createdAt || row?.date_processed || row?.dateProcessed || new Date().toISOString();
+                return {
+                    ...row,
+                    created_at: String(createdAt),
+                    full_email_content: String(row?.full_email_content || row?.fullEmailContent || ''),
+                    staff_name: String(row?.staff_name || row?.staffName || 'Unknown'),
+                    amount: Number.isFinite(Number(row?.amount)) ? Number(row.amount) : 0,
+                    nab_code: row?.nab_code ?? row?.nabCode ?? null,
+                    yp_name: row?.yp_name ?? row?.ypName ?? null,
+                    location: row?.location ?? row?.youngPersonName ?? null
+                };
+            };
+
+            const dedupeRows = (rows: any[]): any[] => {
+                const seen = new Set<string>();
+                const deduped: any[] = [];
+
+                rows.forEach((row) => {
+                    const normalized = normalizeHistoryRow(row);
+                    const hasId = normalized.id !== undefined && normalized.id !== null && String(normalized.id).trim() !== '';
+                    const fallbackFingerprint = [
+                        normalizeTextKey(String(normalized.staff_name || '')),
+                        normalizeMoneyValue(String(normalized.amount || '0.00'), '0.00'),
+                        String(normalized.created_at || '').slice(0, 19),
+                        normalizeTextKey(String(normalized.full_email_content || '').slice(0, 120))
+                    ].join('|');
+
+                    const key = hasId ? `id:${String(normalized.id)}` : `fp:${fallbackFingerprint}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    deduped.push(normalized);
+                });
+
+                return deduped;
+            };
+
+            for (const tableName of candidateTables) {
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    lastError = error;
+                    continue;
+                }
+
+                const rows = Array.isArray(data) ? dedupeRows(data) : [];
+                if (rows.length > 0) {
+                    setHistoryData(rows);
+                    return;
+                }
+            }
+
+            if (lastError) throw lastError;
+            setHistoryData([]);
+            showWarningToast('No cloud records found. Check Supabase project/table if data should exist.');
         } catch (e) {
             console.error("Error fetching history:", e);
         } finally {
