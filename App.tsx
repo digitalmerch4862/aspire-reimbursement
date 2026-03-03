@@ -3251,14 +3251,14 @@ export const App = () => {
                 if (!historyStaff) return;
 
                 const storeMatch = txStoreKey === historyStoreKey;
-                const productMatch = txProductKey === historyProductKey;
-                const staffMatch = txStaff && historyStaff ? txStaff === historyStaff : false;
                 const dateMatch = txDateKey && historyDateKey ? txDateKey === historyDateKey : false;
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
-                const exactMatch = staffMatch && storeMatch && totalAmountMatch && dateMatch;
-                const nearMatch = staffMatch && storeMatch && totalAmountMatch && !dateMatch;
 
-                if (!exactMatch && !nearMatch) return;
+                // STRICT RULE FOR FRAUD: If Store AND Amount match exactly -> Highly Suspicious
+                if (!storeMatch || !totalAmountMatch) return;
+
+                const exactMatch = storeMatch && totalAmountMatch && dateMatch;
+                const nearMatch = storeMatch && totalAmountMatch && !dateMatch;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -3283,7 +3283,7 @@ export const App = () => {
 
                 if (exactMatch) {
                     redMatches.push(evidence);
-                } else if (nearMatch || (productMatch && staffMatch && storeMatch && totalAmountMatch)) {
+                } else if (nearMatch) {
                     yellowMatches.push(evidence);
                 }
             });
