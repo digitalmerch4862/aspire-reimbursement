@@ -132,17 +132,25 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
                 const trimmedLine = line.trim().replace(/^\|/, '').replace(/\|$/, '');
                 const parts = trimmedLine.split('|').map(p => p.trim()).filter(p => p);
                 if (parts.length >= 2) {
+                    const amountIdx = [...parts].reverse().findIndex(p => /[0-9]/.test(p) && !p.includes('/'));
+                    const actualAmountIdx = amountIdx >= 0 ? parts.length - 1 - amountIdx : parts.length - 1;
+                    const amountValue = normalizeMoneyValue(parts[actualAmountIdx], '0.00');
+                    const dateIdx = parts.findIndex((p, idx) => idx !== actualAmountIdx && /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/.test(p));
+                    const productIdx = [...parts].map((p, idx) => ({ p, idx }))
+                        .reverse()
+                        .find(({ p, idx }) => idx !== actualAmountIdx && idx !== dateIdx && idx > 0 && !/[0-9]/.test(p))?.idx ?? -1;
+
                     items.push({
-                        receiptNum: parts[0],
-                        uniqueId: parts[1] || '-',
-                        storeName: parts[2] || '-',
-                        dateTime: parts[3] || '-',
-                        product: parts[4] || '-',
-                        category: parts[5] || 'Other',
-                        itemAmount: parts[6] || '0.00',
-                        receiptTotal: parts[7] || '0.00',
-                        notes: parts[8] || '',
-                        amount: parts[7] || '0.00'
+                        receiptNum: parts.length > 2 ? parts[0] : '1',
+                        uniqueId: parts.length > 3 ? parts[1] : '-',
+                        storeName: parts[0],
+                        dateTime: dateIdx >= 0 ? parts[dateIdx] : '-',
+                        product: productIdx >= 0 ? parts[productIdx] : (parts.length > 2 ? parts[parts.length - 2] : parts[0]),
+                        category: 'Other',
+                        itemAmount: amountValue,
+                        receiptTotal: amountValue,
+                        notes: '',
+                        amount: amountValue
                     });
                 }
             }

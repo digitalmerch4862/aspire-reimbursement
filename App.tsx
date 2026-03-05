@@ -1254,7 +1254,10 @@ const normalizeReceiptRow = (
             notes: ''
         };
     } else if (parts.length >= 2) {
-        // Very lenient fallback for fragments
+        // Very lenient fallback for fragments - only accept if last part looks like an amount
+        const lastPart = parts[parts.length - 1];
+        const hasAmount = /^\$?[\d,]+(\.\d{1,2})?$/.test(lastPart.replace(/,/g, ''));
+        if (!hasAmount) return null;
         normalized = {
             receiptNum: parts[0] || '',
             uniqueId: fallbackUid,
@@ -1262,8 +1265,8 @@ const normalizeReceiptRow = (
             dateTime: '',
             product: parts[2] || '',
             category: 'Uncategorized',
-            itemAmount: 'Included in total',
-            receiptTotal: fallbackTotal,
+            itemAmount: lastPart,
+            receiptTotal: lastPart,
             notes: ''
         };
     } else {
@@ -4925,14 +4928,16 @@ export const App = () => {
                 const rawDate = String(tx.rawDate || '').trim();
                 const totalValue = Number(normalizeMoneyValue(String(tx.totalAmount), '0.00'));
 
+                // Skip zero-amount rows - these are ghost rows from form text being
+                // accidentally parsed (e.g. form lines with pipe chars like "Others | 10.00")
+                if (!Number.isFinite(totalValue) || totalValue <= 0) return false;
+
                 // Allow fallback rows (no store/product/date) if they have a valid amount 
-                // and it's from the "Total Amount" line search
                 if (tx.signatureKey.startsWith('fallback|') && totalValue > 0) return false;
 
                 if (!storeKey || storeKey === 'particulars') return true;
                 if (!productKey || productKey === '-') return true;
                 if (!rawDate) return true;
-                if (!Number.isFinite(totalValue) || totalValue <= 0) return true;
                 return false;
             });
 
