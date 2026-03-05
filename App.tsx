@@ -1253,6 +1253,19 @@ const normalizeReceiptRow = (
             receiptTotal: parts[3] || fallbackTotal,
             notes: ''
         };
+    } else if (parts.length >= 2) {
+        // Very lenient fallback for fragments
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: fallbackUid,
+            storeName: parts[1] || fallbackStore,
+            dateTime: '',
+            product: parts[2] || '',
+            category: 'Uncategorized',
+            itemAmount: 'Included in total',
+            receiptTotal: fallbackTotal,
+            notes: ''
+        };
     } else {
         return null;
     }
@@ -3043,9 +3056,11 @@ export const App = () => {
         const parsed: InputTransactionFingerprint[] = [];
 
         for (const line of lines) {
-            if (!line.trim().startsWith('|') || line.includes('---') || line.includes('Receipt #') || line.includes('GRAND TOTAL') || line.includes('Unique ID')) {
+            const trimmed = line.trim();
+            if ((!trimmed.includes('|') && !trimmed.includes('\t')) || trimmed.includes('---') || trimmed.includes('Receipt #') || trimmed.includes('GRAND TOTAL') || trimmed.includes('Unique ID')) {
                 continue;
             }
+
 
             const parts = line.split('|').map(p => p.trim()).filter(Boolean);
             const normalized = normalizeReceiptRow(parts, '0.00', '', '');
@@ -4869,10 +4884,38 @@ export const App = () => {
 
         if (requestMode === 'solo') {
             const combinedText = `${reimbursementFormText}\n${receiptDetailsText}`;
-            const tableHeaderRegex = /\|?\s*Receipt\s*#\s*\|\s*Unique\s*ID\s*\/\s*Fallback\s*\|\s*Store\s*Name\s*\|\s*Date\s*&\s*Time\s*\|\s*Product\s*\(Per\s*Item\)\s*\|\s*Category\s*\|\s*Item\s*Amount\s*\|\s*Receipt\s*Total\s*\|\s*Notes\s*\|?/i;
-            const hasReceiptTable = tableHeaderRegex.test(combinedText);
+
+            const hasReceiptTable = (() => {
+                // If we already parsed valid transactions (more than fallback), it's a table
+                if (currentInputTransactions.length >= 1 && currentInputTransactions[0].storeName !== '') {
+                    return true;
+                }
+
+                const lines = combinedText.split('\n');
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.includes('|') && !trimmed.includes('\t')) continue;
+
+                    const cols = trimmed.includes('|')
+                        ? trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim().toLowerCase())
+                        : trimmed.split('\t').map(c => c.trim().toLowerCase());
+
+                    if (cols.length < 3) continue;
+
+                    const headerCheck = cols.map(c => c.toLowerCase());
+                    const hasReceiptCol = headerCheck.some(c => c.includes('receipt') || c.includes('#') || c.includes('no'));
+                    const hasStoreCol = headerCheck.some(c => c.includes('store') || c.includes('particular'));
+                    const hasDateCol = headerCheck.some(c => c.includes('date') || c.includes('time'));
+
+                    if ((hasReceiptCol && hasStoreCol) || (hasStoreCol && hasDateCol)) {
+                        return true;
+                    }
+                }
+                return false;
+            })();
+
             if (!hasReceiptTable) {
-                setErrorMessage('Receipt table is required for Solo Mode. Paste the full receipt table before saving.');
+                setErrorMessage('Receipt table is required for Solo Mode. Paste the full receipt table with columns: Receipt #, Store Name, Date & Time, Product, and Receipt Total.');
                 return;
             }
 
@@ -4881,6 +4924,11 @@ export const App = () => {
                 const productKey = normalizeTextKey(tx.product || '');
                 const rawDate = String(tx.rawDate || '').trim();
                 const totalValue = Number(normalizeMoneyValue(String(tx.totalAmount), '0.00'));
+
+                // Allow fallback rows (no store/product/date) if they have a valid amount 
+                // and it's from the "Total Amount" line search
+                if (tx.signatureKey.startsWith('fallback|') && totalValue > 0) return false;
+
                 if (!storeKey || storeKey === 'particulars') return true;
                 if (!productKey || productKey === '-') return true;
                 if (!rawDate) return true;

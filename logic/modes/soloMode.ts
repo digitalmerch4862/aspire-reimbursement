@@ -42,7 +42,10 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
             const headerCheck = cols.map(col => col.toLowerCase());
 
             if (!headerFound) {
-                const isHeader = headerCheck[0] === 'receipt #' && headerCheck[1]?.includes('unique id') && headerCheck[2]?.includes('store name');
+                const hasReceiptCol = headerCheck.some(c => c.includes('receipt') && (c.includes('#') || c.includes('no')));
+                const hasStoreCol = headerCheck.some(c => c.includes('store'));
+                const hasDateCol = headerCheck.some(c => c.includes('date') || c.includes('time'));
+                const isHeader = hasReceiptCol && hasStoreCol && hasDateCol;
                 if (isHeader) {
                     headerFound = true;
                     inTable = true;
@@ -128,13 +131,13 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
                 !line.includes('Receipt #') && !line.includes('GRAND TOTAL')) {
                 const trimmedLine = line.trim().replace(/^\|/, '').replace(/\|$/, '');
                 const parts = trimmedLine.split('|').map(p => p.trim()).filter(p => p);
-                if (parts.length >= 5) {
+                if (parts.length >= 2) {
                     items.push({
                         receiptNum: parts[0],
-                        uniqueId: parts[1],
-                        storeName: parts[2],
-                        dateTime: parts[3],
-                        product: parts[4],
+                        uniqueId: parts[1] || '-',
+                        storeName: parts[2] || '-',
+                        dateTime: parts[3] || '-',
+                        product: parts[4] || '-',
                         category: parts[5] || 'Other',
                         itemAmount: parts[6] || '0.00',
                         receiptTotal: parts[7] || '0.00',
