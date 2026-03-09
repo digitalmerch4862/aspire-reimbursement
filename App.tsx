@@ -1510,6 +1510,42 @@ export const App = () => {
     const [dismissedIds, setDismissedIds] = useState<number[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
 
+    // Pending Entries Collapse + Search State
+    const [isPendingCollapsed, setIsPendingCollapsed] = useState(false);
+    const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+    const [showPendingSearch, setShowPendingSearch] = useState(false);
+    const [selectedPendingIds, setSelectedPendingIds] = useState<number[]>([]);
+
+    const filteredPendingThisWeek = useMemo(() => {
+        const query = pendingSearchQuery.toLowerCase().trim();
+        if (!query) return groupPendingThisWeek;
+        return groupPendingThisWeek.filter(item =>
+            item.staffName?.toLowerCase().includes(query) ||
+            item.ypName?.toLowerCase().includes(query) ||
+            item.location?.toLowerCase().includes(query)
+        );
+    }, [groupPendingThisWeek, pendingSearchQuery]);
+
+    const filteredPendingPreviousWeeks = useMemo(() => {
+        const query = pendingSearchQuery.toLowerCase().trim();
+        if (!query) return groupPendingPreviousWeeks;
+        return groupPendingPreviousWeeks.filter(item =>
+            item.staffName?.toLowerCase().includes(query) ||
+            item.ypName?.toLowerCase().includes(query) ||
+            item.location?.toLowerCase().includes(query)
+        );
+    }, [groupPendingPreviousWeeks, pendingSearchQuery]);
+
+    const [pendingGroupSearchQuery, setPendingGroupSearchQuery] = useState('');
+
+    const filteredPendingGroups = useMemo(() => {
+        const query = pendingGroupSearchQuery.toLowerCase().trim();
+        if (!query) return [];
+        return pendingApprovalStaffGroups.filter(group =>
+            group.staffName?.toLowerCase().includes(query)
+        );
+    }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
+
     // Row Modal State
     const [selectedRow, setSelectedRow] = useState<any | null>(null);
     const [isRowModalOpen, setIsRowModalOpen] = useState(false);
@@ -4641,24 +4677,29 @@ export const App = () => {
     const openPendingApprovalModal = (staffGroup: PendingStaffGroup) => {
         setPendingApprovalStaffGroup(staffGroup);
         setPendingApprovalNabCode('');
+        setSelectedPendingIds(staffGroup.records.map((r: any) => r.id));
     };
 
     const closePendingApprovalModal = () => {
         setPendingApprovalStaffGroup(null);
         setPendingApprovalNabCode('');
+        setSelectedPendingIds([]);
     };
 
     const handleApprovePendingRecord = async () => {
         if (!pendingApprovalStaffGroup) return;
         const approvedNabCode = pendingApprovalNabCode.trim();
         if (!approvedNabCode) return;
+        if (selectedPendingIds.length === 0) return;
 
         let updatedRecords: Array<{ id: any; nab_code: string; full_email_content: string; staff_name?: string; amount?: number; yp_name?: string; location?: string }> = [];
         let combinedClaimantEmail = '';
 
         setIsApprovingPending(true);
         try {
-            updatedRecords = pendingApprovalStaffGroup.records.map((record: any) => {
+            updatedRecords = pendingApprovalStaffGroup.records
+                .filter((record: any) => selectedPendingIds.includes(record.id))
+                .map((record: any) => {
                 let updatedContent = record.full_email_content || '';
 
                 if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
@@ -5968,6 +6009,8 @@ export const App = () => {
                                     />
                                 )}
 
+                            </div>
+
                                 {hasRuleInput && (
                                     <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
                                         <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
@@ -6056,12 +6099,52 @@ export const App = () => {
                                 {requestMode === 'group' && (
                                     <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
                                         <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
-                                            <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
-                                            <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
-                                                {groupPendingThisWeek.length} This Week Pending
-                                            </span>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={() => setIsPendingCollapsed(!isPendingCollapsed)}
+                                                    className="text-indigo-300 hover:text-white transition-colors"
+                                                >
+                                                    {isPendingCollapsed ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                                    )}
+                                                </button>
+                                                <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                {pendingSearchQuery && (
+                                                    <span className="text-[10px] text-amber-300">
+                                                        {filteredPendingThisWeek.length + filteredPendingPreviousWeeks.length} found
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => { setShowPendingSearch(!showPendingSearch); if (!showPendingSearch) setPendingSearchQuery(''); }}
+                                                    className={`text-xs px-2 py-1 rounded transition-colors ${showPendingSearch ? 'bg-amber-500/30 text-amber-300' : 'text-indigo-300 hover:text-white'}`}
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                                </button>
+                                                <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
+                                                    {groupPendingThisWeek.length} This Week Pending
+                                                </span>
+                                            </div>
                                         </div>
 
+                                        {showPendingSearch && (
+                                            <div className="px-6 py-3 border-b border-white/5 bg-indigo-500/5">
+                                                <input
+                                                    type="text"
+                                                    value={pendingSearchQuery}
+                                                    onChange={(e) => setPendingSearchQuery(e.target.value)}
+                                                    placeholder="Search staff, YP name, or location..."
+                                                    className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        )}
+
+                                        {!isPendingCollapsed && (
+                                        <>
                                         {groupPendingLiquidations.length === 0 ? (
                                             <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
                                         ) : (
@@ -6078,12 +6161,12 @@ export const App = () => {
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {groupPendingThisWeek.length === 0 && (
+                                                        {filteredPendingThisWeek.length === 0 && (
                                                             <tr className="border-t border-white/5">
                                                                 <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
                                                             </tr>
                                                         )}
-                                                        {groupPendingThisWeek.map((item) => (
+                                                        {filteredPendingThisWeek.map((item) => (
                                                             <tr key={item.id} className="border-t border-white/5">
                                                                 <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
                                                                 <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
@@ -6102,12 +6185,12 @@ export const App = () => {
                                                     </tbody>
                                                 </table>
 
-                                                {groupPendingPreviousWeeks.length > 0 && (
+                                                {filteredPendingPreviousWeeks.length > 0 && (
                                                     <>
                                                         <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
                                                         <table className="w-full text-xs">
                                                             <tbody>
-                                                                {groupPendingPreviousWeeks.map((item) => (
+                                                                {filteredPendingPreviousWeeks.map((item) => (
                                                                     <tr key={item.id} className="border-t border-white/5 opacity-75">
                                                                         <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
                                                                         <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
@@ -6129,13 +6212,14 @@ export const App = () => {
                                                 )}
                                             </div>
                                         )}
+                                        </>
+                                        )}
 
                                         <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
                                             Only this week pending rows are used for group request exclusion and budget allocation checks.
                                         </div>
                                     </div>
                                 )}
-                            </div>
 
                             <div className="flex-1 space-y-6 min-h-[600px]">
 
@@ -6438,10 +6522,31 @@ export const App = () => {
                                                 <p className="text-xs text-amber-200/80">Need NAB code before moving to paid records. Aging resets when you mark Followed Up.</p>
                                             </div>
                                         </div>
-                                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
                                             {pendingApprovalStaffGroups.length} Pending
                                         </span>
+                                        <button
+                                            onClick={() => { setPendingGroupSearchQuery(''); }}
+                                            className="ml-2 text-slate-400 hover:text-white transition-colors"
+                                            title="Search"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                        </button>
                                     </div>
+
+                                    {pendingGroupSearchQuery && (
+                                        <div className="px-6 py-3 border-b border-white/10 bg-amber-500/5">
+                                            <input
+                                                type="text"
+                                                value={pendingGroupSearchQuery}
+                                                onChange={(e) => setPendingGroupSearchQuery(e.target.value)}
+                                                placeholder="Search staff name..."
+                                                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
+                                                autoFocus
+                                            />
+                                            <p className="text-[10px] text-amber-300 mt-1">Found: {filteredPendingGroups.length} staff</p>
+                                        </div>
+                                    )}
 
                                     <div className="px-6 py-3 border-b border-white/10 bg-black/20 text-xs text-slate-300 flex flex-wrap items-center gap-3">
                                         <span className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-200">0-2d: {pendingAgingSummary.fresh}</span>
@@ -6450,7 +6555,7 @@ export const App = () => {
                                     </div>
 
                                     <div className="p-6 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
-                                        {pendingApprovalStaffGroups.length > 0 ? pendingApprovalStaffGroups.map((group) => (
+                                        {(pendingGroupSearchQuery ? filteredPendingGroups : pendingApprovalStaffGroups).length > 0 ? (pendingGroupSearchQuery ? filteredPendingGroups : pendingApprovalStaffGroups).map((group) => (
                                             <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                                 <div className="space-y-1">
                                                     <div className="flex items-center gap-2">
@@ -7469,7 +7574,7 @@ export const App = () => {
 
                     {pendingApprovalStaffGroup && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="bg-[#1c1e24] w-full max-w-lg rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
+                            <div className="bg-[#1c1e24] w-full max-w-2xl rounded-[24px] border border-white/10 shadow-2xl overflow-hidden">
                                 <div className="px-6 py-5 border-b border-white/10 bg-emerald-500/10 flex items-center gap-3">
                                     <CheckCircle className="text-emerald-300" size={20} />
                                     <div>
@@ -7478,12 +7583,88 @@ export const App = () => {
                                     </div>
                                 </div>
 
-                                <div className="p-6 space-y-3">
-                                    <div>
-                                        <p className="text-xs text-slate-400 mb-1">Staff</p>
-                                        <p className="text-sm text-white font-semibold uppercase">{pendingApprovalStaffGroup.staffName || 'Unknown'}</p>
-                                        <p className="text-xs text-slate-400 mt-1">Entries to approve: {pendingApprovalStaffGroup.count}</p>
+                                <div className="p-6 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-xs text-slate-400 mb-1">Staff</p>
+                                            <p className="text-sm text-white font-semibold uppercase">{pendingApprovalStaffGroup.staffName || 'Unknown'}</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setSelectedPendingIds(pendingApprovalStaffGroup.records.map((r: any) => r.id))}
+                                                className="text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors"
+                                            >
+                                                Select All
+                                            </button>
+                                            <button
+                                                onClick={() => setSelectedPendingIds([])}
+                                                className="text-[10px] px-2 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                                            >
+                                                Deselect All
+                                            </button>
+                                        </div>
                                     </div>
+
+                                    <div className="max-h-[240px] overflow-auto border border-white/10 rounded-lg">
+                                        <table className="w-full text-xs">
+                                            <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider">
+                                                <tr>
+                                                    <th className="px-3 py-2 text-left w-8"></th>
+                                                    <th className="px-3 py-2 text-left">Staff Name</th>
+                                                    <th className="px-3 py-2 text-right">Amount</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {pendingApprovalStaffGroup.records.map((record: any) => (
+                                                    <tr key={record.id} className="border-t border-white/5 hover:bg-white/5">
+                                                        <td className="px-3 py-2 align-top">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedPendingIds.includes(record.id)}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setSelectedPendingIds([...selectedPendingIds, record.id]);
+                                                                    } else {
+                                                                        setSelectedPendingIds(selectedPendingIds.filter(id => id !== record.id));
+                                                                    }
+                                                                }}
+                                                                className="w-4 h-4 rounded border-white/20 bg-black/20 text-emerald-500 focus:ring-emerald-500/50"
+                                                            />
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-white font-medium">{pendingApprovalStaffGroup.staffName || '-'}</span>
+                                                                <button
+                                                                    onClick={() => handleCopyField(pendingApprovalStaffGroup.staffName || '', `pending-staff-${record.id}`)}
+                                                                    className="text-slate-400 hover:text-white transition-colors"
+                                                                    title="Copy staff name"
+                                                                >
+                                                                    {copiedField === `pending-staff-${record.id}` ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex items-center gap-1 mt-1">
+                                                                <span className="text-emerald-300 font-semibold">${record.amount?.toFixed(2) || '0.00'}</span>
+                                                                <button
+                                                                    onClick={() => handleCopyField(String(record.amount?.toFixed(2) || '0.00'), `pending-amount-${record.id}`)}
+                                                                    className="text-slate-400 hover:text-white transition-colors"
+                                                                    title="Copy amount"
+                                                                >
+                                                                    {copiedField === `pending-amount-${record.id}` ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right">
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div className="text-xs text-slate-400 text-right">
+                                        Selected: <span className="text-emerald-300 font-bold">{selectedPendingIds.length}</span> of {pendingApprovalStaffGroup.count} entries
+                                    </div>
+
                                     <div>
                                         <label className="text-xs text-slate-400 block mb-1">NAB Code</label>
                                         <input
@@ -7506,10 +7687,10 @@ export const App = () => {
                                     </button>
                                     <button
                                         onClick={handleApprovePendingRecord}
-                                        disabled={isApprovingPending || !pendingApprovalNabCode.trim()}
+                                        disabled={isApprovingPending || !pendingApprovalNabCode.trim() || selectedPendingIds.length === 0}
                                         className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {isApprovingPending ? 'Approving...' : 'Confirm Approval'}
+                                        {isApprovingPending ? 'Approving...' : `Confirm Approval (${selectedPendingIds.length})`}
                                     </button>
                                 </div>
                             </div>
