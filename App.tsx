@@ -1538,13 +1538,6 @@ export const App = () => {
 
     const [pendingGroupSearchQuery, setPendingGroupSearchQuery] = useState('');
 
-    const filteredPendingGroups = useMemo(() => {
-        const query = pendingGroupSearchQuery.toLowerCase().trim();
-        if (!query) return [];
-        return pendingApprovalStaffGroups.filter(group =>
-            group.staffName?.toLowerCase().includes(query)
-        );
-    }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
 
     // Row Modal State
     const [selectedRow, setSelectedRow] = useState<any | null>(null);
@@ -2323,7 +2316,7 @@ export const App = () => {
     };
 
 
-    const parsedTransactions = getParsedTransactions();
+    const parsedTransactions = useMemo(() => getParsedTransactions(), [isEditing, editableContent, results?.phase4]);
 
     useEffect(() => {
         if (parsedTransactions.length === 0 || employeeList.length === 0) return;
@@ -4700,30 +4693,30 @@ export const App = () => {
             updatedRecords = pendingApprovalStaffGroup.records
                 .filter((record: any) => selectedPendingIds.includes(record.id))
                 .map((record: any) => {
-                let updatedContent = record.full_email_content || '';
+                    let updatedContent = record.full_email_content || '';
 
-                if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
-                    updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
-                } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
-                    updatedContent += '\n\n<!-- STATUS: PAID -->';
-                }
+                    if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
+                        updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
+                    } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
+                        updatedContent += '\n\n<!-- STATUS: PAID -->';
+                    }
 
-                if (updatedContent.match(/NAB (?:Code|Reference):/i)) {
-                    updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
-                } else {
-                    updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
-                }
+                    if (updatedContent.match(/NAB (?:Code|Reference):/i)) {
+                        updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
+                    } else {
+                        updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
+                    }
 
-                return {
-                    id: record.id,
-                    nab_code: approvedNabCode,
-                    full_email_content: updatedContent,
-                    staff_name: record.staff_name,
-                    amount: record.amount,
-                    yp_name: record.yp_name,
-                    location: record.location
-                };
-            });
+                    return {
+                        id: record.id,
+                        nab_code: approvedNabCode,
+                        full_email_content: updatedContent,
+                        staff_name: record.staff_name,
+                        amount: record.amount,
+                        yp_name: record.yp_name,
+                        location: record.location
+                    };
+                });
 
             const claimantBlocks = updatedRecords
                 .map((record) => {
@@ -5429,6 +5422,14 @@ export const App = () => {
         return Array.from(grouped.values()).sort((a, b) => b.oldestAgeDays - a.oldestAgeDays || b.count - a.count || a.staffName.localeCompare(b.staffName));
     }, [pendingApprovalRecords]);
 
+    const filteredPendingGroups = useMemo(() => {
+        const query = pendingGroupSearchQuery.toLowerCase().trim();
+        if (!query) return [];
+        return pendingApprovalStaffGroups.filter(group =>
+            group.staffName?.toLowerCase().includes(query)
+        );
+    }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
+
     const pendingAgingSummary = useMemo(() => {
         return pendingApprovalRecords.reduce(
             (acc, record: any) => {
@@ -6011,215 +6012,215 @@ export const App = () => {
 
                             </div>
 
-                                {hasRuleInput && (
-                                    <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
-                                        <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
-                                        <div className="space-y-3 pl-1">
-                                            {rulesStatusItems.map((rule) => {
-                                                const isBlocked = rule.status === 'blocked';
-                                                const isWarning = rule.status === 'warning';
-                                                const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
-                                                const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
-                                                const badgeClass = isBlocked
-                                                    ? 'bg-red-500/15 text-red-300 border-red-500/30'
-                                                    : isWarning
-                                                        ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
-                                                        : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                            {hasRuleInput && (
+                                <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
+                                    <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
+                                    <div className="space-y-3 pl-1">
+                                        {rulesStatusItems.map((rule) => {
+                                            const isBlocked = rule.status === 'blocked';
+                                            const isWarning = rule.status === 'warning';
+                                            const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
+                                            const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
+                                            const badgeClass = isBlocked
+                                                ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                                : isWarning
+                                                    ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
+                                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 
-                                                return (
-                                                    <div
-                                                        key={rule.id}
-                                                        className={isExactFraudBlocked
-                                                            ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
-                                                            : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
-                                                    >
-                                                        <div className="flex items-start gap-2">
-                                                            {isBlocked ? (
-                                                                <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
-                                                            ) : isWarning ? (
-                                                                <AlertCircle size={15} className="text-amber-400 mt-0.5" />
-                                                            ) : (
-                                                                <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
-                                                            )}
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center justify-between gap-2">
-                                                                    <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
-                                                                    <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
-                                                                </div>
-                                                                <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
-                                                                {isExactFraudBlocked && evidenceRows.length > 0 && (
-                                                                    <div className="mt-2 space-y-1.5">
-                                                                        {evidenceRows.map((match, idx) => (
-                                                                            <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
-                                                                                <div className="flex items-start justify-between gap-2">
-                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
-                                                                                    <button
-                                                                                        onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
-                                                                                        className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
-                                                                                    >
-                                                                                        {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
-                                                                                        {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
-                                                                                    </button>
-                                                                                </div>
-                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
-                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
+                                            return (
+                                                <div
+                                                    key={rule.id}
+                                                    className={isExactFraudBlocked
+                                                        ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
+                                                        : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
+                                                >
+                                                    <div className="flex items-start gap-2">
+                                                        {isBlocked ? (
+                                                            <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
+                                                        ) : isWarning ? (
+                                                            <AlertCircle size={15} className="text-amber-400 mt-0.5" />
+                                                        ) : (
+                                                            <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
+                                                        )}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
+                                                                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
                                                             </div>
+                                                            <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
+                                                            {isExactFraudBlocked && evidenceRows.length > 0 && (
+                                                                <div className="mt-2 space-y-1.5">
+                                                                    {evidenceRows.map((match, idx) => (
+                                                                        <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
+                                                                            <div className="flex items-start justify-between gap-2">
+                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
+                                                                                <button
+                                                                                    onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
+                                                                                    className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
+                                                                                >
+                                                                                    {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
+                                                                                    {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
+                                                                                </button>
+                                                                            </div>
+                                                                            <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
+                                                                            <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
-                                                );
-                                            })}
-                                        </div>
-
-                                        {/* Processing Status Badge */}
-                                        {processingState === ProcessingState.PROCESSING && (
-                                            <div className="mt-4 pt-4 border-t border-white/5">
-                                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                                    <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                                                    </svg>
-                                                    Using Cloud API
                                                 </div>
-                                            </div>
-                                        )}
+                                            );
+                                        })}
                                     </div>
-                                )}
 
-                                {requestMode === 'solo' && (
-                                    <LiquidationTracker
-                                        items={dbOutstandingLiquidations}
-                                        onSettle={handleSettleLiquidation}
-                                        isSettling={isSettlingLiquidation}
-                                    />
-                                )}
-
-                                {requestMode === 'group' && (
-                                    <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
-                                        <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <button
-                                                    onClick={() => setIsPendingCollapsed(!isPendingCollapsed)}
-                                                    className="text-indigo-300 hover:text-white transition-colors"
-                                                >
-                                                    {isPendingCollapsed ? (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                                                    ) : (
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                                    )}
-                                                </button>
-                                                <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
+                                    {/* Processing Status Badge */}
+                                    {processingState === ProcessingState.PROCESSING && (
+                                        <div className="mt-4 pt-4 border-t border-white/5">
+                                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                                                </svg>
+                                                Using Cloud API
                                             </div>
-                                            <div className="flex items-center gap-3">
-                                                {pendingSearchQuery && (
-                                                    <span className="text-[10px] text-amber-300">
-                                                        {filteredPendingThisWeek.length + filteredPendingPreviousWeeks.length} found
-                                                    </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {requestMode === 'solo' && (
+                                <LiquidationTracker
+                                    items={dbOutstandingLiquidations}
+                                    onSettle={handleSettleLiquidation}
+                                    isSettling={isSettlingLiquidation}
+                                />
+                            )}
+
+                            {requestMode === 'group' && (
+                                <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
+                                    <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={() => setIsPendingCollapsed(!isPendingCollapsed)}
+                                                className="text-indigo-300 hover:text-white transition-colors"
+                                            >
+                                                {isPendingCollapsed ? (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                                ) : (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                                 )}
-                                                <button
-                                                    onClick={() => { setShowPendingSearch(!showPendingSearch); if (!showPendingSearch) setPendingSearchQuery(''); }}
-                                                    className={`text-xs px-2 py-1 rounded transition-colors ${showPendingSearch ? 'bg-amber-500/30 text-amber-300' : 'text-indigo-300 hover:text-white'}`}
-                                                >
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                                </button>
-                                                <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
-                                                    {groupPendingThisWeek.length} This Week Pending
+                                            </button>
+                                            <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            {pendingSearchQuery && (
+                                                <span className="text-[10px] text-amber-300">
+                                                    {filteredPendingThisWeek.length + filteredPendingPreviousWeeks.length} found
                                                 </span>
-                                            </div>
-                                        </div>
-
-                                        {showPendingSearch && (
-                                            <div className="px-6 py-3 border-b border-white/5 bg-indigo-500/5">
-                                                <input
-                                                    type="text"
-                                                    value={pendingSearchQuery}
-                                                    onChange={(e) => setPendingSearchQuery(e.target.value)}
-                                                    placeholder="Search staff, YP name, or location..."
-                                                    className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
-                                                    autoFocus
-                                                />
-                                            </div>
-                                        )}
-
-                                        {!isPendingCollapsed && (
-                                        <>
-                                        {groupPendingLiquidations.length === 0 ? (
-                                            <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
-                                        ) : (
-                                            <div className="max-h-[320px] overflow-auto custom-scrollbar">
-                                                <div className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-amber-300 font-bold">This Week Pending</div>
-                                                <table className="w-full text-xs">
-                                                    <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider z-10">
-                                                        <tr>
-                                                            <th className="px-3 py-2 text-left">Staff Name</th>
-                                                            <th className="px-3 py-2 text-left">YP Name</th>
-                                                            <th className="px-3 py-2 text-left">Location</th>
-                                                            <th className="px-3 py-2 text-right">Amount</th>
-                                                            <th className="px-3 py-2 text-right">Action</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {filteredPendingThisWeek.length === 0 && (
-                                                            <tr className="border-t border-white/5">
-                                                                <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
-                                                            </tr>
-                                                        )}
-                                                        {filteredPendingThisWeek.map((item) => (
-                                                            <tr key={item.id} className="border-t border-white/5">
-                                                                <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
-                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
-                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
-                                                                <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
-                                                                <td className="px-3 py-2 text-right">
-                                                                    <button
-                                                                        onClick={() => handleSettleGroupLiquidation(item.id)}
-                                                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white hover:bg-emerald-400 transition-colors"
-                                                                    >
-                                                                        Settle
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-
-                                                {filteredPendingPreviousWeeks.length > 0 && (
-                                                    <>
-                                                        <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
-                                                        <table className="w-full text-xs">
-                                                            <tbody>
-                                                                {filteredPendingPreviousWeeks.map((item) => (
-                                                                    <tr key={item.id} className="border-t border-white/5 opacity-75">
-                                                                        <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
-                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
-                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
-                                                                        <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
-                                                                        <td className="px-3 py-2 text-right">
-                                                                            <button
-                                                                                onClick={() => handleSettleGroupLiquidation(item.id)}
-                                                                                className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
-                                                                            >
-                                                                                Remove
-                                                                            </button>
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </>
-                                                )}
-                                            </div>
-                                        )}
-                                        </>
-                                        )}
-
-                                        <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
-                                            Only this week pending rows are used for group request exclusion and budget allocation checks.
+                                            )}
+                                            <button
+                                                onClick={() => { setShowPendingSearch(!showPendingSearch); if (!showPendingSearch) setPendingSearchQuery(''); }}
+                                                className={`text-xs px-2 py-1 rounded transition-colors ${showPendingSearch ? 'bg-amber-500/30 text-amber-300' : 'text-indigo-300 hover:text-white'}`}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                            </button>
+                                            <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
+                                                {groupPendingThisWeek.length} This Week Pending
+                                            </span>
                                         </div>
                                     </div>
-                                )}
+
+                                    {showPendingSearch && (
+                                        <div className="px-6 py-3 border-b border-white/5 bg-indigo-500/5">
+                                            <input
+                                                type="text"
+                                                value={pendingSearchQuery}
+                                                onChange={(e) => setPendingSearchQuery(e.target.value)}
+                                                placeholder="Search staff, YP name, or location..."
+                                                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
+                                                autoFocus
+                                            />
+                                        </div>
+                                    )}
+
+                                    {!isPendingCollapsed && (
+                                        <>
+                                            {groupPendingLiquidations.length === 0 ? (
+                                                <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
+                                            ) : (
+                                                <div className="max-h-[320px] overflow-auto custom-scrollbar">
+                                                    <div className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-amber-300 font-bold">This Week Pending</div>
+                                                    <table className="w-full text-xs">
+                                                        <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider z-10">
+                                                            <tr>
+                                                                <th className="px-3 py-2 text-left">Staff Name</th>
+                                                                <th className="px-3 py-2 text-left">YP Name</th>
+                                                                <th className="px-3 py-2 text-left">Location</th>
+                                                                <th className="px-3 py-2 text-right">Amount</th>
+                                                                <th className="px-3 py-2 text-right">Action</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {filteredPendingThisWeek.length === 0 && (
+                                                                <tr className="border-t border-white/5">
+                                                                    <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
+                                                                </tr>
+                                                            )}
+                                                            {filteredPendingThisWeek.map((item) => (
+                                                                <tr key={item.id} className="border-t border-white/5">
+                                                                    <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
+                                                                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
+                                                                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
+                                                                    <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
+                                                                    <td className="px-3 py-2 text-right">
+                                                                        <button
+                                                                            onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white hover:bg-emerald-400 transition-colors"
+                                                                        >
+                                                                            Settle
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+
+                                                    {filteredPendingPreviousWeeks.length > 0 && (
+                                                        <>
+                                                            <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
+                                                            <table className="w-full text-xs">
+                                                                <tbody>
+                                                                    {filteredPendingPreviousWeeks.map((item) => (
+                                                                        <tr key={item.id} className="border-t border-white/5 opacity-75">
+                                                                            <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
+                                                                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
+                                                                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
+                                                                            <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
+                                                                            <td className="px-3 py-2 text-right">
+                                                                                <button
+                                                                                    onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                                    className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+                                                                                >
+                                                                                    Remove
+                                                                                </button>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+
+                                    <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
+                                        Only this week pending rows are used for group request exclusion and budget allocation checks.
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex-1 space-y-6 min-h-[600px]">
 
@@ -6522,7 +6523,7 @@ export const App = () => {
                                                 <p className="text-xs text-amber-200/80">Need NAB code before moving to paid records. Aging resets when you mark Followed Up.</p>
                                             </div>
                                         </div>
-                                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
                                             {pendingApprovalStaffGroups.length} Pending
                                         </span>
                                         <button
