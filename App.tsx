@@ -3331,14 +3331,16 @@ export const App = () => {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
         }
 
-        const nowMs = Date.now();
-        const lookbackMs = DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-        const historyRows = databaseRows.filter((row: any) => {
-            const rawDate = row.rawDate instanceof Date ? row.rawDate : new Date(row.rawDate || row.dateProcessed || '');
-            const ts = rawDate.getTime();
-            if (Number.isNaN(ts)) return false;
-            return (nowMs - ts) <= lookbackMs;
-        });
+        const historyRows = requestMode === 'solo'
+            ? databaseRows
+            : databaseRows.filter((row: any) => {
+                const nowMs = Date.now();
+                const lookbackMs = DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+                const rawDate = row.rawDate instanceof Date ? row.rawDate : new Date(row.rawDate || row.dateProcessed || '');
+                const ts = rawDate.getTime();
+                if (Number.isNaN(ts)) return false;
+                return (nowMs - ts) <= lookbackMs;
+            });
 
         if (historyRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
@@ -3407,7 +3409,7 @@ export const App = () => {
         if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
         if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
         return { signal: 'green', redMatches, yellowMatches };
-    }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
+    }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
 
     const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
     const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode === 'solo';
@@ -4661,6 +4663,7 @@ export const App = () => {
         baseContent: string,
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
+        const effectiveLookbackDays = requestMode === 'solo' ? 0 : DUPLICATE_LOOKBACK_DAYS;
         let withStatus = upsertStatusTag(baseContent, status);
         withStatus = (status === 'PENDING' && isFormHigherMismatchDetail(options?.detail))
             ? upsertClaimantRevisionSection(withStatus)
@@ -4685,7 +4688,7 @@ export const App = () => {
             signal: options.duplicateSignal,
             reason: options.reviewerReason,
             detail: options.detail,
-            lookbackDays: DUPLICATE_LOOKBACK_DAYS
+            lookbackDays: effectiveLookbackDays
         } : undefined);
 
         handleSaveToCloud(finalContent);
@@ -5070,7 +5073,10 @@ export const App = () => {
             const ageContext = currentInputAgedCount > 0
                 ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
                 : '';
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Receipt Amount + Purchase Date in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
+            const windowLabel = requestMode === 'solo'
+                ? 'across full history'
+                : `in the last ${DUPLICATE_LOOKBACK_DAYS} days`;
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Receipt Amount + Purchase Date ${windowLabel}.${ageContext}`;
             setSaveStatus('duplicate');
             setSaveModalDecision({ mode: 'red', detail });
             setShowSaveModal(true);
@@ -5081,7 +5087,10 @@ export const App = () => {
             const ageContext = currentInputAgedCount > 0
                 ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
                 : '';
-            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
+            const windowLabel = requestMode === 'solo'
+                ? 'across full history'
+                : `in the last ${DUPLICATE_LOOKBACK_DAYS} days`;
+            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) ${windowLabel}.${ageContext}`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -5118,7 +5127,9 @@ export const App = () => {
         const status = (hasTransactions && allHaveRef) ? 'PAID' : 'PENDING';
         confirmSave(status, {
             duplicateSignal: 'green',
-            detail: `No duplicate patterns detected within ${DUPLICATE_LOOKBACK_DAYS}-day lookback.`
+            detail: requestMode === 'solo'
+                ? 'No duplicate patterns detected across full history.'
+                : `No duplicate patterns detected within ${DUPLICATE_LOOKBACK_DAYS}-day lookback.`
         });
     };
 
