@@ -4301,8 +4301,8 @@ export const App = () => {
         if (filteredDatabaseRows.length === 0) return;
 
         const headers = [
-            "UID", "Time Stamp", "YP Name", "Staff Name", "Type of expense",
-            "Product", "Receipt Date", "Amount", "Total Amount", "Date Processed", "Nab Code"
+            "Unique ID / Fallback", "Time Stamp", "YP Name", "Staff Name", "Type of expense",
+            "Product", "Receipt Date", "Total Amount", "Amount", "Date Processed", "Nab Code"
         ];
 
         const csvRows = [
@@ -4317,8 +4317,8 @@ export const App = () => {
                     escape(row.expenseType),
                     escape(row.product),
                     escape(row.receiptDate),
-                    escape(row.amount),
                     escape(row.totalAmount),
+                    escape(row.amount),
                     escape(row.dateProcessed),
                     escape(row.nabCode)
                 ].join(',');
@@ -6022,8 +6022,10 @@ export const App = () => {
                                                         />
                                                     </th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Time Stamp</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[170px]">Unique ID / Fallback</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Nab Code</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[120px] bg-white/5">Total Amount</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px]">Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Location</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Client</th>
 
@@ -6031,7 +6033,6 @@ export const App = () => {
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Type of expense</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Product</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[100px]">Receipt Date</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px]">Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[120px]">Date Processed</th>
                                                 </tr>
                                             </thead>
@@ -6061,15 +6062,16 @@ export const App = () => {
                                                                 />
                                                             </td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-300 font-mono">{isPending ? '-' : (row.uid || '-')}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{row.youngPersonName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.receiptDate}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.dateProcessed}</td>
                                                         </tr>
                                                     );
