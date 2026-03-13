@@ -39,34 +39,35 @@ const SoloMode: React.FC<SoloModeProps> = ({
                 )}
             </div>
             <div className="p-6 space-y-6">
-                <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-slate-400">Reimbursement Form</h3>
-                    <textarea
-                        ref={reimbursementFormRef}
-                        value={reimbursementFormText}
-                        onChange={(e) => setReimbursementFormText(e.target.value)}
-                        placeholder={`Client's full name: Dylan Crane\nAddress: 3A Acre Street, Oran Park\nStaff member to reimburse: Isaac Thompson\nApproved by: Isaac Thompson\n\nParticular | Date Purchased | Amount | On Charge Y/N\nPocket Money | 15.2.25 | $20 | N\nTakeout | 12.2.26 | $19.45 | N\n\nTotal Amount: $39.45`}
-                        className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
-                    />
-                </div>
-
                 <div className="relative">
-                    <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                        <div className="w-full border-t border-white/5"></div>
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 z-10 hidden lg:flex">
+                        <span className="bg-[#1c1e24] px-3 py-1 text-[10px] text-slate-500 uppercase tracking-widest border border-white/10 rounded-full">And/Or</span>
                     </div>
-                    <div className="relative flex justify-center">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-medium text-slate-400">Reimbursement Form</h3>
+                            <textarea
+                                ref={reimbursementFormRef}
+                                value={reimbursementFormText}
+                                onChange={(e) => setReimbursementFormText(e.target.value)}
+                                placeholder={`Client's full name: Dylan Crane\nAddress: 3A Acre Street, Oran Park\nStaff member to reimburse: Isaac Thompson\nApproved by: Isaac Thompson\n\nParticular | Date Purchased | Amount | On Charge Y/N\nPocket Money | 15.2.25 | $20 | N\nTakeout | 12.2.26 | $19.45 | N\n\nTotal Amount: $39.45`}
+                                className="w-full h-56 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-medium text-slate-400">Receipt Details</h3>
+                            <textarea
+                                value={receiptDetailsText}
+                                onChange={(e) => setReceiptDetailsText(e.target.value)}
+                                placeholder={`Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Hills 1% Milk 3L | Groceries | Included in total | $6.00 | Walang visible OR number\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Bread Loaf 650g | Groceries | Included in total | $6.00 | Same receipt as above\n2 | 126302897245 | (Handwritten - not clear) | 31/01/2026 | Cool & Creamy - Lolly | Takeaway | $90.00 | $90.00 | Matches Incentive entry\n\nGRAND TOTAL: $39.45`}
+                                className="w-full h-56 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
+                            />
+                        </div>
+                    </div>
+                    <div className="relative flex justify-center mt-4 lg:hidden">
                         <span className="bg-[#1c1e24] px-2 text-xs text-slate-500 uppercase tracking-widest">And/Or</span>
                     </div>
-                </div>
-
-                <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-slate-400">Receipt Details</h3>
-                    <textarea
-                        value={receiptDetailsText}
-                        onChange={(e) => setReceiptDetailsText(e.target.value)}
-                        placeholder={`Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Hills 1% Milk 3L | Groceries | Included in total | $6.00 | Walang visible OR number\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Bread Loaf 650g | Groceries | Included in total | $6.00 | Same receipt as above\n2 | 126302897245 | (Handwritten - not clear) | 31/01/2026 | Cool & Creamy - Lolly | Takeaway | $90.00 | $90.00 | Matches Incentive entry\n\nGRAND TOTAL: $39.45`}
-                        className="w-full h-48 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
-                    />
                 </div>
                 {errorMessage && (
                     <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
