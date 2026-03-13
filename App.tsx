@@ -3285,8 +3285,9 @@ export const App = () => {
             historyRows.forEach((row: any) => {
                 const historyStoreKey = normalizeTextKey(String(row.storeName || ''));
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
-                const historyAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
-                const historyTotalAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+                // Fraud matching should be per receipt row, not per saved batch total.
+                const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
+                const historyTotalAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
                 const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
                 const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
@@ -3378,7 +3379,7 @@ export const App = () => {
             }
 
             const rowDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
-            const rowAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+            const rowAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
             const rowStore = normalizeTextKey(String(row.storeName || ''));
             const rowProduct = normalizeTextKey(String(row.product || ''));
             const signatureKey = [
