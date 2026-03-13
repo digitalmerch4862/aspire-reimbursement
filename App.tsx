@@ -5116,31 +5116,29 @@ export const App = () => {
         }
 
         if (duplicateCheckResult.signal === 'red') {
-
-            const ageContext = currentInputAgedCount > 0
-                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
-                : '';
-            const windowLabel = requestMode === 'solo'
-                ? 'across full history'
-                : `in the last ${DUPLICATE_LOOKBACK_DAYS} days`;
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Receipt Amount + Purchase Date ${windowLabel}.${ageContext}`;
-            setSaveStatus('duplicate');
-            setSaveModalDecision({ mode: 'red', detail });
-            setShowSaveModal(true);
-            return;
+            const topMatch = duplicateCheckResult.redMatches[0];
+            const codes = Array.from(new Set(
+                duplicateCheckResult.redMatches
+                    .map((m) => String(m.historyNabCode || '').trim())
+                    .filter(Boolean)
+            ));
+            const codePreview = codes.length > 0 ? codes.join(', ') : 'No NAB code found';
+            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || '-';
+            const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
+            showWarningToast(`Fraud exact match detected. Amount: $${amountPreview} | Date: ${datePreview} | NAB: ${codePreview}. Proceeding without auto-block.`);
         }
 
         if (duplicateCheckResult.signal === 'yellow') {
-            const ageContext = currentInputAgedCount > 0
-                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
-                : '';
-            const windowLabel = requestMode === 'solo'
-                ? 'across full history'
-                : `in the last ${DUPLICATE_LOOKBACK_DAYS} days`;
-            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) ${windowLabel}.${ageContext}`;
-            setSaveModalDecision({ mode: 'yellow', detail });
-            setShowSaveModal(true);
-            return;
+            const topMatch = duplicateCheckResult.yellowMatches[0];
+            const codes = Array.from(new Set(
+                duplicateCheckResult.yellowMatches
+                    .map((m) => String(m.historyNabCode || '').trim())
+                    .filter(Boolean)
+            ));
+            const codePreview = codes.length > 0 ? codes.join(', ') : 'No NAB code found';
+            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || '-';
+            const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
+            showWarningToast(`Fraud near match detected. Amount: $${amountPreview} | Date: ${datePreview} | NAB: ${codePreview}. Proceeding without auto-block.`);
         }
 
         if (formVsReceiptTotals.isFormHigherMismatch && formVsReceiptTotals.formTotal !== null && formVsReceiptTotals.receiptTotal !== null) {
