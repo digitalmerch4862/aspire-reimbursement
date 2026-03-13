@@ -3061,6 +3061,51 @@ export const App = () => {
         );
     }, [databaseRows, searchTerm]);
 
+    const extractReceiptDetailRows = (rawText: string): string[][] => {
+        const lines = String(rawText || '').split('\n');
+        const rows: string[][] = [];
+        let currentRow = '';
+
+        const flushCurrentRow = () => {
+            if (!currentRow.trim()) return;
+            const parts = currentRow
+                .replace(/^\|/, '')
+                .replace(/\|$/, '')
+                .split('|')
+                .map((part) => part.trim())
+                .filter(Boolean);
+            if (parts.length >= 2) rows.push(parts);
+            currentRow = '';
+        };
+
+        for (const rawLine of lines) {
+            const trimmed = rawLine.trim();
+            if (!trimmed) continue;
+
+            const lower = trimmed.toLowerCase();
+            if (lower.includes('receipt #') || lower.includes('unique id / fallback') || lower.includes('item amount') || lower.includes('receipt total')) continue;
+            if (/^[:\-\s|]+$/.test(trimmed)) continue;
+            if (lower.includes('grand total')) {
+                flushCurrentRow();
+                continue;
+            }
+
+            const startsReceiptRow = /^\|?\s*\d+\s*\|/.test(trimmed);
+            if (startsReceiptRow) {
+                flushCurrentRow();
+                currentRow = trimmed;
+                continue;
+            }
+
+            if (currentRow) {
+                currentRow = `${currentRow} ${trimmed}`;
+            }
+        }
+
+        flushCurrentRow();
+        return rows;
+    };
+
     const currentInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
         const formText = reimbursementFormText.trim();
         const receiptText = receiptDetailsText.trim();
@@ -3084,17 +3129,10 @@ export const App = () => {
 
         const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
         const fallbackStaff = staffMatch ? staffMatch[1].trim() : 'Unknown';
-        const lines = allText.split('\n');
         const parsed: InputTransactionFingerprint[] = [];
 
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if ((!trimmed.includes('|') && !trimmed.includes('\t')) || trimmed.includes('---') || trimmed.includes('Receipt #') || trimmed.includes('GRAND TOTAL') || trimmed.includes('Unique ID')) {
-                continue;
-            }
-
-
-            const parts = line.split('|').map(p => p.trim()).filter(Boolean);
+        const assembledRows = extractReceiptDetailRows(receiptText);
+        for (const parts of assembledRows) {
             const normalized = normalizeReceiptRow(parts, '0.00', '', '');
             if (!normalized) continue;
 
@@ -3119,6 +3157,42 @@ export const App = () => {
                 dateKey,
                 signatureKey
             });
+        }
+
+        if (parsed.length === 0) {
+            const lines = allText.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if ((!trimmed.includes('|') && !trimmed.includes('\t')) || trimmed.includes('---') || trimmed.includes('Receipt #') || trimmed.includes('GRAND TOTAL') || trimmed.includes('Unique ID')) {
+                    continue;
+                }
+
+                const parts = line.split('|').map(p => p.trim()).filter(Boolean);
+                const normalized = normalizeReceiptRow(parts, '0.00', '', '');
+                if (!normalized) continue;
+
+                const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+                const totalAmount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+                const dateKey = toDateKey(normalized.dateTime || '');
+                const productKey = normalizeTextKey(normalized.product || '');
+                const signatureKey = [
+                    normalizeTextKey(normalized.storeName || ''),
+                    productKey,
+                    normalizeMoneyValue(String(totalAmount), '0.00')
+                ].join('|');
+
+                parsed.push({
+                    staffName: fallbackStaff,
+                    amount,
+                    totalAmount,
+                    uid: (normalized.uniqueId || '').trim().toLowerCase(),
+                    storeName: (normalized.storeName || '').trim(),
+                    product: (normalized.product || '').trim(),
+                    rawDate: normalized.dateTime || '',
+                    dateKey,
+                    signatureKey
+                });
+            }
         }
 
         if (parsed.length > 0) return parsed;
