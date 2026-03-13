@@ -5556,6 +5556,7 @@ export const App = () => {
     }, [duplicateCheckResult.redMatches]);
 
     const hasRuleInput = Boolean(reimbursementFormText.trim() || receiptDetailsText.trim());
+    const showSupportColumn = hasRuleInput || requestMode === 'solo' || requestMode === 'group';
 
     const handleCopyDuplicateNabCodes = () => {
         if (duplicateNabCodesForModal.length === 0) return;
@@ -5953,9 +5954,9 @@ export const App = () => {
                     {/* ... (Rest of the file remains unchanged from line 1000 onwards in previous version) ... */}
                     {activeTab === 'dashboard' && (
                         // ... (Dashboard content preserved) ...
-                        <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
                             {/* ... */}
-                            <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
+                            <div className="w-full space-y-6 min-w-0">
                                 <ModeTabs
                                     currentMode={requestMode}
                                     onModeChange={(mode) => {
@@ -6006,93 +6007,95 @@ export const App = () => {
 
                             </div>
 
-                            {hasRuleInput && (
-                                <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
-                                    <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
-                                    <div className="space-y-3 pl-1">
-                                        {rulesStatusItems.map((rule) => {
-                                            const isBlocked = rule.status === 'blocked';
-                                            const isWarning = rule.status === 'warning';
-                                            const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
-                                            const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
-                                            const badgeClass = isBlocked
-                                                ? 'bg-red-500/15 text-red-300 border-red-500/30'
-                                                : isWarning
-                                                    ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
-                                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                            {showSupportColumn && (
+                                <div className="space-y-6 min-w-0">
+                                    {hasRuleInput && (
+                                        <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
+                                            <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
+                                            <div className="space-y-3 pl-1">
+                                                {rulesStatusItems.map((rule) => {
+                                                    const isBlocked = rule.status === 'blocked';
+                                                    const isWarning = rule.status === 'warning';
+                                                    const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
+                                                    const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
+                                                    const badgeClass = isBlocked
+                                                        ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                                        : isWarning
+                                                            ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
+                                                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 
-                                            return (
-                                                <div
-                                                    key={rule.id}
-                                                    className={isExactFraudBlocked
-                                                        ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
-                                                        : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
-                                                >
-                                                    <div className="flex items-start gap-2">
-                                                        {isBlocked ? (
-                                                            <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
-                                                        ) : isWarning ? (
-                                                            <AlertCircle size={15} className="text-amber-400 mt-0.5" />
-                                                        ) : (
-                                                            <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
-                                                        )}
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
-                                                                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
-                                                            </div>
-                                                            <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
-                                                            {isExactFraudBlocked && evidenceRows.length > 0 && (
-                                                                <div className="mt-2 space-y-1.5">
-                                                                    {evidenceRows.map((match, idx) => (
-                                                                        <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
-                                                                            <div className="flex items-start justify-between gap-2">
-                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
-                                                                                <button
-                                                                                    onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
-                                                                                    className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
-                                                                                >
-                                                                                    {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
-                                                                                    {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
-                                                                                </button>
-                                                                            </div>
-                                                                            <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
-                                                                            <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
+                                                    return (
+                                                        <div
+                                                            key={rule.id}
+                                                            className={isExactFraudBlocked
+                                                                ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
+                                                                : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
+                                                        >
+                                                            <div className="flex items-start gap-2">
+                                                                {isBlocked ? (
+                                                                    <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
+                                                                ) : isWarning ? (
+                                                                    <AlertCircle size={15} className="text-amber-400 mt-0.5" />
+                                                                ) : (
+                                                                    <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
+                                                                )}
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
+                                                                        <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
+                                                                    </div>
+                                                                    <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
+                                                                    {isExactFraudBlocked && evidenceRows.length > 0 && (
+                                                                        <div className="mt-2 space-y-1.5">
+                                                                            {evidenceRows.map((match, idx) => (
+                                                                                <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
+                                                                                    <div className="flex items-start justify-between gap-2">
+                                                                                        <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
+                                                                                        <button
+                                                                                            onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
+                                                                                            className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
+                                                                                        >
+                                                                                            {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
+                                                                                            {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
+                                                                                        </button>
+                                                                                    </div>
+                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
+                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
+                                                                                </div>
+                                                                            ))}
                                                                         </div>
-                                                                    ))}
+                                                                    )}
                                                                 </div>
-                                                            )}
+                                                            </div>
                                                         </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {/* Processing Status Badge */}
+                                            {processingState === ProcessingState.PROCESSING && (
+                                                <div className="mt-4 pt-4 border-t border-white/5">
+                                                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                                                        </svg>
+                                                        Using Cloud API
                                                     </div>
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    {/* Processing Status Badge */}
-                                    {processingState === ProcessingState.PROCESSING && (
-                                        <div className="mt-4 pt-4 border-t border-white/5">
-                                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                                <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                                                </svg>
-                                                Using Cloud API
-                                            </div>
+                                            )}
                                         </div>
                                     )}
-                                </div>
-                            )}
 
-                            {requestMode === 'solo' && (
-                                <LiquidationTracker
-                                    items={dbOutstandingLiquidations}
-                                    onSettle={handleSettleLiquidation}
-                                    isSettling={isSettlingLiquidation}
-                                />
-                            )}
+                                    {requestMode === 'solo' && (
+                                        <LiquidationTracker
+                                            items={dbOutstandingLiquidations}
+                                            onSettle={handleSettleLiquidation}
+                                            isSettling={isSettlingLiquidation}
+                                        />
+                                    )}
 
-                            {requestMode === 'group' && (
-                                <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
+                                    {requestMode === 'group' && (
+                                        <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
                                     <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <button
@@ -6214,9 +6217,11 @@ export const App = () => {
                                         Only this week pending rows are used for group request exclusion and budget allocation checks.
                                     </div>
                                 </div>
+                                    )}
+                                </div>
                             )}
 
-                            <div className="flex-1 space-y-6 min-h-[600px]">
+                            <div className={`space-y-6 min-h-[600px] min-w-0 ${showSupportColumn ? 'xl:col-start-3' : 'xl:col-start-2'}`}>
 
                                 {!results && processingState === ProcessingState.IDLE && (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] p-12 text-center backdrop-blur-sm">
