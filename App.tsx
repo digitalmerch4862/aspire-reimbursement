@@ -569,8 +569,8 @@ const DELETE_RULE_CONFIRMATION_PHRASE = 'yes i have decided to delete this rule 
 const getDefaultBuiltInRules = (): RuleConfig[] => {
     const now = new Date().toISOString();
     return [
-        { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using store name + purchase date + total amount.', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using store name + total amount (purchase date mismatch or missing).', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using receipt amount + purchase date (per receipt line).', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using receipt amount when purchase date is mismatch or missing.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
@@ -3274,16 +3274,14 @@ export const App = () => {
         const yellowMatches: DuplicateMatchEvidence[] = [];
 
         currentInputTransactions.forEach((tx) => {
-            const txStoreKey = normalizeTextKey(tx.storeName);
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
             const txReference = normalizeReferenceKey(tx.uid);
 
-            if (!txStoreKey || !txTotalAmount) return;
+            if (!txTotalAmount) return;
 
             historyRows.forEach((row: any) => {
-                const historyStoreKey = normalizeTextKey(String(row.storeName || ''));
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
                 // Fraud matching should be per receipt row, not per saved batch total.
                 const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
@@ -3292,15 +3290,16 @@ export const App = () => {
                 const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
                 const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
 
-                const storeMatch = txStoreKey === historyStoreKey;
-                const dateMatch = txDateKey && historyDateKey ? txDateKey === historyDateKey : false;
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
+                const hasTxDate = Boolean(txDateKey && txDateKey !== '-');
+                const hasHistoryDate = Boolean(historyDateKey && historyDateKey !== '-');
+                const dateMatch = hasTxDate && hasHistoryDate ? txDateKey === historyDateKey : false;
 
-                // Exact fraud rule: Store + Date + Total Amount must all match.
-                if (!storeMatch || !totalAmountMatch) return;
+                // Exact fraud rule: per-receipt Amount + Date must both match.
+                if (!totalAmountMatch) return;
 
-                const exactMatch = storeMatch && totalAmountMatch && dateMatch;
-                const nearMatch = storeMatch && totalAmountMatch && !dateMatch;
+                const exactMatch = totalAmountMatch && dateMatch;
+                const nearMatch = totalAmountMatch && (!hasTxDate || !hasHistoryDate || !dateMatch);
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -3440,8 +3439,8 @@ export const App = () => {
                 id: 'r1',
                 title: rule1.title,
                 detail: duplicateCheckResult.redMatches.length > 0
-                    ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same store + purchase date + total amount in history.`
-                    : 'No exact fraud match found for store + purchase date + total amount.',
+                    ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same receipt amount + purchase date in history.`
+                    : 'No exact fraud match found for receipt amount + purchase date.',
                 severity: rule1.severity,
                 status: duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass'
             });
@@ -3453,7 +3452,7 @@ export const App = () => {
                 id: 'r2',
                 title: rule2.title,
                 detail: duplicateCheckResult.yellowMatches.length > 0
-                    ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same store + total amount, with purchase date mismatch/missing.`
+                    ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same receipt amount, with purchase date mismatch/missing.`
                     : firstHistoryMatch
                         ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
                         : 'No near fraud pattern found in history.',
@@ -4997,7 +4996,7 @@ export const App = () => {
             const ageContext = currentInputAgedCount > 0
                 ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
                 : '';
-            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Purchase Date + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Receipt Amount + Purchase Date in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
             setSaveStatus('duplicate');
             setSaveModalDecision({ mode: 'red', detail });
             setShowSaveModal(true);
