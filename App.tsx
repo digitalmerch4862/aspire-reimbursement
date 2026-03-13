@@ -3326,8 +3326,50 @@ export const App = () => {
         return days > 30;
     }).length, [currentInputTransactions]);
 
+    const fraudInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
+        if (requestMode !== 'solo') return currentInputTransactions;
+
+        const formText = reimbursementFormText.trim();
+        const receiptText = receiptDetailsText.trim();
+        if (!receiptText) return [];
+
+        const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
+        const fallbackStaff = staffMatch ? staffMatch[1].trim() : 'Unknown';
+        const parsed: InputTransactionFingerprint[] = [];
+        const assembledRows = extractReceiptDetailRows(receiptText);
+
+        for (const parts of assembledRows) {
+            const normalized = normalizeReceiptRow(parts, '0.00', '', '');
+            if (!normalized) continue;
+
+            const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+            const totalAmount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
+            const dateKey = toDateKey(normalized.dateTime || '');
+            const productKey = normalizeTextKey(normalized.product || '');
+            const signatureKey = [
+                normalizeTextKey(normalized.storeName || ''),
+                productKey,
+                normalizeMoneyValue(String(totalAmount), '0.00')
+            ].join('|');
+
+            parsed.push({
+                staffName: fallbackStaff,
+                amount,
+                totalAmount,
+                uid: (normalized.uniqueId || '').trim().toLowerCase(),
+                storeName: (normalized.storeName || '').trim(),
+                product: (normalized.product || '').trim(),
+                rawDate: normalized.dateTime || '',
+                dateKey,
+                signatureKey
+            });
+        }
+
+        return parsed;
+    }, [requestMode, currentInputTransactions, reimbursementFormText, receiptDetailsText]);
+
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
-        if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
+        if (fraudInputTransactions.length === 0 || databaseRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
         }
 
@@ -3349,7 +3391,7 @@ export const App = () => {
         const redMatches: DuplicateMatchEvidence[] = [];
         const yellowMatches: DuplicateMatchEvidence[] = [];
 
-        currentInputTransactions.forEach((tx) => {
+        fraudInputTransactions.forEach((tx) => {
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
@@ -3409,7 +3451,7 @@ export const App = () => {
         if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
         if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
         return { signal: 'green', redMatches, yellowMatches };
-    }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
+    }, [fraudInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
 
     const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
     const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode === 'solo';
@@ -3508,17 +3550,20 @@ export const App = () => {
         };
 
         const items: RuleStatusItem[] = [];
+        const hasSoloReceiptFraudInput = requestMode !== 'solo' || fraudInputTransactions.length > 0;
 
         const rule1 = getRuleMeta('r1', 'Fraud Exact Match', 'critical');
         if (rule1) {
             items.push({
                 id: 'r1',
                 title: rule1.title,
-                detail: duplicateCheckResult.redMatches.length > 0
+                detail: !hasSoloReceiptFraudInput
+                    ? 'No valid Receipt Details rows found for exact fraud check.'
+                    : duplicateCheckResult.redMatches.length > 0
                     ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same receipt amount + purchase date in history.`
                     : 'No exact fraud match found for receipt amount + purchase date.',
                 severity: rule1.severity,
-                status: duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass'
+                status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass')
             });
         }
 
@@ -3527,13 +3572,15 @@ export const App = () => {
             items.push({
                 id: 'r2',
                 title: rule2.title,
-                detail: duplicateCheckResult.yellowMatches.length > 0
+                detail: !hasSoloReceiptFraudInput
+                    ? 'Near fraud check requires valid Receipt Details rows.'
+                    : duplicateCheckResult.yellowMatches.length > 0
                     ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same receipt amount, with purchase date mismatch/missing.`
                     : firstHistoryMatch
                         ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
                         : 'No near fraud pattern found in history.',
                 severity: rule2.severity,
-                status: duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass'
+                status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass')
             });
         }
 
@@ -3641,7 +3688,7 @@ export const App = () => {
         });
 
         return items;
-    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals]);
+    }, [currentInputTransactions, fraudInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals, requestMode]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
