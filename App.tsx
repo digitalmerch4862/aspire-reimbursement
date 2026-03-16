@@ -495,7 +495,7 @@ interface RulePendingAction {
     nextRule?: RuleConfig;
 }
 
-type DuplicateTrafficLight = 'red' | 'yellow' | 'green';
+type DuplicateTrafficLight = 'red' | 'orange' | 'yellow' | 'amber' | 'green';
 
 interface DuplicateMatchEvidence {
     txStaffName: string;
@@ -1599,14 +1599,32 @@ export const App = () => {
 
         setSpecialInstructionLogs(loadSpecialInstructionLogs());
 
-        // Load Employee Data
-        const storedEmployees = localStorage.getItem('aspire_employee_list');
-        if (storedEmployees) {
-            setEmployeeRawText(storedEmployees);
-            setEmployeeList(parseEmployeeData(storedEmployees));
-        } else {
-            setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
-        }
+        // Load Employee Data (try Supabase first, then localStorage, then default)
+        const loadEmployeeData = async () => {
+            if (hasSupabaseEnv) {
+                try {
+                    const supabaseEmployees = await fetchEmployeesFromSupabase();
+                    if (supabaseEmployees) {
+                        localStorage.setItem('aspire_employee_list', supabaseEmployees);
+                        setEmployeeRawText(supabaseEmployees);
+                        setEmployeeList(parseEmployeeData(supabaseEmployees));
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('Failed to load from Supabase, falling back to localStorage');
+                }
+            }
+            
+            const storedEmployees = localStorage.getItem('aspire_employee_list');
+            if (storedEmployees) {
+                setEmployeeRawText(storedEmployees);
+                setEmployeeList(parseEmployeeData(storedEmployees));
+            } else {
+                setEmployeeRawText(DEFAULT_EMPLOYEE_DATA);
+                setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
+            }
+        };
+        loadEmployeeData();
 
         const storedPendingEmployees = localStorage.getItem(EMPLOYEE_PENDING_DEACTIVATION_KEY);
         if (storedPendingEmployees) {
@@ -1994,11 +2012,24 @@ export const App = () => {
         }, 3000);
     };
 
-    const handleSaveEmployeeList = () => {
+    const handleSaveEmployeeList = async () => {
         localStorage.setItem('aspire_employee_list', employeeRawText);
         setEmployeeList(parseEmployeeData(employeeRawText));
-        setSaveEmployeeStatus('saved');
-        setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+        
+        if (hasSupabaseEnv) {
+            const result = await saveEmployeesToSupabase(employeeRawText);
+            if (result.success) {
+                setSaveEmployeeStatus('saved');
+                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+            } else {
+                setSaveEmployeeStatus('saved');
+                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+                showWarningToast(`Saved locally. Supabase sync failed: ${result.error}`);
+            }
+        } else {
+            setSaveEmployeeStatus('saved');
+            setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+        }
     };
 
     const persistPendingDeactivationEmployees = (records: Employee[]) => {
@@ -2034,6 +2065,11 @@ export const App = () => {
             setEmployeeRawText(raw);
             setEmployeeList(parsedEmployees);
             localStorage.setItem('aspire_employee_list', raw);
+            
+            if (hasSupabaseEnv) {
+                await saveEmployeesToSupabase(raw);
+            }
+            
             persistPendingDeactivationEmployees(pendingApproval);
             setCsvImportMessage(`Imported ${parsedEmployees.length} active records. ${pendingApproval.length} account(s) moved to approval queue.`);
         } catch (error) {
@@ -2046,7 +2082,7 @@ export const App = () => {
         }
     };
 
-    const handleKeepPendingEmployee = (account: string) => {
+    const handleKeepPendingEmployee = async (account: string) => {
         const target = pendingDeactivationEmployees.find((employee) => employee.account === account);
         if (!target) return;
 
@@ -2057,6 +2093,10 @@ export const App = () => {
         const nextRaw = serializeEmployeeData(nextActive);
         setEmployeeRawText(nextRaw);
         localStorage.setItem('aspire_employee_list', nextRaw);
+
+        if (hasSupabaseEnv) {
+            await saveEmployeesToSupabase(nextRaw);
+        }
 
         const nextPending = pendingDeactivationEmployees.filter((employee) => employee.account !== account);
         persistPendingDeactivationEmployees(nextPending);
@@ -2698,6 +2738,73 @@ export const App = () => {
             setEditableContent(updated);
         } else {
             setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
+        }
+    };
+
+    const fetchEmployeesFromSupabase = async () => {
+        if (!hasSupabaseEnv) return null;
+        try {
+            const { data, error } = await supabase
+                .from('employees')
+                .select('*')
+                .order('surname', { ascending: true });
+            if (error) {
+                console.warn('Failed to fetch employees from Supabase:', error);
+                return null;
+            }
+            if (data && data.length > 0) {
+                const csvContent = data.map(emp => 
+                    `${emp.first_name}\t${emp.surname}\t${emp.surname}, ${emp.first_name}\t${emp.bsb || ''}\t${emp.account || ''}`
+                ).join('\n');
+                return `First Names\tSurname\tConcatenate\tBSB\tAccount\n${csvContent}`;
+            }
+            return null;
+        } catch (e) {
+            console.warn('Error fetching employees from Supabase:', e);
+            return null;
+        }
+    };
+
+    const saveEmployeesToSupabase = async (employeeText: string) => {
+        if (!hasSupabaseEnv) return { success: false, error: 'No Supabase env' };
+        try {
+            const lines = employeeText.split('\n').filter(line => line.trim());
+            if (lines.length <= 1) return { success: false, error: 'No employee data' };
+            
+            const headerLine = lines[0].toLowerCase();
+            const employeeRows = lines.slice(1);
+            
+            const employees = employeeRows.map(line => {
+                const parts = line.split('\t').map(p => p.trim());
+                if (parts.length < 2) return null;
+                const [firstName, surname, concatenate, bsb, account] = parts;
+                return {
+                    first_name: firstName || '',
+                    surname: surname || '',
+                    concatenate: concatenate || `${surname}, ${firstName}`,
+                    bsb: bsb || null,
+                    account: account || null
+                };
+            }).filter(Boolean);
+
+            const { error: deleteError } = await supabase.from('employees').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            if (deleteError) {
+                console.warn('Failed to clear employees:', deleteError);
+            }
+
+            const { data, error } = await supabase
+                .from('employees')
+                .upsert(employees, { onConflict: 'surname,first_name' })
+                .select();
+            
+            if (error) {
+                console.error('Failed to save employees to Supabase:', error);
+                return { success: false, error: error.message };
+            }
+            return { success: true, count: employees.length };
+        } catch (e) {
+            console.error('Error saving employees to Supabase:', e);
+            return { success: false, error: String(e) };
         }
     };
 
@@ -3389,35 +3496,42 @@ export const App = () => {
         }
 
         const redMatches: DuplicateMatchEvidence[] = [];
+        const orangeMatches: DuplicateMatchEvidence[] = [];
         const yellowMatches: DuplicateMatchEvidence[] = [];
+        const amberMatches: DuplicateMatchEvidence[] = [];
 
         fraudInputTransactions.forEach((tx) => {
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
             const txReference = normalizeReferenceKey(tx.uid);
+            const txStoreKey = normalizeTextKey(tx.storeName || '');
 
             if (!txTotalAmount) return;
 
             historyRows.forEach((row: any) => {
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
-                // Fraud matching should be per receipt row, not per saved batch total.
                 const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
                 const historyTotalAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
                 const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
                 const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
+                const historyStoreKey = normalizeTextKey(String(row.storeName || '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim());
 
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
                 const hasTxDate = Boolean(txDateKey && txDateKey !== '-');
                 const hasHistoryDate = Boolean(historyDateKey && historyDateKey !== '-');
                 const dateMatch = hasTxDate && hasHistoryDate ? txDateKey === historyDateKey : false;
 
-                // Exact fraud rule: per-receipt Amount + Date must both match.
-                if (!totalAmountMatch) return;
+                const hasTxStore = Boolean(txStoreKey && txStoreKey !== '-');
+                const hasHistoryStore = Boolean(historyStoreKey && historyStoreKey !== '-');
+                const storeMatch = hasTxStore && hasHistoryStore ? txStoreKey === historyStoreKey : false;
 
-                const exactMatch = totalAmountMatch && dateMatch;
-                const nearMatch = totalAmountMatch && (!hasTxDate || !hasHistoryDate || !dateMatch);
+                const hasTxUid = Boolean(txReference);
+                const hasHistoryUid = Boolean(historyReference);
+                const uidMatch = hasTxUid && hasHistoryUid ? txReference === historyReference : false;
+
+                if (!totalAmountMatch) return;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -3440,21 +3554,32 @@ export const App = () => {
                     historyProcessedAt: String(row.dateProcessed || '-')
                 };
 
+                const exactMatch = totalAmountMatch && dateMatch && storeMatch && uidMatch;
+                const strongMatch = totalAmountMatch && dateMatch && storeMatch;
+                const mediumMatch = totalAmountMatch && dateMatch;
+                const weakMatch = totalAmountMatch && uidMatch;
+
                 if (exactMatch) {
                     redMatches.push(evidence);
-                } else if (nearMatch) {
+                } else if (strongMatch) {
+                    orangeMatches.push(evidence);
+                } else if (mediumMatch) {
                     yellowMatches.push(evidence);
+                } else if (weakMatch) {
+                    amberMatches.push(evidence);
                 }
             });
         });
 
-        if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
-        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
-        return { signal: 'green', redMatches, yellowMatches };
+        if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches: [...orangeMatches, ...yellowMatches, ...amberMatches] };
+        if (orangeMatches.length > 0) return { signal: 'orange', redMatches: [], yellowMatches: [...orangeMatches, ...yellowMatches, ...amberMatches] };
+        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches: [], yellowMatches: [...yellowMatches, ...amberMatches] };
+        if (amberMatches.length > 0) return { signal: 'amber', redMatches: [], yellowMatches: amberMatches };
+        return { signal: 'green', redMatches: [], yellowMatches: [] };
     }, [fraudInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
 
     const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
-    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode === 'solo';
+    const hasFraudDuplicate = ['red', 'orange', 'yellow', 'amber'].includes(duplicateCheckResult.signal) && requestMode === 'solo';
     const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode === 'solo';
 
 
@@ -3551,50 +3676,65 @@ export const App = () => {
 
         const items: RuleStatusItem[] = [];
         const hasSoloReceiptFraudInput = requestMode !== 'solo' || fraudInputTransactions.length > 0;
+        const signal = duplicateCheckResult.signal;
 
         const rule1 = getRuleMeta('r1', 'Fraud Exact Match', 'critical');
         if (rule1) {
             const redMatch = duplicateCheckResult.redMatches[0];
+            const matchFound = signal === 'red';
             const redDetail = !hasSoloReceiptFraudInput
                 ? 'No valid Receipt Details rows found for exact fraud check.'
-                : duplicateCheckResult.redMatches.length > 0
-                ? `⚠️ ${duplicateCheckResult.redMatches.length} exact fraud match(es) found:\n` +
+                : matchFound
+                ? `⚠️ ${duplicateCheckResult.redMatches.length} EXACT fraud match(es) found (BLOCKED):\n` +
                   `Amount: $${redMatch?.historyTotalAmount || redMatch?.txTotalAmount || '0.00'}\n` +
                   `Date: ${redMatch?.historyDateTime || redMatch?.txDateTime || '-'}\n` +
+                  `Store: ${redMatch?.historyStoreName || redMatch?.txStoreName || '-'}\n` +
                   `Staff: ${redMatch?.historyStaffName || redMatch?.txStaffName || '-'}\n` +
                   `Unique ID: ${redMatch?.txReference || redMatch?.historyReference || '-'}\n` +
                   `NAB: ${redMatch?.historyNabCode || '-'}`
-                : 'No exact fraud match found for receipt amount + purchase date.';
+                : 'No exact fraud match found (Amount + Date + Store + UID).';
             items.push({
                 id: 'r1',
                 title: rule1.title,
                 detail: redDetail,
                 severity: rule1.severity,
-                status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass')
+                status: !hasSoloReceiptFraudInput ? 'warning' : (matchFound ? 'blocked' : 'pass')
             });
         }
 
-        const rule2 = getRuleMeta('r2', 'Fraud Near Match', 'high');
+        const rule2 = getRuleMeta('r2', 'Fraud Strong/Medium/Weak Match', 'high');
         if (rule2) {
+            const hasOrangeOrYellow = signal === 'orange' || signal === 'yellow';
+            const hasAmber = signal === 'amber';
             const yellowMatch = duplicateCheckResult.yellowMatches[0];
+            
+            const levelLabel = signal === 'orange' ? 'STRONG (Amount+Date+Store)' : signal === 'yellow' ? 'MEDIUM (Amount+Date)' : signal === 'amber' ? 'WEAK (Amount+UID)' : 'None';
+            
             const yellowDetail = !hasSoloReceiptFraudInput
-                ? 'Near fraud check requires valid Receipt Details rows.'
-                : duplicateCheckResult.yellowMatches.length > 0
-                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} near fraud match(es) found:\n` +
+                ? 'Fraud check requires valid Receipt Details rows.'
+                : hasOrangeOrYellow
+                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} ${signal.toUpperCase()} fraud match(es) found:\n` +
                   `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
                   `Date: ${yellowMatch?.historyDateTime || yellowMatch?.txDateTime || '-'}\n` +
+                  `Store: ${yellowMatch?.historyStoreName || yellowMatch?.txStoreName || '-'}\n` +
                   `Staff: ${yellowMatch?.historyStaffName || yellowMatch?.txStaffName || '-'}\n` +
                   `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
                   `NAB: ${yellowMatch?.historyNabCode || '-'}`
+                : hasAmber
+                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} AMBER (Weak) fraud match(es) found:\n` +
+                  `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
+                  `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
+                  `NAB: ${yellowMatch?.historyNabCode || '-'}\n` +
+                  `(No date/store match - possible different transaction)`
                 : firstHistoryMatch
-                    ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
-                    : 'No near fraud pattern found in history.';
+                    ? `No fraud match. Last related: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
+                    : 'No fraud pattern found in history.';
             items.push({
                 id: 'r2',
                 title: rule2.title,
                 detail: yellowDetail,
                 severity: rule2.severity,
-                status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass')
+                status: !hasSoloReceiptFraudInput ? 'warning' : (hasOrangeOrYellow ? 'blocked' : hasAmber ? 'warning' : 'pass')
             });
         }
 
@@ -5167,9 +5307,9 @@ export const App = () => {
             return;
         }
 
-        if (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') {
-            const isExact = duplicateCheckResult.signal === 'red';
-            const matches = isExact ? duplicateCheckResult.redMatches : duplicateCheckResult.yellowMatches;
+        if (['red', 'orange', 'yellow', 'amber'].includes(duplicateCheckResult.signal)) {
+            const signal = duplicateCheckResult.signal;
+            const matches = duplicateCheckResult.yellowMatches;
             const topMatch = matches[0];
             
             const staffNamePreview = topMatch?.historyStaffName || topMatch?.txStaffName || '-';
@@ -5177,16 +5317,29 @@ export const App = () => {
             const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
             const uniqueIdPreview = topMatch?.txReference || topMatch?.historyReference || '-';
             const nabCodePreview = topMatch?.historyNabCode || '-';
+            const storePreview = topMatch?.historyStoreName || topMatch?.txStoreName || '-';
             
-            const detail = `⚠️ FRAUD ${isExact ? 'EXACT' : 'NEAR'} MATCH DETECTED\n\n` +
+            const signalLabels: Record<string, string> = {
+                'red': 'EXACT (Amount + Date + Store + UID)',
+                'orange': 'STRONG (Amount + Date + Store)',
+                'yellow': 'MEDIUM (Amount + Date)',
+                'amber': 'WEAK (Amount + UID)'
+            };
+            
+            const isBlockSignal = signal === 'red' || signal === 'orange';
+            
+            const detail = `⚠️ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
                 `Amount: $${amountPreview}\n` +
                 `Date: ${datePreview}\n` +
+                `Store: ${storePreview}\n` +
                 `Staff Name: ${staffNamePreview}\n` +
                 `Unique ID / Fallback: ${uniqueIdPreview}\n` +
                 `NAB Code: ${nabCodePreview}\n\n` +
-                `Do you want to proceed anyway?`;
+                (isBlockSignal 
+                    ? `❌ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
+                    : `Do you want to proceed anyway?`);
             
-            setSaveModalDecision({ mode: 'yellow', detail });
+            setSaveModalDecision({ mode: isBlockSignal ? 'red' : 'yellow', detail });
             setShowSaveModal(true);
             return;
         }
@@ -7170,11 +7323,15 @@ export const App = () => {
                                                 Upload .CSV for Update
                                             </button>
                                             <button
-                                                onClick={() => {
+                                                onClick={async () => {
                                                     if (window.confirm('Reset to default list?')) {
+                                                        localStorage.setItem('aspire_employee_list', DEFAULT_EMPLOYEE_DATA);
                                                         setEmployeeRawText(DEFAULT_EMPLOYEE_DATA);
                                                         setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
                                                         persistPendingDeactivationEmployees([]);
+                                                        if (hasSupabaseEnv) {
+                                                            await saveEmployeesToSupabase(DEFAULT_EMPLOYEE_DATA);
+                                                        }
                                                         setCsvImportMessage('Employee list reset to defaults.');
                                                     }
                                                 }}
