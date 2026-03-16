@@ -2749,12 +2749,12 @@ export const App = () => {
                 .select('*')
                 .order('surname', { ascending: true });
             if (error) {
-                console.warn('Failed to fetch employees from Supabase:', error);
+                console.warn('Failed to fetch employees from Supabase:', error.message || error);
                 return null;
             }
             if (data && data.length > 0) {
                 const csvContent = data.map(emp => 
-                    `${emp.first_name}\t${emp.surname}\t${emp.surname}, ${emp.first_name}\t${emp.bsb || ''}\t${emp.account || ''}`
+                    `${String(emp.first_name || '')}\t${String(emp.surname || '')}\t${String(emp.surname || '')}, ${String(emp.first_name || '')}\t${String(emp.bsb || '')}\t${String(emp.account || '')}`
                 ).join('\n');
                 return `First Names\tSurname\tConcatenate\tBSB\tAccount\n${csvContent}`;
             }
@@ -3221,17 +3221,20 @@ export const App = () => {
         const allText = `${formText}\n${receiptText}`;
         const groupEntries = parseGroupPettyCashEntries(allText);
         if (requestMode === 'group' && groupEntries.length >= 2) {
-            return groupEntries.map((entry) => ({
-                staffName: entry.staffName,
-                amount: Number(entry.amount.toFixed(2)),
-                totalAmount: Number(entry.amount.toFixed(2)),
-                uid: '',
-                storeName: 'group petty cash',
-                product: 'group petty cash',
-                rawDate: '',
-                dateKey: '',
-                signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
-            }));
+            return groupEntries.map((entry) => {
+                const amountNum = typeof entry.amount === 'number' && Number.isFinite(entry.amount) ? entry.amount : parseFloat(String(entry.amount || '0').replace(/[^0-9.-]/g, '')) || 0;
+                return {
+                    staffName: entry.staffName,
+                    amount: Number(amountNum.toFixed(2)),
+                    totalAmount: Number(amountNum.toFixed(2)),
+                    uid: '',
+                    storeName: 'group petty cash',
+                    product: 'group petty cash',
+                    rawDate: '',
+                    dateKey: '',
+                    signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
+                };
+            });
         }
 
         const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
@@ -5006,7 +5009,9 @@ export const App = () => {
                         const staffName = record.staff_name || 'Staff Member';
                         const ypName = record.yp_name || 'Client Name';
                         const address = record.location || 'Address';
-                        const amount = record.amount ? Number(record.amount).toFixed(2) : '0.00';
+                        const amountRaw = record.amount;
+                        const amountNum = Number(amountRaw) || 0;
+                        const amount = amountNum.toFixed(2);
 
                         const header = [
                             'Hi,',
