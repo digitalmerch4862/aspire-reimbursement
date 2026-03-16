@@ -3554,14 +3554,21 @@ export const App = () => {
 
         const rule1 = getRuleMeta('r1', 'Fraud Exact Match', 'critical');
         if (rule1) {
+            const redMatch = duplicateCheckResult.redMatches[0];
+            const redDetail = !hasSoloReceiptFraudInput
+                ? 'No valid Receipt Details rows found for exact fraud check.'
+                : duplicateCheckResult.redMatches.length > 0
+                ? `⚠️ ${duplicateCheckResult.redMatches.length} exact fraud match(es) found:\n` +
+                  `Amount: $${redMatch?.historyTotalAmount || redMatch?.txTotalAmount || '0.00'}\n` +
+                  `Date: ${redMatch?.historyDateTime || redMatch?.txDateTime || '-'}\n` +
+                  `Staff: ${redMatch?.historyStaffName || redMatch?.txStaffName || '-'}\n` +
+                  `Unique ID: ${redMatch?.txReference || redMatch?.historyReference || '-'}\n` +
+                  `NAB: ${redMatch?.historyNabCode || '-'}`
+                : 'No exact fraud match found for receipt amount + purchase date.';
             items.push({
                 id: 'r1',
                 title: rule1.title,
-                detail: !hasSoloReceiptFraudInput
-                    ? 'No valid Receipt Details rows found for exact fraud check.'
-                    : duplicateCheckResult.redMatches.length > 0
-                    ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same receipt amount + purchase date in history.`
-                    : 'No exact fraud match found for receipt amount + purchase date.',
+                detail: redDetail,
                 severity: rule1.severity,
                 status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass')
             });
@@ -3569,16 +3576,23 @@ export const App = () => {
 
         const rule2 = getRuleMeta('r2', 'Fraud Near Match', 'high');
         if (rule2) {
+            const yellowMatch = duplicateCheckResult.yellowMatches[0];
+            const yellowDetail = !hasSoloReceiptFraudInput
+                ? 'Near fraud check requires valid Receipt Details rows.'
+                : duplicateCheckResult.yellowMatches.length > 0
+                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} near fraud match(es) found:\n` +
+                  `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
+                  `Date: ${yellowMatch?.historyDateTime || yellowMatch?.txDateTime || '-'}\n` +
+                  `Staff: ${yellowMatch?.historyStaffName || yellowMatch?.txStaffName || '-'}\n` +
+                  `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
+                  `NAB: ${yellowMatch?.historyNabCode || '-'}`
+                : firstHistoryMatch
+                    ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
+                    : 'No near fraud pattern found in history.';
             items.push({
                 id: 'r2',
                 title: rule2.title,
-                detail: !hasSoloReceiptFraudInput
-                    ? 'Near fraud check requires valid Receipt Details rows.'
-                    : duplicateCheckResult.yellowMatches.length > 0
-                    ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same receipt amount, with purchase date mismatch/missing.`
-                    : firstHistoryMatch
-                        ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
-                        : 'No near fraud pattern found in history.',
+                detail: yellowDetail,
                 severity: rule2.severity,
                 status: !hasSoloReceiptFraudInput ? 'warning' : (duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass')
             });
@@ -5037,6 +5051,16 @@ export const App = () => {
         setSaveStatus('idle');
         setErrorMessage(null);
 
+        if (loadingHistory) {
+            showWarningToast('Please wait for history to load before saving. Click refresh if needed.');
+            return;
+        }
+
+        if (historyData.length === 0) {
+            showWarningToast('No history data available. Please refresh and try again.');
+            return;
+        }
+
         if (requestMode === 'solo') {
             const combinedText = `${reimbursementFormText}\n${receiptDetailsText}`;
 
@@ -5106,6 +5130,34 @@ export const App = () => {
             return;
         }
 
+        // CHECK IF NAB CODE EXISTS IN HISTORY - BLOCK SAVE IF FOUND
+        if (hasTransactions && allHaveRef) {
+            const existingNabCodes = new Map<string, { staffName: string; amount: string; date: string }>();
+            parsedTransactions.forEach(tx => {
+                const nabRef = tx.currentNabRef?.trim().toUpperCase();
+                if (!nabRef) return;
+                databaseRows.forEach((row: any) => {
+                    const historyNab = String(row.nabCode || row.nab_code || row.uid || '').trim().toUpperCase();
+                    if (historyNab === nabRef) {
+                        existingNabCodes.set(nabRef, {
+                            staffName: row.staffName || row.staff_name || '-',
+                            amount: row.amount || row.totalAmount || '-',
+                            date: row.receiptDate || row.dateProcessed || row.receiptDateTime || '-'
+                        });
+                    }
+                });
+            });
+            if (existingNabCodes.size > 0) {
+                const firstEntry = Array.from(existingNabCodes.entries())[0];
+                setSaveModalDecision({
+                    mode: 'red',
+                    detail: `NAB Code "${firstEntry[0]}" already exists in system for ${firstEntry[1].staffName} on ${firstEntry[1].date} (Amount: $${firstEntry[1].amount}). Please use a different NAB code.`
+                });
+                setShowSaveModal(true);
+                return;
+            }
+        }
+
         // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
         if (hasTransactions && allHaveRef) {
             confirmSave('PAID', {
@@ -5115,30 +5167,28 @@ export const App = () => {
             return;
         }
 
-        if (duplicateCheckResult.signal === 'red') {
-            const topMatch = duplicateCheckResult.redMatches[0];
-            const codes = Array.from(new Set(
-                duplicateCheckResult.redMatches
-                    .map((m) => String(m.historyNabCode || '').trim())
-                    .filter(Boolean)
-            ));
-            const codePreview = codes.length > 0 ? codes.join(', ') : 'No NAB code found';
-            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || '-';
+        if (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') {
+            const isExact = duplicateCheckResult.signal === 'red';
+            const matches = isExact ? duplicateCheckResult.redMatches : duplicateCheckResult.yellowMatches;
+            const topMatch = matches[0];
+            
+            const staffNamePreview = topMatch?.historyStaffName || topMatch?.txStaffName || '-';
+            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || topMatch?.txDateTime || '-';
             const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
-            showWarningToast(`Fraud exact match detected. Amount: $${amountPreview} | Date: ${datePreview} | NAB: ${codePreview}. Proceeding without auto-block.`);
-        }
-
-        if (duplicateCheckResult.signal === 'yellow') {
-            const topMatch = duplicateCheckResult.yellowMatches[0];
-            const codes = Array.from(new Set(
-                duplicateCheckResult.yellowMatches
-                    .map((m) => String(m.historyNabCode || '').trim())
-                    .filter(Boolean)
-            ));
-            const codePreview = codes.length > 0 ? codes.join(', ') : 'No NAB code found';
-            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || '-';
-            const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
-            showWarningToast(`Fraud near match detected. Amount: $${amountPreview} | Date: ${datePreview} | NAB: ${codePreview}. Proceeding without auto-block.`);
+            const uniqueIdPreview = topMatch?.txReference || topMatch?.historyReference || '-';
+            const nabCodePreview = topMatch?.historyNabCode || '-';
+            
+            const detail = `⚠️ FRAUD ${isExact ? 'EXACT' : 'NEAR'} MATCH DETECTED\n\n` +
+                `Amount: $${amountPreview}\n` +
+                `Date: ${datePreview}\n` +
+                `Staff Name: ${staffNamePreview}\n` +
+                `Unique ID / Fallback: ${uniqueIdPreview}\n` +
+                `NAB Code: ${nabCodePreview}\n\n` +
+                `Do you want to proceed anyway?`;
+            
+            setSaveModalDecision({ mode: 'yellow', detail });
+            setShowSaveModal(true);
+            return;
         }
 
         if (formVsReceiptTotals.isFormHigherMismatch && formVsReceiptTotals.formTotal !== null && formVsReceiptTotals.receiptTotal !== null) {
