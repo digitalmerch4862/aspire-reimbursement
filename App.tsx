@@ -2917,7 +2917,7 @@ export const App = () => {
                 ? uidMetaMatch[1].split('||').map((v: string) => v.trim()).filter((v: string) => v.length > 0)
                 : [];
             let uidIdx = 0;
-            const timestamp = new Date(record.created_at).toLocaleString('en-AU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const timestamp = new Date(record.created_at).toLocaleString('en-AU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(/-/g, ' ');
             const rawDate = new Date(record.created_at);
 
             // Extract basic info
@@ -2956,7 +2956,7 @@ export const App = () => {
             const youngPersonName = record.location || locationValue || addressValue || locationFirstPart || '-';
 
 
-            const dateProcessed = new Date(record.created_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+            const dateProcessed = new Date(record.created_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
             const nabRefDisplay = record.nab_code || 'PENDING';
 
             // 2. Extract Table Rows
@@ -3103,12 +3103,12 @@ export const App = () => {
 
                     const dateMatch = normalized.dateTime.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
                     let receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
-                    // Format receipt date to dd-MMM-YYYY if it's a date string
+                    // Format receipt date to DD MMM YYYY if it's a date string
                     if (receiptDate && receiptDate.includes('/')) {
                         try {
                             const parsed = new Date(receiptDate);
                             if (!isNaN(parsed.getTime())) {
-                                receiptDate = parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+                                receiptDate = parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
                             }
                         } catch (e) {
                             // Keep original if parsing fails
@@ -5594,6 +5594,26 @@ export const App = () => {
                         return '';
                     };
                     
+                    // Helper to format date for display (DD MMM YYYY format)
+                    const formatDateForDisplay = (dateStr: string): string => {
+                        if (!dateStr) return '-';
+                        const parsed = new Date(dateStr);
+                        if (!isNaN(parsed.getTime())) {
+                            return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
+                        }
+                        // Try parsing direct string if Date constructor fails
+                        try {
+                            const parts = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+                            if (parts) {
+                                const d = new Date(`${parts[3]}-${parts[2]}-${parts[1]}`);
+                                if (!isNaN(d.getTime())) {
+                                    return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
+                                }
+                            }
+                        } catch (e) {}
+                        return dateStr;
+                    };
+                    
                     // Helper to extract receipt date from email content
                     const extractReceiptDateFromContent = (content: string): string => {
                         if (!content) return '';
@@ -5653,7 +5673,9 @@ export const App = () => {
                     exactMatchMap.forEach((rows, key) => {
                         if (rows.length > 1) {
                             const [amount, date] = key.split('|');
-                            exactDuplicates.push({ amount, date, rows, matchType: 'exact' });
+                            // Format date for display
+                            const formattedDate = formatDateForDisplay(date);
+                            exactDuplicates.push({ amount, date: formattedDate, rows, matchType: 'exact' });
                             // Add ALL rows from this duplicate group to fraud list
                             rows.forEach(rowNum => {
                                 if (!addedRowNums.has(rowNum)) {
@@ -5664,7 +5686,7 @@ export const App = () => {
                                     fraudReceiptsList.push({
                                         rowNum,
                                         amount,
-                                        date,
+                                        date: formatDateForDisplay(item.dateTime || date),
                                         storeName: item.storeName || '-',
                                         nabCode: dbNabCode
                                     });
@@ -5710,7 +5732,7 @@ export const App = () => {
                             if (isNearAmountMatch || isNearStoreMatch) {
                                 nearMatches.push({
                                     amount: `$${amount1.toFixed(2)} ~ $${amount2.toFixed(2)}`,
-                                    date: rawDate1, // Use original date for display
+                                    date: formatDateForDisplay(rawDate1),
                                     rows: [i + 1, j + 1],
                                     matchType: 'near',
                                     storeName: store1 || item1.storeName
@@ -5724,7 +5746,7 @@ export const App = () => {
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
-                                        date: rawDate1,
+                                        date: formatDateForDisplay(rawDate1),
                                         storeName: item1.storeName || '-',
                                         nabCode: dbNabCode1
                                     });
@@ -5738,7 +5760,7 @@ export const App = () => {
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
-                                        date: rawDate2,
+                                        date: formatDateForDisplay(rawDate2),
                                         storeName: item2.storeName || '-',
                                         nabCode: dbNabCode2
                                     });
