@@ -1437,7 +1437,7 @@ export const App = () => {
     // Fraud Detection State
     const [showFraudPopup, setShowFraudPopup] = useState(false);
     const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[], matchType: 'exact' | 'near', storeName?: string}>>([]);
-    const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string}>>([]);
+    const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string, uniqueId: string, matchType: string}>>([]);
     const [showFraudReceiptsModal, setShowFraudReceiptsModal] = useState(false);
     const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
 
@@ -5577,24 +5577,23 @@ export const App = () => {
 
             // For Solo Mode specific issues and rules blocking
             if (requestMode === 'solo') {
-                // FRAUD DETECTION: Check for duplicate/near-match receipts
-                const fraudReceiptsList: Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string}> = [];
-                const addedRowNums = new Set<number>(); // Track added rows to avoid duplicates in display
+                // FRAUD DETECTION: 2-Layer System
+                // Layer 1: Unique ID Match (Highest Priority - CRITICAL)
+                // Layer 2: Date + Amount Match (Warning)
+                
+                const fraudReceiptsList: Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string, uniqueId: string, matchType: string}> = [];
+                const addedRowNums = new Set<number>();
                 
                 if (result.parsedItems && result.parsedItems.length > 0) {
                     const items = result.parsedItems;
                     
-                    // Helper to normalize date for matching (converts to ISO YYYY-MM-DD format)
+                    // Helper functions (normalizeDateForMatch, formatDateForDisplay, extractReceiptDateFromContent)
                     const normalizeDateForMatch = (dateStr: string): string => {
                         if (!dateStr) return '';
-                        
-                        // Try direct parse first
                         let parsed = new Date(dateStr);
                         if (!isNaN(parsed.getTime())) {
                             return parsed.toISOString().split('T')[0];
                         }
-                        
-                        // Try parsing DD/MMM/YYYY format (e.g., "13/Mar/2026" or "13-Mar-2026")
                         const monthNames: Record<string, string> = {
                             'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
                             'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
@@ -5608,8 +5607,6 @@ export const App = () => {
                             if (year.length === 2) year = '20' + year;
                             if (month) return `${year}-${month}-${day}`;
                         }
-                        
-                        // Try parsing DD-MM-YYYY or DD/MM/YYYY format
                         const dmyMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
                         if (dmyMatch) {
                             const day = dmyMatch[1].padStart(2, '0');
@@ -5618,21 +5615,15 @@ export const App = () => {
                             if (year.length === 2) year = '20' + year;
                             return `${year}-${month}-${day}`;
                         }
-                        
                         return '';
                     };
                     
-                    // Helper to format date for display (DD MMM YYYY format)
                     const formatDateForDisplay = (dateStr: string): string => {
                         if (!dateStr) return '-';
-                        
-                        // Try direct parse first
                         let parsed = new Date(dateStr);
                         if (!isNaN(parsed.getTime())) {
                             return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
                         }
-                        
-                        // Try parsing DD/MMM/YYYY format (e.g., "13/Mar/2026")
                         const monthNames: Record<string, string> = {
                             'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
                             'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
@@ -5649,8 +5640,6 @@ export const App = () => {
                                 return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
                             }
                         }
-                        
-                        // Try parsing DD-MM-YYYY or DD/MM/YYYY format
                         try {
                             const parts = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
                             if (parts) {
@@ -5660,12 +5649,9 @@ export const App = () => {
                                 }
                             }
                         } catch (e) {}
-                        
-                        // If already in DD MMM YYYY format, return as is
                         return dateStr;
                     };
                     
-                    // Helper to extract receipt date from email content
                     const extractReceiptDateFromContent = (content: string): string => {
                         if (!content) return '';
                         const patterns = [
@@ -5683,8 +5669,10 @@ export const App = () => {
                         return '';
                     };
                     
-                    // Build map to find NAB Codes from historyData (database) - multiple keys for better matching
+                    // Build NAB Code lookup maps from historyData (database)
                     const historyNabCodeMap = new Map<string, string>(); // key: "amount|date", value: nab_code
+                    const historyUniqueIdNabMap = new Map<string, string>(); // key: uniqueId, value: nab_code
+                    
                     historyData.forEach(record => {
                         const amount = normalizeMoneyValue(String(record.amount || '0'), '0.00');
                         if (amount === '0.00') return;
@@ -5692,141 +5680,133 @@ export const App = () => {
                         const nabCode = record.nab_code || record.nabCode || '';
                         if (!nabCode || isPendingNabCodeValue(nabCode)) return;
                         
-                        // Try processed date (created_at) - normalized to ISO
+                        // Add by amount + date
                         const processedDate = normalizeDateForMatch(record.created_at);
                         if (processedDate) {
                             historyNabCodeMap.set(`${amount}|${processedDate}`, nabCode);
                         }
-                        
-                        // Try to extract receipt date from email content
                         const receiptDate = extractReceiptDateFromContent(record.full_email_content || '');
                         if (receiptDate) {
                             historyNabCodeMap.set(`${amount}|${receiptDate}`, nabCode);
                         }
+                        
+                        // Add by Unique ID from content
+                        const uidMatch = record.full_email_content?.match(/\*\*Receipt ID:\*\*\s*(.*?)(?:\n|$)/i);
+                        if (uidMatch) {
+                            const uid = uidMatch[1].trim().toLowerCase();
+                            if (uid) historyUniqueIdNabMap.set(uid, nabCode);
+                        }
                     });
                     
-                    // Check for exact matches (same amount + same date) - use normalized dates
-                    const exactMatchMap = new Map<string, number[]>();
+                    // ========== LAYER 1: UNIQUE ID MATCH (Highest Priority) ==========
+                    const uniqueIdMap = new Map<string, number[]>();
+                    items.forEach((item, idx) => {
+                        // Use uniqueId first, then receiptNum as fallback
+                        const uid = (item.uniqueId || item.receiptNum || '').trim().toLowerCase();
+                        if (uid && uid !== '-' && uid !== 'manual-entry' && !uid.startsWith('particular-')) {
+                            const existing = uniqueIdMap.get(uid) || [];
+                            existing.push(idx + 1);
+                            uniqueIdMap.set(uid, existing);
+                        }
+                    });
+                    
+                    // Collect Layer 1 duplicates (Unique ID matches)
+                    const uniqueIdDuplicates: Array<{uniqueId: string, rows: number[], matchType: string}> = [];
+                    uniqueIdMap.forEach((rows, uid) => {
+                        if (rows.length > 1) {
+                            uniqueIdDuplicates.push({ uniqueId: uid, rows, matchType: 'UNIQUE ID DUPLICATE' });
+                        }
+                    });
+                    
+                    // ========== LAYER 2: DATE + AMOUNT MATCH (Warning) ==========
+                    const dateAmountMap = new Map<string, number[]>();
                     items.forEach((item, idx) => {
                         const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
-                        const rawDate = (item.dateTime || '').trim();
-                        // Normalize input date to ISO format for matching
-                        const dateKey = normalizeDateForMatch(rawDate);
-                        if (!dateKey || amount === '0.00') return;
-                        const key = `${amount}|${dateKey}`;
-                        const existing = exactMatchMap.get(key) || [];
-                        existing.push(idx + 1);
-                        exactMatchMap.set(key, existing);
+                        const date = normalizeDateForMatch(item.dateTime || '');
+                        if (amount !== '0.00' && date) {
+                            const key = `${amount}|${date}`;
+                            const existing = dateAmountMap.get(key) || [];
+                            existing.push(idx + 1);
+                            dateAmountMap.set(key, existing);
+                        }
                     });
-
-                    // Collect ALL exact matches - ALL rows that have duplicates
-                    const exactDuplicates: Array<{amount: string, date: string, rows: number[], matchType: 'exact', storeName?: string}> = [];
-                    exactMatchMap.forEach((rows, key) => {
+                    
+                    // Collect Layer 2 duplicates (Date + Amount matches)
+                    const dateAmountDuplicates: Array<{amount: string, date: string, rows: number[], matchType: string}> = [];
+                    dateAmountMap.forEach((rows, key) => {
                         if (rows.length > 1) {
                             const [amount, date] = key.split('|');
-                            // Format date for display
-                            const formattedDate = formatDateForDisplay(date);
-                            exactDuplicates.push({ amount, date: formattedDate, rows, matchType: 'exact' });
-                            // Add ALL rows from this duplicate group to fraud list
-                            rows.forEach(rowNum => {
+                            dateAmountDuplicates.push({ amount, date, rows, matchType: 'DATE + AMOUNT' });
+                        }
+                    });
+                    
+                    // ========== PRIORITY: Check Layer 1 FIRST ==========
+                    let fraudLevel: 'critical' | 'warning' | null = null;
+                    let allFraudDuplicates: any[] = [];
+                    
+                    if (uniqueIdDuplicates.length > 0) {
+                        // Layer 1: CRITICAL - Unique ID duplicates
+                        fraudLevel = 'critical';
+                        allFraudDuplicates = uniqueIdDuplicates;
+                        
+                        // Build fraud receipts list for Layer 1
+                        uniqueIdDuplicates.forEach(dup => {
+                            dup.rows.forEach(rowNum => {
                                 if (!addedRowNums.has(rowNum)) {
                                     const item = items[rowNum - 1];
-                                    // Look up NAB Code from database (historyData)
-                                    const lookupKey = `${amount}|${date}`;
-                                    const dbNabCode = historyNabCodeMap.get(lookupKey) || '-';
+                                    const uid = (item.uniqueId || item.receiptNum || '').trim();
+                                    // Look up NAB code by Unique ID first, then by amount+date
+                                    let dbNabCode = historyUniqueIdNabMap.get(uid.toLowerCase()) || '-';
+                                    if (dbNabCode === '-') {
+                                        const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
+                                        const date = normalizeDateForMatch(item.dateTime || '');
+                                        dbNabCode = historyNabCodeMap.get(`${amount}|${date}`) || '-';
+                                    }
                                     fraudReceiptsList.push({
                                         rowNum,
-                                        amount,
-                                        date: formatDateForDisplay(item.dateTime || date),
+                                        amount: item.receiptTotal || item.amount || '-',
+                                        date: formatDateForDisplay(item.dateTime || ''),
                                         storeName: item.storeName || '-',
-                                        nabCode: dbNabCode
+                                        nabCode: dbNabCode,
+                                        uniqueId: uid,
+                                        matchType: 'UNIQUE ID DUPLICATE'
                                     });
                                     addedRowNums.add(rowNum);
                                 }
                             });
-                        }
-                    });
-
-                    // Check for near matches (same date + amount within $5 OR same store + same date)
-                    const nearMatches: Array<{amount: string, date: string, rows: number[], matchType: 'near', storeName?: string}> = [];
-                    
-                    for (let i = 0; i < items.length; i++) {
-                        const item1 = items[i];
-                        const amount1 = parseFloat(normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00'));
-                        const rawDate1 = (item1.dateTime || '').trim();
-                        const normDate1 = normalizeDateForMatch(rawDate1);
-                        const store1 = (item1.storeName || '').trim().toLowerCase();
+                        });
+                    } else if (dateAmountDuplicates.length > 0) {
+                        // Layer 2: WARNING - Date + Amount matches
+                        fraudLevel = 'warning';
+                        allFraudDuplicates = dateAmountDuplicates;
                         
-                        if (!normDate1 || amount1 <= 0) continue;
-
-                        for (let j = i + 1; j < items.length; j++) {
-                            const item2 = items[j];
-                            const amount2 = parseFloat(normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00'));
-                            const rawDate2 = (item2.dateTime || '').trim();
-                            const normDate2 = normalizeDateForMatch(rawDate2);
-                            const store2 = (item2.storeName || '').trim().toLowerCase();
-
-                            if (!normDate2 || amount2 <= 0) continue;
-
-                            // Skip if already in exact match
-                            const bothInExact = exactDuplicates.some(d => 
-                                d.rows.includes(i + 1) && d.rows.includes(j + 1)
-                            );
-                            if (bothInExact) continue;
-
-                            // Near match criteria:
-                            // 1. Same date + amount within $5
-                            const isNearAmountMatch = normDate1 === normDate2 && Math.abs(amount1 - amount2) <= 5;
-                            // 2. Same store + same date
-                            const isNearStoreMatch = store1 && store1 !== '-' && store1 === store2 && normDate1 === normDate2;
-
-                            if (isNearAmountMatch || isNearStoreMatch) {
-                                nearMatches.push({
-                                    amount: `$${amount1.toFixed(2)} ~ $${amount2.toFixed(2)}`,
-                                    date: formatDateForDisplay(rawDate1),
-                                    rows: [i + 1, j + 1],
-                                    matchType: 'near',
-                                    storeName: store1 || item1.storeName
-                                });
-                                // Add near match rows to fraud list
-                                if (!addedRowNums.has(i + 1)) {
-                                    // Look up NAB Code from database (historyData)
-                                    const normAmount1 = normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00');
-                                    const lookupKey1 = `${normAmount1}|${normDate1}`;
-                                    const dbNabCode1 = historyNabCodeMap.get(lookupKey1) || '-';
+                        // Build fraud receipts list for Layer 2
+                        dateAmountDuplicates.forEach(dup => {
+                            dup.rows.forEach(rowNum => {
+                                if (!addedRowNums.has(rowNum)) {
+                                    const item = items[rowNum - 1];
+                                    const uid = (item.uniqueId || item.receiptNum || '').trim();
+                                    const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
+                                    const date = normalizeDateForMatch(item.dateTime || '');
+                                    const dbNabCode = historyNabCodeMap.get(`${amount}|${date}`) || '-';
                                     fraudReceiptsList.push({
-                                        rowNum: i + 1,
-                                        amount: `$${amount1.toFixed(2)}`,
-                                        date: formatDateForDisplay(rawDate1),
-                                        storeName: item1.storeName || '-',
-                                        nabCode: dbNabCode1
+                                        rowNum,
+                                        amount: item.receiptTotal || item.amount || '-',
+                                        date: formatDateForDisplay(item.dateTime || ''),
+                                        storeName: item.storeName || '-',
+                                        nabCode: dbNabCode,
+                                        uniqueId: uid,
+                                        matchType: 'DATE + AMOUNT'
                                     });
-                                    addedRowNums.add(i + 1);
+                                    addedRowNums.add(rowNum);
                                 }
-                                if (!addedRowNums.has(j + 1)) {
-                                    // Look up NAB Code from database (historyData)
-                                    const normAmount2 = normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00');
-                                    const lookupKey2 = `${normAmount2}|${normDate2}`;
-                                    const dbNabCode2 = historyNabCodeMap.get(lookupKey2) || '-';
-                                    fraudReceiptsList.push({
-                                        rowNum: j + 1,
-                                        amount: `$${amount2.toFixed(2)}`,
-                                        date: formatDateForDisplay(rawDate2),
-                                        storeName: item2.storeName || '-',
-                                        nabCode: dbNabCode2
-                                    });
-                                    addedRowNums.add(j + 1);
-                                }
-                            }
-                        }
+                            });
+                        });
                     }
-
-                    // Combine exact + near matches
-                    const allDuplicates = [...exactDuplicates, ...nearMatches];
                     
-                    // If fraud duplicates found, show popup and pause
-                    if (allDuplicates.length > 0) {
-                        setFraudDuplicates(allDuplicates);
+                    // If fraud detected, show popup
+                    if (allFraudDuplicates.length > 0) {
+                        setFraudDuplicates(allFraudDuplicates);
                         setFraudReceiptRows(fraudReceiptsList);
                         setPendingProcessResult(result);
                         setShowFraudPopup(true);
@@ -8502,12 +8482,18 @@ export const App = () => {
                     {/* Fraud Detection Popup */}
                     {showFraudPopup && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="bg-[#1c1e24] w-full max-w-lg rounded-[28px] border border-red-500/50 shadow-2xl overflow-hidden">
-                                <div className="px-6 py-5 border-b border-white/10 bg-red-500/20 flex items-center gap-3">
-                                    <AlertCircle className="text-red-400" size={24} />
+                            <div className={`bg-[#1c1e24] w-full max-w-lg rounded-[28px] border shadow-2xl overflow-hidden ${fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'border-red-500/50' : 'border-orange-500/50'}`}>
+                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'bg-red-500/20' : 'bg-orange-500/20'}`}>
+                                    <AlertCircle className={fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'text-red-400' : 'text-orange-400'} size={24} />
                                     <div>
-                                        <h3 className="text-white font-bold text-lg">⚠️ FRAUD DETECTION</h3>
-                                        <p className="text-xs text-red-200/90">Possible duplicate receipt detected!</p>
+                                        <h3 className="text-white font-bold text-lg">
+                                            {fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? '🔴 CRITICAL FRAUD ALERT' : '🟠 FRAUD WARNING'}
+                                        </h3>
+                                        <p className="text-xs text-red-200/90">
+                                            {fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' 
+                                                ? 'Unique ID duplicates detected - Same receipt scanned multiple times!' 
+                                                : 'Same date + amount detected - Possible duplicate submission!'}
+                                        </p>
                                     </div>
                                 </div>
 
@@ -8517,21 +8503,26 @@ export const App = () => {
                                     </p>
                                     
                                     {fraudDuplicates.slice(0, 3).map((dup, idx) => (
-                                        <div key={idx} className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
-                                            <p className="text-white font-semibold">
-                                                Amount: <span className="text-red-400">${dup.amount}</span>
-                                                <span className="text-xs ml-2 px-2 py-0.5 bg-red-500/30 rounded-full">{dup.matchType === 'exact' ? 'EXACT' : 'NEAR'}</span>
-                                            </p>
-                                            <p className="text-white font-semibold">
-                                                Date: <span className="text-red-400">{dup.date}</span>
-                                            </p>
-                                            {dup.storeName && dup.storeName !== '-' && (
+                                        <div key={idx} className={`rounded-xl border p-4 ${dup.matchType === 'UNIQUE ID DUPLICATE' ? 'border-red-500/30 bg-red-500/10' : 'border-orange-500/30 bg-orange-500/10'}`}>
+                                            {dup.matchType === 'UNIQUE ID DUPLICATE' ? (
                                                 <p className="text-white font-semibold">
-                                                    Store: <span className="text-red-400">{dup.storeName}</span>
+                                                    Unique ID: <span className="text-red-400 font-mono">{dup.uniqueId}</span>
+                                                </p>
+                                            ) : (
+                                                <p className="text-white font-semibold">
+                                                    Amount: <span className="text-orange-400">${dup.amount}</span>
+                                                </p>
+                                            )}
+                                            {dup.date && (
+                                                <p className="text-white font-semibold">
+                                                    Date: <span className="text-orange-400">{dup.date}</span>
                                                 </p>
                                             )}
                                             <p className="text-slate-300 text-sm mt-2">
                                                 Rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
+                                            </p>
+                                            <p className="text-xs mt-1 px-2 py-0.5 rounded-full inline-block bg-slate-600 text-white">
+                                                {dup.matchType}
                                             </p>
                                         </div>
                                     ))}
@@ -8542,18 +8533,28 @@ export const App = () => {
                                         </p>
                                     )}
 
-                                    <button
-                                        onClick={() => setShowFraudReceiptsModal(true)}
-                                        className="w-full mt-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
-                                    >
-                                        📋 View All ({fraudReceiptRows.length}) Fraud Receipts
-                                    </button>
+                                    {(() => {
+                                        const firstDup = fraudDuplicates[0];
+                                        const isUniqueIdDuplicate = firstDup?.matchType === 'UNIQUE ID DUPLICATE';
+                                        return (
+                                            <>
+                                                <button
+                                                    onClick={() => setShowFraudReceiptsModal(true)}
+                                                    className="w-full mt-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
+                                                >
+                                                    📋 View All ({fraudReceiptRows.length}) Fraud Receipts
+                                                </button>
 
-                                    <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                                        <p className="text-xs text-amber-200">
-                                            ⚠️ This could be a fraudulent duplicate submission. Please verify before proceeding.
-                                        </p>
-                                    </div>
+                                                <div className={`mt-4 p-3 border rounded-lg ${isUniqueIdDuplicate ? 'bg-red-500/10 border-red-500/30' : 'bg-orange-500/10 border-orange-500/30'}`}>
+                                                    <p className="text-xs text-amber-200">
+                                                        ⚠️ {isUniqueIdDuplicate 
+                                                            ? 'CRITICAL: Same receipt appears multiple times. This is likely fraud.' 
+                                                            : 'WARNING: Same amount on same date. Please verify before proceeding.'}
+                                                    </p>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
@@ -8565,7 +8566,7 @@ export const App = () => {
                                     </button>
                                     <button
                                         onClick={handleFraudProceedAnyway}
-                                        className="px-5 py-2.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-500 transition-colors"
+                                        className="px-5 py-2.5 rounded-lg text-white font-semibold hover:opacity-90 transition-colors bg-orange-600"
                                     >
                                         I Understand, Proceed Anyway
                                     </button>
@@ -8596,20 +8597,28 @@ export const App = () => {
                                         <thead>
                                             <tr className="text-slate-400 border-b border-white/10">
                                                 <th className="text-left py-2 px-3">Row</th>
+                                                <th className="text-left py-2 px-3">Unique ID</th>
                                                 <th className="text-left py-2 px-3">Amount</th>
                                                 <th className="text-left py-2 px-3">Date</th>
                                                 <th className="text-left py-2 px-3">Store</th>
                                                 <th className="text-left py-2 px-3">NAB Code</th>
+                                                <th className="text-left py-2 px-3">Match Type</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {fraudReceiptRows.map((row, idx) => (
                                                 <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
                                                     <td className="py-2 px-3 text-white font-bold">{row.rowNum}</td>
+                                                    <td className="py-2 px-3 text-slate-300 font-mono text-xs">{row.uniqueId || '-'}</td>
                                                     <td className="py-2 px-3 text-red-400 font-semibold">{row.amount}</td>
                                                     <td className="py-2 px-3 text-red-400">{row.date}</td>
                                                     <td className="py-2 px-3 text-slate-300">{row.storeName}</td>
                                                     <td className="py-2 px-3 text-amber-400 font-mono">{row.nabCode}</td>
+                                                    <td className="py-2 px-3">
+                                                        <span className={`text-xs px-2 py-1 rounded-full ${row.matchType === 'UNIQUE ID DUPLICATE' ? 'bg-red-500/30 text-red-300' : 'bg-orange-500/30 text-orange-300'}`}>
+                                                            {row.matchType}
+                                                        </span>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
