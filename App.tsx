@@ -1487,6 +1487,7 @@ export const App = () => {
     const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string, uniqueId: string, matchType: string}>>([]);
     const [showFraudReceiptsModal, setShowFraudReceiptsModal] = useState(false);
     const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
+    const fraudPopupSignalKeyRef = useRef('');
 
     // Processing status state
     const [ocrStatus, setOcrStatus] = useState<string>('');
@@ -3637,6 +3638,68 @@ export const App = () => {
         return { signal: 'green', redMatches: [], yellowMatches: [] };
     }, [fraudInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
 
+    const fraudPopupPayload = useMemo(() => {
+        if (requestMode !== 'solo') {
+            return {
+                signalKey: 'none',
+                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: 'exact' | 'near'; storeName?: string }>,
+                rows: [] as Array<{ rowNum: number; amount: string; date: string; storeName: string; nabCode: string; uniqueId: string; matchType: string }>
+            };
+        }
+
+        const signal = duplicateCheckResult.signal;
+        if (!['red', 'orange', 'yellow', 'amber'].includes(signal)) {
+            return {
+                signalKey: 'none',
+                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: 'exact' | 'near'; storeName?: string }>,
+                rows: [] as Array<{ rowNum: number; amount: string; date: string; storeName: string; nabCode: string; uniqueId: string; matchType: string }>
+            };
+        }
+
+        const evidence = signal === 'red'
+            ? duplicateCheckResult.redMatches
+            : duplicateCheckResult.yellowMatches;
+
+        const duplicates = evidence.map((match, idx) => ({
+            amount: match.txTotalAmount || match.historyTotalAmount || '0.00',
+            date: match.txDateTime || match.historyDateTime || '-',
+            rows: [idx + 1],
+            matchType: signal === 'red' ? 'exact' as const : 'near' as const,
+            storeName: match.txStoreName || match.historyStoreName || '-'
+        }));
+
+        const rows = evidence.map((match, idx) => ({
+            rowNum: idx + 1,
+            amount: `$${match.txTotalAmount || match.historyTotalAmount || '0.00'}`,
+            date: match.txDateTime || match.historyDateTime || '-',
+            storeName: match.txStoreName || match.historyStoreName || '-',
+            nabCode: match.historyNabCode || '-',
+            uniqueId: match.txReference || match.historyReference || '-',
+            matchType: signal === 'red' ? 'UNIQUE ID DUPLICATE' : 'DATE + AMOUNT'
+        }));
+
+        const firstRef = evidence[0]?.historyNabCode || evidence[0]?.txReference || '-';
+        return {
+            signalKey: `${signal}|${evidence.length}|${firstRef}`,
+            duplicates,
+            rows
+        };
+    }, [duplicateCheckResult, requestMode]);
+
+    useEffect(() => {
+        if (requestMode !== 'solo') return;
+        if (processingState !== ProcessingState.COMPLETE) return;
+        if (showSaveModal || showFraudPopup) return;
+        if (!fraudPopupPayload.rows.length) return;
+        if (fraudPopupSignalKeyRef.current === fraudPopupPayload.signalKey) return;
+
+        fraudPopupSignalKeyRef.current = fraudPopupPayload.signalKey;
+        setPendingProcessResult(null);
+        setFraudDuplicates(fraudPopupPayload.duplicates);
+        setFraudReceiptRows(fraudPopupPayload.rows);
+        setShowFraudPopup(true);
+    }, [requestMode, processingState, showSaveModal, showFraudPopup, fraudPopupPayload]);
+
     const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
     const hasFraudDuplicate = ['red', 'orange', 'yellow', 'amber'].includes(duplicateCheckResult.signal) && requestMode === 'solo';
     const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode === 'solo';
@@ -5577,6 +5640,7 @@ export const App = () => {
         setShowApprovedClaimantModal(false);
         setApprovedClaimantEmailContent('');
         setApprovedClaimantCopied(false);
+        fraudPopupSignalKeyRef.current = '';
 
         try {
             setOcrStatus('Processing...');
@@ -8520,16 +8584,16 @@ export const App = () => {
                     {/* Fraud Detection Popup */}
                     {showFraudPopup && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className={`bg-[#1c1e24] w-full max-w-lg rounded-[28px] border shadow-2xl overflow-hidden ${fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'border-red-500/50' : 'border-orange-500/50'}`}>
-                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'bg-red-500/20' : 'bg-orange-500/20'}`}>
-                                    <AlertCircle className={fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? 'text-red-400' : 'text-orange-400'} size={24} />
+                            <div className={`bg-[#1c1e24] w-full max-w-lg rounded-[28px] border shadow-2xl overflow-hidden ${(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? 'border-red-500/50' : 'border-orange-500/50'}`}>
+                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? 'bg-red-500/20' : 'bg-orange-500/20'}`}>
+                                    <AlertCircle className={(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? 'text-red-400' : 'text-orange-400'} size={24} />
                                     <div>
                                         <h3 className="text-white font-bold text-lg">
-                                            {fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' ? '🔴 CRITICAL FRAUD ALERT' : '🟠 FRAUD WARNING'}
+                                            {(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? '🔴 CRITICAL FRAUD ALERT' : '🟠 FRAUD WARNING'}
                                         </h3>
                                         <p className="text-xs text-red-200/90">
-                                            {fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' 
-                                                ? 'Unique ID duplicates detected - Same receipt scanned multiple times!' 
+                                            {(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') 
+                                                ? 'Exact fraud pattern detected from history. This receipt appears already processed.' 
                                                 : 'Same date + amount detected - Possible duplicate submission!'}
                                         </p>
                                     </div>
@@ -8541,10 +8605,10 @@ export const App = () => {
                                     </p>
                                     
                                     {fraudDuplicates.slice(0, 3).map((dup, idx) => (
-                                        <div key={idx} className={`rounded-xl border p-4 ${dup.matchType === 'UNIQUE ID DUPLICATE' ? 'border-red-500/30 bg-red-500/10' : 'border-orange-500/30 bg-orange-500/10'}`}>
-                                            {dup.matchType === 'UNIQUE ID DUPLICATE' ? (
+                                        <div key={idx} className={`rounded-xl border p-4 ${(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? 'border-red-500/30 bg-red-500/10' : 'border-orange-500/30 bg-orange-500/10'}`}>
+                                            {(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? (
                                                 <p className="text-white font-semibold">
-                                                    Unique ID: <span className="text-red-400 font-mono">{dup.uniqueId}</span>
+                                                    Store: <span className="text-red-400 font-mono">{dup.storeName || '-'}</span>
                                                 </p>
                                             ) : (
                                                 <p className="text-white font-semibold">
@@ -8573,7 +8637,7 @@ export const App = () => {
 
                                     {(() => {
                                         const firstDup = fraudDuplicates[0];
-                                        const isUniqueIdDuplicate = firstDup?.matchType === 'UNIQUE ID DUPLICATE';
+                                        const isUniqueIdDuplicate = firstDup?.matchType === 'UNIQUE ID DUPLICATE' || firstDup?.matchType === 'exact';
                                         return (
                                             <>
                                                 <button
@@ -8586,7 +8650,7 @@ export const App = () => {
                                                 <div className={`mt-4 p-3 border rounded-lg ${isUniqueIdDuplicate ? 'bg-red-500/10 border-red-500/30' : 'bg-orange-500/10 border-orange-500/30'}`}>
                                                     <p className="text-xs text-amber-200">
                                                         ⚠️ {isUniqueIdDuplicate 
-                                                            ? 'CRITICAL: Same receipt appears multiple times. This is likely fraud.' 
+                                                            ? 'CRITICAL: This appears to match an already processed receipt. Possible fraud duplicate.' 
                                                             : 'WARNING: Same amount on same date. Please verify before proceeding.'}
                                                     </p>
                                                 </div>
@@ -8754,3 +8818,4 @@ export const App = () => {
         </div>
     );
 };
+
