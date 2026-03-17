@@ -36,3 +36,5 @@ dist-ssr
 
 # Ignore nul file just in case it is picked up by Git
 nul
+
+.vercel

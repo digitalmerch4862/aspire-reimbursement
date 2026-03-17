@@ -97,7 +97,6 @@ const levenshteinDistance = (a: string, b: string): number => {
                 dp[i - 1][j] + 1,
                 dp[i][j - 1] + 1,
                 dp[i - 1][j - 1] + cost
-            );
         }
     }
 
@@ -495,7 +494,7 @@ interface RulePendingAction {
     nextRule?: RuleConfig;
 }
 
-type DuplicateTrafficLight = 'red' | 'orange' | 'yellow' | 'amber' | 'green';
+type DuplicateTrafficLight = 'red' | 'yellow' | 'green';
 
 interface DuplicateMatchEvidence {
     txStaffName: string;
@@ -569,8 +568,8 @@ const DELETE_RULE_CONFIRMATION_PHRASE = 'yes i have decided to delete this rule 
 const getDefaultBuiltInRules = (): RuleConfig[] => {
     const now = new Date().toISOString();
     return [
-        { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using receipt amount + purchase date (per receipt line).', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using receipt amount when purchase date is mismatch or missing.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using staff name + store name + purchase date + amount.', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using staff name + store name + amount (date mismatch or missing).', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
@@ -1095,7 +1094,6 @@ const updateGroupTableColumnValues = (
         updatedContent = updatedContent.replace(
             /\*\*TOTAL AMOUNT:\s*\$?[0-9,.]+\*\*/i,
             `**TOTAL AMOUNT: $${total.toFixed(2)}**`
-        );
     }
 
     return updatedContent;
@@ -1434,11 +1432,6 @@ export const App = () => {
     const bypassManualAuditRef = useRef(false);
     const specialInstructionSyncAttemptedRef = useRef(false);
 
-    // Fraud Detection State
-    const [showFraudPopup, setShowFraudPopup] = useState(false);
-    const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[]}>>([]);
-    const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
-
     // Processing status state
     const [ocrStatus, setOcrStatus] = useState<string>('');
 
@@ -1528,7 +1521,6 @@ export const App = () => {
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
             item.location?.toLowerCase().includes(query)
-        );
     }, [groupPendingThisWeek, pendingSearchQuery]);
 
     const filteredPendingPreviousWeeks = useMemo(() => {
@@ -1538,7 +1530,6 @@ export const App = () => {
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
             item.location?.toLowerCase().includes(query)
-        );
     }, [groupPendingPreviousWeeks, pendingSearchQuery]);
 
     const [pendingGroupSearchQuery, setPendingGroupSearchQuery] = useState('');
@@ -1604,32 +1595,14 @@ export const App = () => {
 
         setSpecialInstructionLogs(loadSpecialInstructionLogs());
 
-        // Load Employee Data (try Supabase first, then localStorage, then default)
-        const loadEmployeeData = async () => {
-            if (hasSupabaseEnv) {
-                try {
-                    const supabaseEmployees = await fetchEmployeesFromSupabase();
-                    if (supabaseEmployees) {
-                        localStorage.setItem('aspire_employee_list', supabaseEmployees);
-                        setEmployeeRawText(supabaseEmployees);
-                        setEmployeeList(parseEmployeeData(supabaseEmployees));
-                        return;
-                    }
-                } catch (e) {
-                    console.warn('Failed to load from Supabase, falling back to localStorage');
-                }
-            }
-            
-            const storedEmployees = localStorage.getItem('aspire_employee_list');
-            if (storedEmployees) {
-                setEmployeeRawText(storedEmployees);
-                setEmployeeList(parseEmployeeData(storedEmployees));
-            } else {
-                setEmployeeRawText(DEFAULT_EMPLOYEE_DATA);
-                setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
-            }
-        };
-        loadEmployeeData();
+        // Load Employee Data
+        const storedEmployees = localStorage.getItem('aspire_employee_list');
+        if (storedEmployees) {
+            setEmployeeRawText(storedEmployees);
+            setEmployeeList(parseEmployeeData(storedEmployees));
+        } else {
+            setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
+        }
 
         const storedPendingEmployees = localStorage.getItem(EMPLOYEE_PENDING_DEACTIVATION_KEY);
         if (storedPendingEmployees) {
@@ -2017,24 +1990,11 @@ export const App = () => {
         }, 3000);
     };
 
-    const handleSaveEmployeeList = async () => {
+    const handleSaveEmployeeList = () => {
         localStorage.setItem('aspire_employee_list', employeeRawText);
         setEmployeeList(parseEmployeeData(employeeRawText));
-        
-        if (hasSupabaseEnv) {
-            const result = await saveEmployeesToSupabase(employeeRawText);
-            if (result.success) {
-                setSaveEmployeeStatus('saved');
-                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
-            } else {
-                setSaveEmployeeStatus('saved');
-                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
-                showWarningToast(`Saved locally. Supabase sync failed: ${result.error}`);
-            }
-        } else {
-            setSaveEmployeeStatus('saved');
-            setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
-        }
+        setSaveEmployeeStatus('saved');
+        setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
     };
 
     const persistPendingDeactivationEmployees = (records: Employee[]) => {
@@ -2070,11 +2030,6 @@ export const App = () => {
             setEmployeeRawText(raw);
             setEmployeeList(parsedEmployees);
             localStorage.setItem('aspire_employee_list', raw);
-            
-            if (hasSupabaseEnv) {
-                await saveEmployeesToSupabase(raw);
-            }
-            
             persistPendingDeactivationEmployees(pendingApproval);
             setCsvImportMessage(`Imported ${parsedEmployees.length} active records. ${pendingApproval.length} account(s) moved to approval queue.`);
         } catch (error) {
@@ -2087,7 +2042,7 @@ export const App = () => {
         }
     };
 
-    const handleKeepPendingEmployee = async (account: string) => {
+    const handleKeepPendingEmployee = (account: string) => {
         const target = pendingDeactivationEmployees.find((employee) => employee.account === account);
         if (!target) return;
 
@@ -2098,10 +2053,6 @@ export const App = () => {
         const nextRaw = serializeEmployeeData(nextActive);
         setEmployeeRawText(nextRaw);
         localStorage.setItem('aspire_employee_list', nextRaw);
-
-        if (hasSupabaseEnv) {
-            await saveEmployeesToSupabase(nextRaw);
-        }
 
         const nextPending = pendingDeactivationEmployees.filter((employee) => employee.account !== account);
         persistPendingDeactivationEmployees(nextPending);
@@ -2725,7 +2676,6 @@ export const App = () => {
             updatedContent = updatedContent.replace(
                 /(\|\s*1\s*\|\s*MANUAL-ENTRY\s*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|[^\n]*\n?)/i,
                 `$1${formattedAmount}$2${formattedAmount}$3`
-            );
             updatedContent = updatedContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1${formattedAmount}$2`);
         }
 
@@ -2743,73 +2693,6 @@ export const App = () => {
             setEditableContent(updated);
         } else {
             setResults((prev) => (prev ? { ...prev, phase4: updated } : prev));
-        }
-    };
-
-    const fetchEmployeesFromSupabase = async () => {
-        if (!hasSupabaseEnv) return null;
-        try {
-            const { data, error } = await supabase
-                .from('employees')
-                .select('*')
-                .order('surname', { ascending: true });
-            if (error) {
-                console.warn('Failed to fetch employees from Supabase:', error.message || error);
-                return null;
-            }
-            if (data && data.length > 0) {
-                const csvContent = data.map(emp => 
-                    `${String(emp.first_name || '')}\t${String(emp.surname || '')}\t${String(emp.surname || '')}, ${String(emp.first_name || '')}\t${String(emp.bsb || '')}\t${String(emp.account || '')}`
-                ).join('\n');
-                return `First Names\tSurname\tConcatenate\tBSB\tAccount\n${csvContent}`;
-            }
-            return null;
-        } catch (e) {
-            console.warn('Error fetching employees from Supabase:', e);
-            return null;
-        }
-    };
-
-    const saveEmployeesToSupabase = async (employeeText: string) => {
-        if (!hasSupabaseEnv) return { success: false, error: 'No Supabase env' };
-        try {
-            const lines = employeeText.split('\n').filter(line => line.trim());
-            if (lines.length <= 1) return { success: false, error: 'No employee data' };
-            
-            const headerLine = lines[0].toLowerCase();
-            const employeeRows = lines.slice(1);
-            
-            const employees = employeeRows.map(line => {
-                const parts = line.split('\t').map(p => p.trim());
-                if (parts.length < 2) return null;
-                const [firstName, surname, concatenate, bsb, account] = parts;
-                return {
-                    first_name: firstName || '',
-                    surname: surname || '',
-                    concatenate: concatenate || `${surname}, ${firstName}`,
-                    bsb: bsb || null,
-                    account: account || null
-                };
-            }).filter(Boolean);
-
-            const { error: deleteError } = await supabase.from('employees').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-            if (deleteError) {
-                console.warn('Failed to clear employees:', deleteError);
-            }
-
-            const { data, error } = await supabase
-                .from('employees')
-                .upsert(employees, { onConflict: 'surname,first_name' })
-                .select();
-            
-            if (error) {
-                console.error('Failed to save employees to Supabase:', error);
-                return { success: false, error: error.message };
-            }
-            return { success: true, count: employees.length };
-        } catch (e) {
-            console.error('Error saving employees to Supabase:', e);
-            return { success: false, error: String(e) };
         }
     };
 
@@ -3170,53 +3053,7 @@ export const App = () => {
             (row.youngPersonName || '').toLowerCase().includes(lowerSearch) ||
             (row.amount || '').includes(lowerSearch) ||
             (row.nabCode || '').toLowerCase().includes(lowerSearch)
-        );
     }, [databaseRows, searchTerm]);
-
-    const extractReceiptDetailRows = (rawText: string): string[][] => {
-        const lines = String(rawText || '').split('\n');
-        const rows: string[][] = [];
-        let currentRow = '';
-
-        const flushCurrentRow = () => {
-            if (!currentRow.trim()) return;
-            const parts = currentRow
-                .replace(/^\|/, '')
-                .replace(/\|$/, '')
-                .split('|')
-                .map((part) => part.trim())
-                .filter(Boolean);
-            if (parts.length >= 2) rows.push(parts);
-            currentRow = '';
-        };
-
-        for (const rawLine of lines) {
-            const trimmed = rawLine.trim();
-            if (!trimmed) continue;
-
-            const lower = trimmed.toLowerCase();
-            if (lower.includes('receipt #') || lower.includes('unique id / fallback') || lower.includes('item amount') || lower.includes('receipt total')) continue;
-            if (/^[:\-\s|]+$/.test(trimmed)) continue;
-            if (lower.includes('grand total')) {
-                flushCurrentRow();
-                continue;
-            }
-
-            const startsReceiptRow = /^\|?\s*\d+\s*\|/.test(trimmed);
-            if (startsReceiptRow) {
-                flushCurrentRow();
-                currentRow = trimmed;
-                continue;
-            }
-
-            if (currentRow) {
-                currentRow = `${currentRow} ${trimmed}`;
-            }
-        }
-
-        flushCurrentRow();
-        return rows;
-    };
 
     const currentInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
         const formText = reimbursementFormText.trim();
@@ -3226,28 +3063,32 @@ export const App = () => {
         const allText = `${formText}\n${receiptText}`;
         const groupEntries = parseGroupPettyCashEntries(allText);
         if (requestMode === 'group' && groupEntries.length >= 2) {
-            return groupEntries.map((entry) => {
-                const amountNum = typeof entry.amount === 'number' && Number.isFinite(entry.amount) ? entry.amount : parseFloat(String(entry.amount || '0').replace(/[^0-9.-]/g, '')) || 0;
-                return {
-                    staffName: entry.staffName,
-                    amount: Number(amountNum.toFixed(2)),
-                    totalAmount: Number(amountNum.toFixed(2)),
-                    uid: '',
-                    storeName: 'group petty cash',
-                    product: 'group petty cash',
-                    rawDate: '',
-                    dateKey: '',
-                    signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
-                };
-            });
+            return groupEntries.map((entry) => ({
+                staffName: entry.staffName,
+                amount: Number(entry.amount.toFixed(2)),
+                totalAmount: Number(entry.amount.toFixed(2)),
+                uid: '',
+                storeName: 'group petty cash',
+                product: 'group petty cash',
+                rawDate: '',
+                dateKey: '',
+                signatureKey: `group|${normalizeMoneyValue(String(entry.amount), '0.00')}`
+            }));
         }
 
         const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
         const fallbackStaff = staffMatch ? staffMatch[1].trim() : 'Unknown';
+        const lines = allText.split('\n');
         const parsed: InputTransactionFingerprint[] = [];
 
-        const assembledRows = extractReceiptDetailRows(receiptText);
-        for (const parts of assembledRows) {
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if ((!trimmed.includes('|') && !trimmed.includes('\t')) || trimmed.includes('---') || trimmed.includes('Receipt #') || trimmed.includes('GRAND TOTAL') || trimmed.includes('Unique ID')) {
+                continue;
+            }
+
+
+            const parts = line.split('|').map(p => p.trim()).filter(Boolean);
             const normalized = normalizeReceiptRow(parts, '0.00', '', '');
             if (!normalized) continue;
 
@@ -3272,42 +3113,6 @@ export const App = () => {
                 dateKey,
                 signatureKey
             });
-        }
-
-        if (parsed.length === 0) {
-            const lines = allText.split('\n');
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if ((!trimmed.includes('|') && !trimmed.includes('\t')) || trimmed.includes('---') || trimmed.includes('Receipt #') || trimmed.includes('GRAND TOTAL') || trimmed.includes('Unique ID')) {
-                    continue;
-                }
-
-                const parts = line.split('|').map(p => p.trim()).filter(Boolean);
-                const normalized = normalizeReceiptRow(parts, '0.00', '', '');
-                if (!normalized) continue;
-
-                const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
-                const totalAmount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
-                const dateKey = toDateKey(normalized.dateTime || '');
-                const productKey = normalizeTextKey(normalized.product || '');
-                const signatureKey = [
-                    normalizeTextKey(normalized.storeName || ''),
-                    productKey,
-                    normalizeMoneyValue(String(totalAmount), '0.00')
-                ].join('|');
-
-                parsed.push({
-                    staffName: fallbackStaff,
-                    amount,
-                    totalAmount,
-                    uid: (normalized.uniqueId || '').trim().toLowerCase(),
-                    storeName: (normalized.storeName || '').trim(),
-                    product: (normalized.product || '').trim(),
-                    rawDate: normalized.dateTime || '',
-                    dateKey,
-                    signatureKey
-                });
-            }
         }
 
         if (parsed.length > 0) return parsed;
@@ -3441,105 +3246,60 @@ export const App = () => {
         return days > 30;
     }).length, [currentInputTransactions]);
 
-    const fraudInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
-        if (requestMode !== 'solo') return currentInputTransactions;
-
-        const formText = reimbursementFormText.trim();
-        const receiptText = receiptDetailsText.trim();
-        if (!receiptText) return [];
-
-        const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
-        const fallbackStaff = staffMatch ? staffMatch[1].trim() : 'Unknown';
-        const parsed: InputTransactionFingerprint[] = [];
-        const assembledRows = extractReceiptDetailRows(receiptText);
-
-        for (const parts of assembledRows) {
-            const normalized = normalizeReceiptRow(parts, '0.00', '', '');
-            if (!normalized) continue;
-
-            const amount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
-            const totalAmount = Number(normalizeMoneyValue(normalized.receiptTotal || normalized.itemAmount, '0.00'));
-            const dateKey = toDateKey(normalized.dateTime || '');
-            const productKey = normalizeTextKey(normalized.product || '');
-            const signatureKey = [
-                normalizeTextKey(normalized.storeName || ''),
-                productKey,
-                normalizeMoneyValue(String(totalAmount), '0.00')
-            ].join('|');
-
-            parsed.push({
-                staffName: fallbackStaff,
-                amount,
-                totalAmount,
-                uid: (normalized.uniqueId || '').trim().toLowerCase(),
-                storeName: (normalized.storeName || '').trim(),
-                product: (normalized.product || '').trim(),
-                rawDate: normalized.dateTime || '',
-                dateKey,
-                signatureKey
-            });
-        }
-
-        return parsed;
-    }, [requestMode, currentInputTransactions, reimbursementFormText, receiptDetailsText]);
-
     const duplicateCheckResult = useMemo<DuplicateCheckResult>(() => {
-        if (fraudInputTransactions.length === 0 || databaseRows.length === 0) {
+        if (currentInputTransactions.length === 0 || databaseRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
         }
 
-        const historyRows = requestMode === 'solo'
-            ? databaseRows
-            : databaseRows.filter((row: any) => {
-                const nowMs = Date.now();
-                const lookbackMs = DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-                const rawDate = row.rawDate instanceof Date ? row.rawDate : new Date(row.rawDate || row.dateProcessed || '');
-                const ts = rawDate.getTime();
-                if (Number.isNaN(ts)) return false;
-                return (nowMs - ts) <= lookbackMs;
-            });
+        const nowMs = Date.now();
+        const lookbackMs = DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+        const historyRows = databaseRows.filter((row: any) => {
+            const rawDate = row.rawDate instanceof Date ? row.rawDate : new Date(row.rawDate || row.dateProcessed || '');
+            const ts = rawDate.getTime();
+            if (Number.isNaN(ts)) return false;
+            return (nowMs - ts) <= lookbackMs;
+        });
 
         if (historyRows.length === 0) {
             return { signal: 'green', redMatches: [], yellowMatches: [] };
         }
 
         const redMatches: DuplicateMatchEvidence[] = [];
-        const orangeMatches: DuplicateMatchEvidence[] = [];
         const yellowMatches: DuplicateMatchEvidence[] = [];
-        const amberMatches: DuplicateMatchEvidence[] = [];
 
-        fraudInputTransactions.forEach((tx) => {
+        currentInputTransactions.forEach((tx) => {
+            const txStaff = normalizeNameKey(tx.staffName);
+            const txStoreKey = normalizeTextKey(tx.storeName);
+            const txProductKey = normalizeTextKey(tx.product);
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
             const txReference = normalizeReferenceKey(tx.uid);
-            const txStoreKey = normalizeTextKey(tx.storeName || '');
 
-            if (!txTotalAmount) return;
+            if (!txStoreKey || !txProductKey || !txTotalAmount) return;
 
             historyRows.forEach((row: any) => {
+                const historyStaff = normalizeNameKey(String(row.staffName || ''));
+                const historyStoreKey = normalizeTextKey(String(row.storeName || ''));
+                const historyProductKey = normalizeTextKey(String(row.product || ''));
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
-                const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
-                const historyTotalAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
+                const historyAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
+                const historyTotalAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
                 const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
                 const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
-                const historyStoreKey = normalizeTextKey(String(row.storeName || '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim());
 
+                if (!historyStaff) return;
+
+                const storeMatch = txStoreKey === historyStoreKey;
+                const dateMatch = txDateKey && historyDateKey ? txDateKey === historyDateKey : false;
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
-                const hasTxDate = Boolean(txDateKey && txDateKey !== '-');
-                const hasHistoryDate = Boolean(historyDateKey && historyDateKey !== '-');
-                const dateMatch = hasTxDate && hasHistoryDate ? txDateKey === historyDateKey : false;
 
-                const hasTxStore = Boolean(txStoreKey && txStoreKey !== '-');
-                const hasHistoryStore = Boolean(historyStoreKey && historyStoreKey !== '-');
-                const storeMatch = hasTxStore && hasHistoryStore ? txStoreKey === historyStoreKey : false;
+                // STRICT RULE FOR FRAUD: If Store AND Amount match exactly -> Highly Suspicious
+                if (!storeMatch || !totalAmountMatch) return;
 
-                const hasTxUid = Boolean(txReference);
-                const hasHistoryUid = Boolean(historyReference);
-                const uidMatch = hasTxUid && hasHistoryUid ? txReference === historyReference : false;
-
-                if (!totalAmountMatch) return;
+                const exactMatch = storeMatch && totalAmountMatch && dateMatch;
+                const nearMatch = storeMatch && totalAmountMatch && !dateMatch;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -3562,32 +3322,21 @@ export const App = () => {
                     historyProcessedAt: String(row.dateProcessed || '-')
                 };
 
-                const exactMatch = totalAmountMatch && dateMatch && storeMatch && uidMatch;
-                const strongMatch = totalAmountMatch && dateMatch && storeMatch;
-                const mediumMatch = totalAmountMatch && dateMatch;
-                const weakMatch = totalAmountMatch && uidMatch;
-
                 if (exactMatch) {
                     redMatches.push(evidence);
-                } else if (strongMatch) {
-                    orangeMatches.push(evidence);
-                } else if (mediumMatch) {
+                } else if (nearMatch) {
                     yellowMatches.push(evidence);
-                } else if (weakMatch) {
-                    amberMatches.push(evidence);
                 }
             });
         });
 
-        if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches: [...orangeMatches, ...yellowMatches, ...amberMatches] };
-        if (orangeMatches.length > 0) return { signal: 'orange', redMatches: [], yellowMatches: [...orangeMatches, ...yellowMatches, ...amberMatches] };
-        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches: [], yellowMatches: [...yellowMatches, ...amberMatches] };
-        if (amberMatches.length > 0) return { signal: 'amber', redMatches: [], yellowMatches: amberMatches };
-        return { signal: 'green', redMatches: [], yellowMatches: [] };
-    }, [fraudInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS, requestMode]);
+        if (redMatches.length > 0) return { signal: 'red', redMatches, yellowMatches };
+        if (yellowMatches.length > 0) return { signal: 'yellow', redMatches, yellowMatches };
+        return { signal: 'green', redMatches, yellowMatches };
+    }, [currentInputTransactions, databaseRows, DUPLICATE_LOOKBACK_DAYS]);
 
     const isOver300ApprovalRequired = currentInputOverallAmount >= 300 && requestMode === 'solo';
-    const hasFraudDuplicate = ['red', 'orange', 'yellow', 'amber'].includes(duplicateCheckResult.signal) && requestMode === 'solo';
+    const hasFraudDuplicate = (duplicateCheckResult.signal === 'red' || duplicateCheckResult.signal === 'yellow') && requestMode === 'solo';
     const isOver30DaysApprovalRequired = currentInputAgedCount > 0 && !hasFraudDuplicate && requestMode === 'solo';
 
 
@@ -3629,7 +3378,7 @@ export const App = () => {
             }
 
             const rowDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
-            const rowAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
+            const rowAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), '0.00');
             const rowStore = normalizeTextKey(String(row.storeName || ''));
             const rowProduct = normalizeTextKey(String(row.product || ''));
             const signatureKey = [
@@ -3683,66 +3432,32 @@ export const App = () => {
         };
 
         const items: RuleStatusItem[] = [];
-        const hasSoloReceiptFraudInput = requestMode !== 'solo' || fraudInputTransactions.length > 0;
-        const signal = duplicateCheckResult.signal;
 
         const rule1 = getRuleMeta('r1', 'Fraud Exact Match', 'critical');
         if (rule1) {
-            const redMatch = duplicateCheckResult.redMatches[0];
-            const matchFound = signal === 'red';
-            const redDetail = !hasSoloReceiptFraudInput
-                ? 'No valid Receipt Details rows found for exact fraud check.'
-                : matchFound
-                ? `⚠️ ${duplicateCheckResult.redMatches.length} EXACT fraud match(es) found (BLOCKED):\n` +
-                  `Amount: $${redMatch?.historyTotalAmount || redMatch?.txTotalAmount || '0.00'}\n` +
-                  `Date: ${redMatch?.historyDateTime || redMatch?.txDateTime || '-'}\n` +
-                  `Store: ${redMatch?.historyStoreName || redMatch?.txStoreName || '-'}\n` +
-                  `Staff: ${redMatch?.historyStaffName || redMatch?.txStaffName || '-'}\n` +
-                  `Unique ID: ${redMatch?.txReference || redMatch?.historyReference || '-'}\n` +
-                  `NAB: ${redMatch?.historyNabCode || '-'}`
-                : 'No exact fraud match found (Amount + Date + Store + UID).';
             items.push({
                 id: 'r1',
                 title: rule1.title,
-                detail: redDetail,
+                detail: duplicateCheckResult.redMatches.length > 0
+                    ? `${duplicateCheckResult.redMatches.length} exact fraud match(es): same staff + store + purchase date + amount in history.`
+                    : 'No exact fraud match found for staff + store + purchase date + amount.',
                 severity: rule1.severity,
-                status: !hasSoloReceiptFraudInput ? 'warning' : (matchFound ? 'blocked' : 'pass')
+                status: duplicateCheckResult.redMatches.length > 0 ? 'blocked' : 'pass'
             });
         }
 
-        const rule2 = getRuleMeta('r2', 'Fraud Strong/Medium/Weak Match', 'high');
+        const rule2 = getRuleMeta('r2', 'Fraud Near Match', 'high');
         if (rule2) {
-            const hasOrangeOrYellow = signal === 'orange' || signal === 'yellow';
-            const hasAmber = signal === 'amber';
-            const yellowMatch = duplicateCheckResult.yellowMatches[0];
-            
-            const levelLabel = signal === 'orange' ? 'STRONG (Amount+Date+Store)' : signal === 'yellow' ? 'MEDIUM (Amount+Date)' : signal === 'amber' ? 'WEAK (Amount+UID)' : 'None';
-            
-            const yellowDetail = !hasSoloReceiptFraudInput
-                ? 'Fraud check requires valid Receipt Details rows.'
-                : hasOrangeOrYellow
-                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} ${signal.toUpperCase()} fraud match(es) found:\n` +
-                  `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
-                  `Date: ${yellowMatch?.historyDateTime || yellowMatch?.txDateTime || '-'}\n` +
-                  `Store: ${yellowMatch?.historyStoreName || yellowMatch?.txStoreName || '-'}\n` +
-                  `Staff: ${yellowMatch?.historyStaffName || yellowMatch?.txStaffName || '-'}\n` +
-                  `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
-                  `NAB: ${yellowMatch?.historyNabCode || '-'}`
-                : hasAmber
-                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} AMBER (Weak) fraud match(es) found:\n` +
-                  `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
-                  `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
-                  `NAB: ${yellowMatch?.historyNabCode || '-'}\n` +
-                  `(No date/store match - possible different transaction)`
-                : firstHistoryMatch
-                    ? `No fraud match. Last related: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
-                    : 'No fraud pattern found in history.';
             items.push({
                 id: 'r2',
                 title: rule2.title,
-                detail: yellowDetail,
+                detail: duplicateCheckResult.yellowMatches.length > 0
+                    ? `${duplicateCheckResult.yellowMatches.length} near fraud match(es): same staff + store + amount, with purchase date mismatch/missing.`
+                    : firstHistoryMatch
+                        ? `No near fraud match. Last related processed record: ${firstHistoryMatch.dateProcessed || '-'} | NAB: ${firstHistoryMatch.nabCode || '-'}`
+                        : 'No near fraud pattern found in history.',
                 severity: rule2.severity,
-                status: !hasSoloReceiptFraudInput ? 'warning' : (hasOrangeOrYellow ? 'blocked' : hasAmber ? 'warning' : 'pass')
+                status: duplicateCheckResult.yellowMatches.length > 0 ? 'warning' : 'pass'
             });
         }
 
@@ -3850,7 +3565,7 @@ export const App = () => {
         });
 
         return items;
-    }, [currentInputTransactions, fraudInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals, requestMode]);
+    }, [currentInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals]);
 
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
@@ -4027,7 +3742,6 @@ export const App = () => {
             newContent = newContent.replace(
                 /(\|\s*1\s*\|\s*MANUAL-ENTRY\s*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|\s*)\$?[\d,]+(?:\.\d{1,2})?(\s*\|[^\n]*\n?)/i,
                 `$1$${amountVal}$2$${amountVal}$3`
-            );
             newContent = newContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1$${amountVal}$2`);
         }
 
@@ -4463,8 +4177,8 @@ export const App = () => {
         if (filteredDatabaseRows.length === 0) return;
 
         const headers = [
-            "Unique ID / Fallback", "Time Stamp", "YP Name", "Staff Name", "Type of expense",
-            "Product", "Receipt Date", "Total Amount", "Amount", "Date Processed", "Nab Code"
+            "UID", "Time Stamp", "YP Name", "Staff Name", "Type of expense",
+            "Product", "Receipt Date", "Amount", "Total Amount", "Date Processed", "Nab Code"
         ];
 
         const csvRows = [
@@ -4479,8 +4193,8 @@ export const App = () => {
                     escape(row.expenseType),
                     escape(row.product),
                     escape(row.receiptDate),
-                    escape(row.totalAmount),
                     escape(row.amount),
+                    escape(row.totalAmount),
                     escape(row.dateProcessed),
                     escape(row.nabCode)
                 ].join(',');
@@ -4872,7 +4586,6 @@ export const App = () => {
         baseContent: string,
         options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
     ) => {
-        const effectiveLookbackDays = requestMode === 'solo' ? 0 : DUPLICATE_LOOKBACK_DAYS;
         let withStatus = upsertStatusTag(baseContent, status);
         withStatus = (status === 'PENDING' && isFormHigherMismatchDetail(options?.detail))
             ? upsertClaimantRevisionSection(withStatus)
@@ -4897,7 +4610,7 @@ export const App = () => {
             signal: options.duplicateSignal,
             reason: options.reviewerReason,
             detail: options.detail,
-            lookbackDays: effectiveLookbackDays
+            lookbackDays: DUPLICATE_LOOKBACK_DAYS
         } : undefined);
 
         handleSaveToCloud(finalContent);
@@ -4973,30 +4686,30 @@ export const App = () => {
             updatedRecords = pendingApprovalStaffGroup.records
                 .filter((record: any) => selectedPendingIds.includes(record.id))
                 .map((record: any) => {
-                    let updatedContent = record.full_email_content || '';
+                let updatedContent = record.full_email_content || '';
 
-                    if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
-                        updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
-                    } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
-                        updatedContent += '\n\n<!-- STATUS: PAID -->';
-                    }
+                if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
+                    updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
+                } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
+                    updatedContent += '\n\n<!-- STATUS: PAID -->';
+                }
 
-                    if (updatedContent.match(/NAB (?:Code|Reference):/i)) {
-                        updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
-                    } else {
-                        updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
-                    }
+                if (updatedContent.match(/NAB (?:Code|Reference):/i)) {
+                    updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
+                } else {
+                    updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
+                }
 
-                    return {
-                        id: record.id,
-                        nab_code: approvedNabCode,
-                        full_email_content: updatedContent,
-                        staff_name: record.staff_name,
-                        amount: record.amount,
-                        yp_name: record.yp_name,
-                        location: record.location
-                    };
-                });
+                return {
+                    id: record.id,
+                    nab_code: approvedNabCode,
+                    full_email_content: updatedContent,
+                    staff_name: record.staff_name,
+                    amount: record.amount,
+                    yp_name: record.yp_name,
+                    location: record.location
+                };
+            });
 
             const claimantBlocks = updatedRecords
                 .map((record) => {
@@ -5007,16 +4720,13 @@ export const App = () => {
                         stripInternalAuditMeta(
                             stripJulianApprovalSection(rawContent)
                         )
-                    );
 
                     // Recompose header if it was stripped or is missing
                     if (!content.includes('Hi,') && !content.includes('I hope this message')) {
                         const staffName = record.staff_name || 'Staff Member';
                         const ypName = record.yp_name || 'Client Name';
                         const address = record.location || 'Address';
-                        const amountRaw = record.amount;
-                        const amountNum = Number(amountRaw) || 0;
-                        const amount = amountNum.toFixed(2);
+                        const amount = record.amount ? Number(record.amount).toFixed(2) : '0.00';
 
                         const header = [
                             'Hi,',
@@ -5048,7 +4758,6 @@ export const App = () => {
             if (!hasSupabaseEnv) {
                 const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
                     updatedRecords.map(record => [record.id, record])
-                );
 
                 const nextHistory = historyData.map(item => {
                     const updated = updatesById.get(item.id);
@@ -5101,7 +4810,6 @@ export const App = () => {
 
             const updatesById = new Map<any, { id: any; nab_code: string | null; full_email_content: string }>(
                 appliedRecords.map(record => [record.id, record])
-            );
             setHistoryData(prev => prev.map(item => {
                 const updated = updatesById.get(item.id);
                 if (!updated) return item;
@@ -5126,7 +4834,6 @@ export const App = () => {
             if (isNetworkFetchError(error) && updatedRecords.length > 0) {
                 const updatesById = new Map<any, { id: any; nab_code: string; full_email_content: string }>(
                     updatedRecords.map(record => [record.id, record])
-                );
 
                 setHistoryData(prev => prev.map(item => {
                     const updated = updatesById.get(item.id);
@@ -5177,7 +4884,6 @@ export const App = () => {
 
             const updatesById = new Map<any, { id: any; full_email_content: string }>(
                 updates.map(update => [update.id, update])
-            );
 
             setHistoryData(prev => prev.map(item => {
                 const updated = updatesById.get(item.id);
@@ -5200,16 +4906,6 @@ export const App = () => {
         const allHaveRef = parsedTransactions.every(tx => isValidNabReference(tx.currentNabRef));
         setSaveStatus('idle');
         setErrorMessage(null);
-
-        if (loadingHistory) {
-            showWarningToast('Please wait for history to load before saving. Click refresh if needed.');
-            return;
-        }
-
-        if (historyData.length === 0) {
-            showWarningToast('No history data available. Please refresh and try again.');
-            return;
-        }
 
         if (requestMode === 'solo') {
             const combinedText = `${reimbursementFormText}\n${receiptDetailsText}`;
@@ -5280,34 +4976,6 @@ export const App = () => {
             return;
         }
 
-        // CHECK IF NAB CODE EXISTS IN HISTORY - BLOCK SAVE IF FOUND
-        if (hasTransactions && allHaveRef) {
-            const existingNabCodes = new Map<string, { staffName: string; amount: string; date: string }>();
-            parsedTransactions.forEach(tx => {
-                const nabRef = tx.currentNabRef?.trim().toUpperCase();
-                if (!nabRef) return;
-                databaseRows.forEach((row: any) => {
-                    const historyNab = String(row.nabCode || row.nab_code || row.uid || '').trim().toUpperCase();
-                    if (historyNab === nabRef) {
-                        existingNabCodes.set(nabRef, {
-                            staffName: row.staffName || row.staff_name || '-',
-                            amount: row.amount || row.totalAmount || '-',
-                            date: row.receiptDate || row.dateProcessed || row.receiptDateTime || '-'
-                        });
-                    }
-                });
-            });
-            if (existingNabCodes.size > 0) {
-                const firstEntry = Array.from(existingNabCodes.entries())[0];
-                setSaveModalDecision({
-                    mode: 'red',
-                    detail: `NAB Code "${firstEntry[0]}" already exists in system for ${firstEntry[1].staffName} on ${firstEntry[1].date} (Amount: $${firstEntry[1].amount}). Please use a different NAB code.`
-                });
-                setShowSaveModal(true);
-                return;
-            }
-        }
-
         // IF NAB CODE IS PRESENT: Save immediately without questions (No validation warnings/modals)
         if (hasTransactions && allHaveRef) {
             confirmSave('PAID', {
@@ -5317,39 +4985,24 @@ export const App = () => {
             return;
         }
 
-        if (['red', 'orange', 'yellow', 'amber'].includes(duplicateCheckResult.signal)) {
-            const signal = duplicateCheckResult.signal;
-            const matches = duplicateCheckResult.yellowMatches;
-            const topMatch = matches[0];
-            
-            const staffNamePreview = topMatch?.historyStaffName || topMatch?.txStaffName || '-';
-            const datePreview = topMatch?.historyDateTime || topMatch?.historyProcessedAt || topMatch?.txDateTime || '-';
-            const amountPreview = topMatch?.historyTotalAmount || topMatch?.txTotalAmount || '0.00';
-            const uniqueIdPreview = topMatch?.txReference || topMatch?.historyReference || '-';
-            const nabCodePreview = topMatch?.historyNabCode || '-';
-            const storePreview = topMatch?.historyStoreName || topMatch?.txStoreName || '-';
-            
-            const signalLabels: Record<string, string> = {
-                'red': 'EXACT (Amount + Date + Store + UID)',
-                'orange': 'STRONG (Amount + Date + Store)',
-                'yellow': 'MEDIUM (Amount + Date)',
-                'amber': 'WEAK (Amount + UID)'
-            };
-            
-            const isBlockSignal = signal === 'red' || signal === 'orange';
-            
-            const detail = `⚠️ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
-                `Amount: $${amountPreview}\n` +
-                `Date: ${datePreview}\n` +
-                `Store: ${storePreview}\n` +
-                `Staff Name: ${staffNamePreview}\n` +
-                `Unique ID / Fallback: ${uniqueIdPreview}\n` +
-                `NAB Code: ${nabCodePreview}\n\n` +
-                (isBlockSignal 
-                    ? `❌ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
-                    : `Do you want to proceed anyway?`);
-            
-            setSaveModalDecision({ mode: isBlockSignal ? 'red' : 'yellow', detail });
+        if (duplicateCheckResult.signal === 'red') {
+
+            const ageContext = currentInputAgedCount > 0
+                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
+                : '';
+            const detail = `Matched ${duplicateCheckResult.redMatches.length} duplicate receipt pattern(s) with same Store + Product + Total Amount in the last ${DUPLICATE_LOOKBACK_DAYS} days (Date/Time is optional).${ageContext}`;
+            setSaveStatus('duplicate');
+            setSaveModalDecision({ mode: 'red', detail });
+            setShowSaveModal(true);
+            return;
+        }
+
+        if (duplicateCheckResult.signal === 'yellow') {
+            const ageContext = currentInputAgedCount > 0
+                ? ` Receipt age check: ${currentInputAgedCount} record(s) are older than 30 days; fraud handling takes priority.`
+                : '';
+            const detail = `Matched ${duplicateCheckResult.yellowMatches.length} near-duplicate pattern(s) in the last ${DUPLICATE_LOOKBACK_DAYS} days.${ageContext}`;
+            setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
         }
@@ -5385,9 +5038,7 @@ export const App = () => {
         const status = (hasTransactions && allHaveRef) ? 'PAID' : 'PENDING';
         confirmSave(status, {
             duplicateSignal: 'green',
-            detail: requestMode === 'solo'
-                ? 'No duplicate patterns detected across full history.'
-                : `No duplicate patterns detected within ${DUPLICATE_LOOKBACK_DAYS}-day lookback.`
+            detail: `No duplicate patterns detected within ${DUPLICATE_LOOKBACK_DAYS}-day lookback.`
         });
     };
 
@@ -5442,67 +5093,6 @@ export const App = () => {
         setOcrStatus('Needs review');
     };
 
-    // Fraud Detection Handlers
-    const handleFraudProceedAnyway = () => {
-        setShowFraudPopup(false);
-        if (pendingProcessResult) {
-            const result = pendingProcessResult;
-            // Continue with validation and show results
-            const clientNameMatch = reimbursementFormText.match(/^(?:Client(?:'|')?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
-            const addressMatch = reimbursementFormText.match(/Address:\s*(.+)/i);
-            const staffMatch = reimbursementFormText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
-            const approvedMatch = reimbursementFormText.match(/Approved\s*by:\s*(.+)/i);
-            
-            const clientName = clientNameMatch ? clientNameMatch[1].trim() : '';
-            const address = addressMatch ? addressMatch[1].trim() : '';
-            const staffMember = staffMatch ? staffMatch[1].trim() : '';
-            const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
-
-            let duplicateIssues: ManualAuditIssue[] = [];
-            if (result.parsedItems && result.parsedItems.length > 0) {
-                const itemsWithOnCharge = result.parsedItems.map(item => ({
-                    ...item,
-                    onCharge: 'N'
-                }));
-                duplicateIssues = buildManualAuditIssues(
-                    itemsWithOnCharge,
-                    result.formTotal || 0,
-                    result.receiptGrandTotal ?? null,
-                    clientName,
-                    address,
-                    staffMember,
-                    approvedBy
-                );
-            }
-
-            const allIssues = [...(result.issues || []), ...duplicateIssues];
-            
-            if (allIssues.length > 0) {
-                setManualAuditIssues(allIssues.filter(i => i.level !== 'error'));
-            }
-
-            setResults({
-                phase1: result.phase1,
-                phase2: result.phase2,
-                phase3: result.phase3,
-                phase4: result.phase4
-            });
-
-            setProcessingState(ProcessingState.COMPLETE);
-            setOcrStatus('Complete');
-        }
-        setPendingProcessResult(null);
-        setFraudDuplicates([]);
-    };
-
-    const handleFraudCancel = () => {
-        setShowFraudPopup(false);
-        setPendingProcessResult(null);
-        setFraudDuplicates([]);
-        setProcessingState(ProcessingState.IDLE);
-        setOcrStatus('Needs review');
-    };
-
     const handleProcess = async () => {
         if (!reimbursementFormText.trim() && !receiptDetailsText.trim() && requestMode === 'solo') {
             setErrorMessage("Please paste Reimbursement Form or Receipt Details first.");
@@ -5541,7 +5131,7 @@ export const App = () => {
                 outstandingLiquidations: liquidationScope
             };
 
-            let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: ManualAuditIssue[], parsedItems?: any[], formTotal?: number, receiptGrandTotal?: number | null };
+            let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: any[] };
 
             if (requestMode === 'manual') {
                 result = ModeLogic.processManualMode(options);
@@ -5558,75 +5148,10 @@ export const App = () => {
             }
 
             // For Solo Mode specific issues and rules blocking
-            if (requestMode === 'solo') {
-                // FRAUD DETECTION: Check for duplicate amount + date in current input
-                const fraudMap = new Map<string, number[]>();
-                if (result.parsedItems && result.parsedItems.length > 0) {
-                    result.parsedItems.forEach((item, idx) => {
-                        const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
-                        const dateKey = (item.dateTime || '').trim().toLowerCase();
-                        // Skip if no date or amount
-                        if (!dateKey || amount === '0.00') return;
-                        const key = `${amount}|${dateKey}`;
-                        const existing = fraudMap.get(key) || [];
-                        existing.push(idx + 1);
-                        fraudMap.set(key, existing);
-                    });
-                }
-
-                // Find duplicates (same amount + date in 2+ rows)
-                const duplicates: Array<{amount: string, date: string, rows: number[]}> = [];
-                fraudMap.forEach((rows, key) => {
-                    if (rows.length > 1) {
-                        const [amount, date] = key.split('|');
-                        duplicates.push({ amount, date, rows });
-                    }
-                });
-
-                // If fraud duplicates found, show popup and pause
-                if (duplicates.length > 0) {
-                    setFraudDuplicates(duplicates);
-                    setPendingProcessResult(result);
-                    setShowFraudPopup(true);
-                    setProcessingState(ProcessingState.IDLE);
-                    setOcrStatus('Fraud Check');
-                    return;
-                }
-
-                // Extract form fields for validation
-                const clientNameMatch = reimbursementFormText.match(/^(?:Client(?:'|')?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
-                const addressMatch = reimbursementFormText.match(/Address:\s*(.+)/i);
-                const staffMatch = reimbursementFormText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
-                const approvedMatch = reimbursementFormText.match(/Approved\s*by:\s*(.+)/i);
-                
-                const clientName = clientNameMatch ? clientNameMatch[1].trim() : '';
-                const address = addressMatch ? addressMatch[1].trim() : '';
-                const staffMember = staffMatch ? staffMatch[1].trim() : '';
-                const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
-
-                // Build duplicate detection issues
-                let duplicateIssues: ManualAuditIssue[] = [];
-                if (result.parsedItems && result.parsedItems.length > 0) {
-                    const itemsWithOnCharge = result.parsedItems.map(item => ({
-                        ...item,
-                        onCharge: 'N'
-                    }));
-                    duplicateIssues = buildManualAuditIssues(
-                        itemsWithOnCharge,
-                        result.formTotal || 0,
-                        result.receiptGrandTotal ?? null,
-                        clientName,
-                        address,
-                        staffMember,
-                        approvedBy
-                    );
-                }
-
-                // Combine issues from mode logic + duplicate detection
-                const allIssues = [...(result.issues || []), ...duplicateIssues];
-                
-                if (allIssues.length > 0 && !bypassManualAuditRef.current) {
-                    const blockingIssues = allIssues.filter((issue) => issue.level === 'error');
+            if (requestMode === 'solo' && result.issues) {
+                const issues = result.issues;
+                if (issues.length > 0 && !bypassManualAuditRef.current) {
+                    const blockingIssues = issues.filter((issue) => issue.level === 'error');
                     if (blockingIssues.length > 0) {
                         setErrorMessage(blockingIssues.map((issue) => issue.message).join(' | '));
                         showWarningToast('Manual validation found blocking errors.');
@@ -5634,7 +5159,7 @@ export const App = () => {
                         setOcrStatus('Needs review');
                         return;
                     }
-                    setManualAuditIssues(allIssues.filter(i => i.level !== 'error'));
+                    setManualAuditIssues(issues.filter(i => i.level !== 'error'));
                 }
             }
             bypassManualAuditRef.current = false;
@@ -5885,14 +5410,6 @@ export const App = () => {
         return Array.from(grouped.values()).sort((a, b) => b.oldestAgeDays - a.oldestAgeDays || b.count - a.count || a.staffName.localeCompare(b.staffName));
     }, [pendingApprovalRecords]);
 
-    const filteredPendingGroups = useMemo(() => {
-        const query = pendingGroupSearchQuery.toLowerCase().trim();
-        if (!query) return [];
-        return pendingApprovalStaffGroups.filter(group =>
-            group.staffName?.toLowerCase().includes(query)
-        );
-    }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
-
     const pendingAgingSummary = useMemo(() => {
         return pendingApprovalRecords.reduce(
             (acc, record: any) => {
@@ -5903,7 +5420,6 @@ export const App = () => {
                 return acc;
             },
             { fresh: 0, watch: 0, stale: 0 }
-        );
     }, [pendingApprovalRecords]);
 
     const eodData = generateEODSchedule(todaysProcessedRecords);
@@ -5994,7 +5510,6 @@ export const App = () => {
         if (!claimantBaseEmailContent) return '';
         const approvalBlock = stripInternalAuditMeta(
             upsertJulianApprovalSection(claimantBaseEmailContent, { ...julianApprovalContext, onlyBlock: true })
-        );
         const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent);
         return summarySection ? `${approvalBlock}\n\n${summarySection}`.trim() : approvalBlock;
     }, [claimantBaseEmailContent, julianApprovalContext]);
@@ -6025,7 +5540,6 @@ export const App = () => {
     }, [duplicateCheckResult.redMatches]);
 
     const hasRuleInput = Boolean(reimbursementFormText.trim() || receiptDetailsText.trim());
-    const showSupportColumn = hasRuleInput || requestMode === 'solo' || requestMode === 'group';
 
     const handleCopyDuplicateNabCodes = () => {
         if (duplicateNabCodesForModal.length === 0) return;
@@ -6076,7 +5590,6 @@ export const App = () => {
                     <p className="mt-4 text-slate-500 text-sm font-medium tracking-widest uppercase">Initializing Auditor...</p>
                 </div>
             </div>
-        );
     }
 
     return (
@@ -6359,10 +5872,8 @@ export const App = () => {
                                                         />
                                                     </th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Time Stamp</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[170px]">Unique ID / Fallback</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Nab Code</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[120px] bg-white/5">Total Amount</th>
-                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px]">Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Location</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Client</th>
 
@@ -6370,6 +5881,7 @@ export const App = () => {
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[150px]">Type of expense</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[200px]">Product</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[100px]">Receipt Date</th>
+                                                    <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap text-right min-w-[100px]">Amount</th>
                                                     <th className="px-4 py-4 border-b border-white/10 whitespace-nowrap min-w-[120px]">Date Processed</th>
                                                 </tr>
                                             </thead>
@@ -6399,19 +5911,17 @@ export const App = () => {
                                                                 />
                                                             </td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-300 font-mono">{isPending ? '-' : (row.uid || '-')}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{row.youngPersonName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.receiptDate}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.dateProcessed}</td>
                                                         </tr>
-                                                    );
                                                 })}
 
                                             </tbody>
@@ -6425,9 +5935,9 @@ export const App = () => {
                     {/* ... (Rest of the file remains unchanged from line 1000 onwards in previous version) ... */}
                     {activeTab === 'dashboard' && (
                         // ... (Dashboard content preserved) ...
-                        <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
+                        <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* ... */}
-                            <div className="w-full space-y-6 min-w-0">
+                            <div className="w-full lg:w-[400px] space-y-6 flex-shrink-0">
                                 <ModeTabs
                                     currentMode={requestMode}
                                     onModeChange={(mode) => {
@@ -6478,221 +5988,216 @@ export const App = () => {
 
                             </div>
 
-                            {showSupportColumn && (
-                                <div className="space-y-6 min-w-0">
-                                    {hasRuleInput && (
-                                        <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
-                                            <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
-                                            <div className="space-y-3 pl-1">
-                                                {rulesStatusItems.map((rule) => {
-                                                    const isBlocked = rule.status === 'blocked';
-                                                    const isWarning = rule.status === 'warning';
-                                                    const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
-                                                    const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
-                                                    const badgeClass = isBlocked
-                                                        ? 'bg-red-500/15 text-red-300 border-red-500/30'
-                                                        : isWarning
-                                                            ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
-                                                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                                {hasRuleInput && (
+                                    <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
+                                        <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
+                                        <div className="space-y-3 pl-1">
+                                            {rulesStatusItems.map((rule) => {
+                                                const isBlocked = rule.status === 'blocked';
+                                                const isWarning = rule.status === 'warning';
+                                                const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
+                                                const evidenceRows = isExactFraudBlocked ? fraudExactMatchesForRulesCard : [];
+                                                const badgeClass = isBlocked
+                                                    ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                                    : isWarning
+                                                        ? 'bg-amber-500/15 text-amber-200 border-amber-500/30'
+                                                        : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 
-                                                    return (
-                                                        <div
-                                                            key={rule.id}
-                                                            className={isExactFraudBlocked
-                                                                ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
-                                                                : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
-                                                        >
-                                                            <div className="flex items-start gap-2">
-                                                                {isBlocked ? (
-                                                                    <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
-                                                                ) : isWarning ? (
-                                                                    <AlertCircle size={15} className="text-amber-400 mt-0.5" />
-                                                                ) : (
-                                                                    <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
-                                                                )}
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="flex items-center justify-between gap-2">
-                                                                        <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
-                                                                        <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
-                                                                    {isExactFraudBlocked && evidenceRows.length > 0 && (
-                                                                        <div className="mt-2 space-y-1.5">
-                                                                            {evidenceRows.map((match, idx) => (
-                                                                                <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
-                                                                                    <div className="flex items-start justify-between gap-2">
-                                                                                        <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
-                                                                                        <button
-                                                                                            onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
-                                                                                            className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
-                                                                                        >
-                                                                                            {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
-                                                                                            {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
-                                                                                        </button>
-                                                                                    </div>
-                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
-                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
+                                                return (
+                                                    <div
+                                                        key={rule.id}
+                                                        className={isExactFraudBlocked
+                                                            ? 'rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2.5 shadow-[0_0_28px_rgba(248,113,113,0.28)] fraud-rule-breathe'
+                                                            : 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5'}
+                                                    >
+                                                        <div className="flex items-start gap-2">
+                                                            {isBlocked ? (
+                                                                <AlertCircle size={15} className={isExactFraudBlocked ? 'text-red-200 mt-0.5 fraud-rule-breathe-soft' : 'text-red-400 mt-0.5'} />
+                                                            ) : isWarning ? (
+                                                                <AlertCircle size={15} className="text-amber-400 mt-0.5" />
+                                                            ) : (
+                                                                <CheckCircle size={15} className="text-emerald-400 mt-0.5" />
+                                                            )}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <p className="text-xs font-semibold text-white uppercase tracking-wide">{rule.title}</p>
+                                                                    <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full border ${badgeClass} ${isExactFraudBlocked ? 'fraud-rule-breathe-soft' : ''}`}>{rule.status}</span>
                                                                 </div>
+                                                                <p className="text-xs text-slate-400 mt-1">{rule.detail}</p>
+                                                                {isExactFraudBlocked && evidenceRows.length > 0 && (
+                                                                    <div className="mt-2 space-y-1.5">
+                                                                        {evidenceRows.map((match, idx) => (
+                                                                            <div key={`${match.historyNabCode}-${match.historyProcessedAt}-${idx}`} className="rounded-md border border-red-300/20 bg-black/25 px-2 py-1.5">
+                                                                                <div className="flex items-start justify-between gap-2">
+                                                                                    <p className="text-[11px] text-slate-200"><span className="text-slate-400">NAB:</span> {match.historyNabCode || '-'}</p>
+                                                                                    <button
+                                                                                        onClick={() => handleCopyField(`NAB: ${match.historyNabCode || '-'}\nProcessed: ${match.historyProcessedAt || '-'}\nAmount: $${match.historyTotalAmount || '0.00'}`, `fraud-evidence-${idx}`)}
+                                                                                        className="px-1.5 py-0.5 rounded border border-white/15 bg-black/30 hover:bg-white/10 text-[10px] text-white flex items-center gap-1"
+                                                                                    >
+                                                                                        {copiedField === `fraud-evidence-${idx}` ? <Check size={10} /> : <Copy size={10} />}
+                                                                                        {copiedField === `fraud-evidence-${idx}` ? 'Copied' : 'Copy'}
+                                                                                    </button>
+                                                                                </div>
+                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">Processed:</span> {match.historyProcessedAt || '-'}</p>
+                                                                                <p className="text-[11px] text-slate-200"><span className="text-slate-400">Amount:</span> ${match.historyTotalAmount || '0.00'}</p>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
-                                                    );
-                                                })}
-                                            </div>
-
-                                            {/* Processing Status Badge */}
-                                            {processingState === ProcessingState.PROCESSING && (
-                                                <div className="mt-4 pt-4 border-t border-white/5">
-                                                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                                                        </svg>
-                                                        Using Cloud API
                                                     </div>
+                                            })}
+                                        </div>
+
+                                        {/* Processing Status Badge */}
+                                        {processingState === ProcessingState.PROCESSING && (
+                                            <div className="mt-4 pt-4 border-t border-white/5">
+                                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                                    <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                                                    </svg>
+                                                    Using Cloud API
                                                 </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {requestMode === 'solo' && (
-                                        <LiquidationTracker
-                                            items={dbOutstandingLiquidations}
-                                            onSettle={handleSettleLiquidation}
-                                            isSettling={isSettlingLiquidation}
-                                        />
-                                    )}
-
-                                    {requestMode === 'group' && (
-                                        <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
-                                    <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={() => setIsPendingCollapsed(!isPendingCollapsed)}
-                                                className="text-indigo-300 hover:text-white transition-colors"
-                                            >
-                                                {isPendingCollapsed ? (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                                                ) : (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                                )}
-                                            </button>
-                                            <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            {pendingSearchQuery && (
-                                                <span className="text-[10px] text-amber-300">
-                                                    {filteredPendingThisWeek.length + filteredPendingPreviousWeeks.length} found
-                                                </span>
-                                            )}
-                                            <button
-                                                onClick={() => { setShowPendingSearch(!showPendingSearch); if (!showPendingSearch) setPendingSearchQuery(''); }}
-                                                className={`text-xs px-2 py-1 rounded transition-colors ${showPendingSearch ? 'bg-amber-500/30 text-amber-300' : 'text-indigo-300 hover:text-white'}`}
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                                            </button>
-                                            <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
-                                                {groupPendingThisWeek.length} This Week Pending
-                                            </span>
-                                        </div>
+                                            </div>
+                                        )}
                                     </div>
+                                )}
 
-                                    {showPendingSearch && (
-                                        <div className="px-6 py-3 border-b border-white/5 bg-indigo-500/5">
-                                            <input
-                                                type="text"
-                                                value={pendingSearchQuery}
-                                                onChange={(e) => setPendingSearchQuery(e.target.value)}
-                                                placeholder="Search staff, YP name, or location..."
-                                                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
-                                                autoFocus
-                                            />
-                                        </div>
-                                    )}
+                                {requestMode === 'solo' && (
+                                    <LiquidationTracker
+                                        items={dbOutstandingLiquidations}
+                                        onSettle={handleSettleLiquidation}
+                                        isSettling={isSettlingLiquidation}
+                                    />
+                                )}
 
-                                    {!isPendingCollapsed && (
-                                        <>
-                                            {groupPendingLiquidations.length === 0 ? (
-                                                <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
-                                            ) : (
-                                                <div className="max-h-[320px] overflow-auto custom-scrollbar">
-                                                    <div className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-amber-300 font-bold">This Week Pending</div>
-                                                    <table className="w-full text-xs">
-                                                        <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider z-10">
-                                                            <tr>
-                                                                <th className="px-3 py-2 text-left">Staff Name</th>
-                                                                <th className="px-3 py-2 text-left">YP Name</th>
-                                                                <th className="px-3 py-2 text-left">Location</th>
-                                                                <th className="px-3 py-2 text-right">Amount</th>
-                                                                <th className="px-3 py-2 text-right">Action</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {filteredPendingThisWeek.length === 0 && (
-                                                                <tr className="border-t border-white/5">
-                                                                    <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
-                                                                </tr>
-                                                            )}
-                                                            {filteredPendingThisWeek.map((item) => (
-                                                                <tr key={item.id} className="border-t border-white/5">
-                                                                    <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
-                                                                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
-                                                                    <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
-                                                                    <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
-                                                                    <td className="px-3 py-2 text-right">
-                                                                        <button
-                                                                            onClick={() => handleSettleGroupLiquidation(item.id)}
-                                                                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white hover:bg-emerald-400 transition-colors"
-                                                                        >
-                                                                            Settle
-                                                                        </button>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-
-                                                    {filteredPendingPreviousWeeks.length > 0 && (
-                                                        <>
-                                                            <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
-                                                            <table className="w-full text-xs">
-                                                                <tbody>
-                                                                    {filteredPendingPreviousWeeks.map((item) => (
-                                                                        <tr key={item.id} className="border-t border-white/5 opacity-75">
-                                                                            <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
-                                                                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
-                                                                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
-                                                                            <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
-                                                                            <td className="px-3 py-2 text-right">
-                                                                                <button
-                                                                                    onClick={() => handleSettleGroupLiquidation(item.id)}
-                                                                                    className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
-                                                                                >
-                                                                                    Remove
-                                                                                </button>
-                                                                            </td>
-                                                                        </tr>
-                                                                    ))}
-                                                                </tbody>
-                                                            </table>
-                                                        </>
+                                {requestMode === 'group' && (
+                                    <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg overflow-hidden flex flex-col">
+                                        <div className="px-6 py-4 border-b border-white/5 bg-indigo-500/10 flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={() => setIsPendingCollapsed(!isPendingCollapsed)}
+                                                    className="text-indigo-300 hover:text-white transition-colors"
+                                                >
+                                                    {isPendingCollapsed ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                                     )}
-                                                </div>
-                                            )}
+                                                </button>
+                                                <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">Group Liquidation Monitor</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                {pendingSearchQuery && (
+                                                    <span className="text-[10px] text-amber-300">
+                                                        {filteredPendingThisWeek.length + filteredPendingPreviousWeeks.length} found
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => { setShowPendingSearch(!showPendingSearch); if (!showPendingSearch) setPendingSearchQuery(''); }}
+                                                    className={`text-xs px-2 py-1 rounded transition-colors ${showPendingSearch ? 'bg-amber-500/30 text-amber-300' : 'text-indigo-300 hover:text-white'}`}
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                                </button>
+                                                <span className="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 font-bold">
+                                                    {groupPendingThisWeek.length} This Week Pending
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {showPendingSearch && (
+                                            <div className="px-6 py-3 border-b border-white/5 bg-indigo-500/5">
+                                                <input
+                                                    type="text"
+                                                    value={pendingSearchQuery}
+                                                    onChange={(e) => setPendingSearchQuery(e.target.value)}
+                                                    placeholder="Search staff, YP name, or location..."
+                                                    className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        )}
+
+                                        {!isPendingCollapsed && (
+                                        <>
+                                        {groupPendingLiquidations.length === 0 ? (
+                                            <div className="p-6 text-center text-slate-400 text-sm">No pending group liquidations.</div>
+                                        ) : (
+                                            <div className="max-h-[320px] overflow-auto custom-scrollbar">
+                                                <div className="px-4 pt-3 pb-2 text-[10px] uppercase tracking-wider text-amber-300 font-bold">This Week Pending</div>
+                                                <table className="w-full text-xs">
+                                                    <thead className="sticky top-0 bg-[#161922] text-slate-400 uppercase tracking-wider z-10">
+                                                        <tr>
+                                                            <th className="px-3 py-2 text-left">Staff Name</th>
+                                                            <th className="px-3 py-2 text-left">YP Name</th>
+                                                            <th className="px-3 py-2 text-left">Location</th>
+                                                            <th className="px-3 py-2 text-right">Amount</th>
+                                                            <th className="px-3 py-2 text-right">Action</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {filteredPendingThisWeek.length === 0 && (
+                                                            <tr className="border-t border-white/5">
+                                                                <td className="px-3 py-3 text-slate-500" colSpan={5}>No pending rows for this week.</td>
+                                                            </tr>
+                                                        )}
+                                                        {filteredPendingThisWeek.map((item) => (
+                                                            <tr key={item.id} className="border-t border-white/5">
+                                                                <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
+                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
+                                                                <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
+                                                                <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
+                                                                <td className="px-3 py-2 text-right">
+                                                                    <button
+                                                                        onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white hover:bg-emerald-400 transition-colors"
+                                                                    >
+                                                                        Settle
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+
+                                                {filteredPendingPreviousWeeks.length > 0 && (
+                                                    <>
+                                                        <div className="px-4 pt-4 pb-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold border-t border-white/5">Previous Weeks (Non-blocking)</div>
+                                                        <table className="w-full text-xs">
+                                                            <tbody>
+                                                                {filteredPendingPreviousWeeks.map((item) => (
+                                                                    <tr key={item.id} className="border-t border-white/5 opacity-75">
+                                                                        <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
+                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
+                                                                        <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
+                                                                        <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
+                                                                        <td className="px-3 py-2 text-right">
+                                                                            <button
+                                                                                onClick={() => handleSettleGroupLiquidation(item.id)}
+                                                                                className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
                                         </>
-                                    )}
+                                        )}
 
-                                    <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
-                                        Only this week pending rows are used for group request exclusion and budget allocation checks.
+                                        <div className="px-4 py-3 border-t border-white/5 bg-indigo-500/5 text-[10px] text-slate-400 text-center">
+                                            Only this week pending rows are used for group request exclusion and budget allocation checks.
+                                        </div>
                                     </div>
-                                </div>
-                                    )}
-                                </div>
-                            )}
+                                )}
 
-                            <div className={`space-y-6 min-h-[600px] min-w-0 ${showSupportColumn ? 'xl:col-start-3' : 'xl:col-start-2'}`}>
+                            <div className="flex-1 space-y-6 min-h-[600px]">
 
                                 {!results && processingState === ProcessingState.IDLE && (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] p-12 text-center backdrop-blur-sm">
@@ -6993,7 +6498,7 @@ export const App = () => {
                                                 <p className="text-xs text-amber-200/80">Need NAB code before moving to paid records. Aging resets when you mark Followed Up.</p>
                                             </div>
                                         </div>
-                                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
                                             {pendingApprovalStaffGroups.length} Pending
                                         </span>
                                         <button
@@ -7459,15 +6964,11 @@ export const App = () => {
                                                 Upload .CSV for Update
                                             </button>
                                             <button
-                                                onClick={async () => {
+                                                onClick={() => {
                                                     if (window.confirm('Reset to default list?')) {
-                                                        localStorage.setItem('aspire_employee_list', DEFAULT_EMPLOYEE_DATA);
                                                         setEmployeeRawText(DEFAULT_EMPLOYEE_DATA);
                                                         setEmployeeList(parseEmployeeData(DEFAULT_EMPLOYEE_DATA));
                                                         persistPendingDeactivationEmployees([]);
-                                                        if (hasSupabaseEnv) {
-                                                            await saveEmployeesToSupabase(DEFAULT_EMPLOYEE_DATA);
-                                                        }
                                                         setCsvImportMessage('Employee list reset to defaults.');
                                                     }
                                                 }}
@@ -7687,7 +7188,6 @@ export const App = () => {
                                                         </div>
                                                     )}
                                                 </div>
-                                            );
                                         })}
                                     </div>
                                 </div>
@@ -7949,8 +7449,6 @@ export const App = () => {
                                                 <div className="space-y-2">
                                                     {duplicateMatchesForModal.map((match, idx) => (
                                                         <div key={`${match.historyDateKey}-${idx}`} className="rounded-lg border border-white/10 bg-black/20 p-2 text-xs text-slate-300">
-                                                            <p><span className="text-slate-400">Staff Reimburse:</span> <span className="text-white">{match.historyStaffName || '-'}</span></p>
-                                                            <p><span className="text-slate-400">NAB Code:</span> <span className="text-white font-mono">{match.historyNabCode || '-'}</span></p>
                                                             <p><span className="text-slate-400">Store:</span> <span className="text-white">{match.historyStoreName}</span></p>
                                                             <p><span className="text-slate-400">Product:</span> <span className="text-white">{match.historyProduct}</span></p>
                                                             <p><span className="text-slate-400">Date & Time (Optional):</span> <span className="text-white">{match.historyDateTime}</span></p>
@@ -8250,60 +7748,6 @@ export const App = () => {
                                         className="px-5 py-2.5 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
                                     >
                                         Approve & Continue
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Fraud Detection Popup */}
-                    {showFraudPopup && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="bg-[#1c1e24] w-full max-w-lg rounded-[28px] border border-red-500/50 shadow-2xl overflow-hidden">
-                                <div className="px-6 py-5 border-b border-white/10 bg-red-500/20 flex items-center gap-3">
-                                    <AlertCircle className="text-red-400" size={24} />
-                                    <div>
-                                        <h3 className="text-white font-bold text-lg">⚠️ FRAUD DETECTION</h3>
-                                        <p className="text-xs text-red-200/90">Possible duplicate receipt detected!</p>
-                                    </div>
-                                </div>
-
-                                <div className="p-6 max-h-[55vh] overflow-y-auto space-y-3">
-                                    <p className="text-sm text-slate-300 mb-4">
-                                        The following receipts have <span className="text-red-400 font-bold">identical amount and date</span>:
-                                    </p>
-                                    {fraudDuplicates.map((dup, idx) => (
-                                        <div key={idx} className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
-                                            <p className="text-white font-semibold">
-                                                Amount: <span className="text-red-400">${dup.amount}</span>
-                                            </p>
-                                            <p className="text-white font-semibold">
-                                                Date: <span className="text-red-400">{dup.date}</span>
-                                            </p>
-                                            <p className="text-slate-300 text-sm mt-2">
-                                                Found in rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
-                                            </p>
-                                        </div>
-                                    ))}
-                                    <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                                        <p className="text-xs text-amber-200">
-                                            ⚠️ This could be a fraudulent duplicate submission. Please verify before proceeding.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
-                                    <button
-                                        onClick={handleFraudCancel}
-                                        className="px-5 py-2.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handleFraudProceedAnyway}
-                                        className="px-5 py-2.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-500 transition-colors"
-                                    >
-                                        I Understand, Proceed Anyway
                                     </button>
                                 </div>
                             </div>
