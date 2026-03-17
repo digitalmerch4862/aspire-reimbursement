@@ -5567,7 +5567,8 @@ export const App = () => {
             // For Solo Mode specific issues and rules blocking
             if (requestMode === 'solo') {
                 // FRAUD DETECTION: Check for duplicate/near-match receipts
-                const fraudReceiptsList: Array<{rowNum: number, amount: string, date: string, storeName: string, matchType: string, matchedWith: number[]}> = [];
+                const fraudReceiptsList: Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string}> = [];
+                const addedRowNums = new Set<number>(); // Track added rows to avoid duplicates in display
                 
                 if (result.parsedItems && result.parsedItems.length > 0) {
                     const items = result.parsedItems;
@@ -5584,22 +5585,25 @@ export const App = () => {
                         exactMatchMap.set(key, existing);
                     });
 
-                    // Collect exact matches
+                    // Collect ALL exact matches - ALL rows that have duplicates
                     const exactDuplicates: Array<{amount: string, date: string, rows: number[], matchType: 'exact', storeName?: string}> = [];
                     exactMatchMap.forEach((rows, key) => {
                         if (rows.length > 1) {
                             const [amount, date] = key.split('|');
                             exactDuplicates.push({ amount, date, rows, matchType: 'exact' });
-                            // Add to fraud receipts list
+                            // Add ALL rows from this duplicate group to fraud list
                             rows.forEach(rowNum => {
-                                const item = items[rowNum - 1];
-                                fraudReceiptsList.push({
-                                    rowNum,
-                                    amount,
-                                    date,
-                                    storeName: item.storeName || '-',
-                                    nabCode: item.uniqueId || '-'
-                                });
+                                if (!addedRowNums.has(rowNum)) {
+                                    const item = items[rowNum - 1];
+                                    fraudReceiptsList.push({
+                                        rowNum,
+                                        amount,
+                                        date,
+                                        storeName: item.storeName || '-',
+                                        nabCode: item.uniqueId || '-'
+                                    });
+                                    addedRowNums.add(rowNum);
+                                }
                             });
                         }
                     });
@@ -5636,7 +5640,6 @@ export const App = () => {
                             const isNearStoreMatch = store1 && store1 !== '-' && store1 === store2 && date1 === date2;
 
                             if (isNearAmountMatch || isNearStoreMatch) {
-                                const matchType = isNearAmountMatch ? 'Near ($5)' : 'Near (Store)';
                                 nearMatches.push({
                                     amount: `$${amount1.toFixed(2)} ~ $${amount2.toFixed(2)}`,
                                     date: date1,
@@ -5644,8 +5647,8 @@ export const App = () => {
                                     matchType: 'near',
                                     storeName: store1 || item1.storeName
                                 });
-                                // Add to fraud receipts list
-                                if (!fraudReceiptsList.find(r => r.rowNum === i + 1)) {
+                                // Add near match rows to fraud list
+                                if (!addedRowNums.has(i + 1)) {
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
@@ -5653,8 +5656,9 @@ export const App = () => {
                                         storeName: item1.storeName || '-',
                                         nabCode: item1.uniqueId || '-'
                                     });
+                                    addedRowNums.add(i + 1);
                                 }
-                                if (!fraudReceiptsList.find(r => r.rowNum === j + 1)) {
+                                if (!addedRowNums.has(j + 1)) {
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
@@ -5662,6 +5666,7 @@ export const App = () => {
                                         storeName: item2.storeName || '-',
                                         nabCode: item2.uniqueId || '-'
                                     });
+                                    addedRowNums.add(j + 1);
                                 }
                             }
                         }
