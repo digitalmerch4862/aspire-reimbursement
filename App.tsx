@@ -2917,7 +2917,7 @@ export const App = () => {
                 ? uidMetaMatch[1].split('||').map((v: string) => v.trim()).filter((v: string) => v.length > 0)
                 : [];
             let uidIdx = 0;
-            const timestamp = new Date(record.created_at).toLocaleString();
+            const timestamp = new Date(record.created_at).toLocaleString('en-AU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
             const rawDate = new Date(record.created_at);
 
             // Extract basic info
@@ -2956,7 +2956,7 @@ export const App = () => {
             const youngPersonName = record.location || locationValue || addressValue || locationFirstPart || '-';
 
 
-            const dateProcessed = new Date(record.created_at).toLocaleDateString();
+            const dateProcessed = new Date(record.created_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
             const nabRefDisplay = record.nab_code || 'PENDING';
 
             // 2. Extract Table Rows
@@ -3102,7 +3102,18 @@ export const App = () => {
                     uidIdx += 1;
 
                     const dateMatch = normalized.dateTime.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-                    const receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
+                    let receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
+                    // Format receipt date to dd-MMM-YYYY if it's a date string
+                    if (receiptDate && receiptDate.includes('/')) {
+                        try {
+                            const parsed = new Date(receiptDate);
+                            if (!isNaN(parsed.getTime())) {
+                                receiptDate = parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+                            }
+                        } catch (e) {
+                            // Keep original if parsing fails
+                        }
+                    }
                     const manualAmountFromRecord = normalizeMoneyValue(String(record.amount || totalAmount || '0.00'), '0.00');
                     const isManualEntryRow = String(normalized.uniqueId || '').trim().toUpperCase() === 'MANUAL-ENTRY';
                     const amountForDb = isManualEntryRow
