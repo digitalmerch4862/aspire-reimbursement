@@ -5573,25 +5573,63 @@ export const App = () => {
                 if (result.parsedItems && result.parsedItems.length > 0) {
                     const items = result.parsedItems;
                     
-                    // Build map to find NAB Codes from historyData (database)
+                    // Helper to normalize date for matching (converts to ISO YYYY-MM-DD format)
+                    const normalizeDateForMatch = (dateStr: string): string => {
+                        if (!dateStr) return '';
+                        const parsed = new Date(dateStr);
+                        if (!isNaN(parsed.getTime())) {
+                            return parsed.toISOString().split('T')[0];
+                        }
+                        return '';
+                    };
+                    
+                    // Helper to extract receipt date from email content
+                    const extractReceiptDateFromContent = (content: string): string => {
+                        if (!content) return '';
+                        const patterns = [
+                            /Receipt\s*Date[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+                            /Date\s*Purchased[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+                            /Date[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i
+                        ];
+                        for (const pattern of patterns) {
+                            const match = content.match(pattern);
+                            if (match) {
+                                const normalized = normalizeDateForMatch(match[1]);
+                                if (normalized) return normalized;
+                            }
+                        }
+                        return '';
+                    };
+                    
+                    // Build map to find NAB Codes from historyData (database) - multiple keys for better matching
                     const historyNabCodeMap = new Map<string, string>(); // key: "amount|date", value: nab_code
                     historyData.forEach(record => {
                         const amount = normalizeMoneyValue(String(record.amount || '0'), '0.00');
-                        const dateProcessed = record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB').toLowerCase() : '';
-                        if (amount !== '0.00' && dateProcessed) {
-                            const key = `${amount}|${dateProcessed}`;
-                            const nabCode = record.nab_code || record.nabCode || '';
-                            if (nabCode && !isPendingNabCodeValue(nabCode)) {
-                                historyNabCodeMap.set(key, nabCode);
-                            }
+                        if (amount === '0.00') return;
+                        
+                        const nabCode = record.nab_code || record.nabCode || '';
+                        if (!nabCode || isPendingNabCodeValue(nabCode)) return;
+                        
+                        // Try processed date (created_at) - normalized to ISO
+                        const processedDate = normalizeDateForMatch(record.created_at);
+                        if (processedDate) {
+                            historyNabCodeMap.set(`${amount}|${processedDate}`, nabCode);
+                        }
+                        
+                        // Try to extract receipt date from email content
+                        const receiptDate = extractReceiptDateFromContent(record.full_email_content || '');
+                        if (receiptDate) {
+                            historyNabCodeMap.set(`${amount}|${receiptDate}`, nabCode);
                         }
                     });
                     
-                    // Check for exact matches (same amount + same date)
+                    // Check for exact matches (same amount + same date) - use normalized dates
                     const exactMatchMap = new Map<string, number[]>();
                     items.forEach((item, idx) => {
                         const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
-                        const dateKey = (item.dateTime || '').trim().toLowerCase();
+                        const rawDate = (item.dateTime || '').trim();
+                        // Normalize input date to ISO format for matching
+                        const dateKey = normalizeDateForMatch(rawDate);
                         if (!dateKey || amount === '0.00') return;
                         const key = `${amount}|${dateKey}`;
                         const existing = exactMatchMap.get(key) || [];
@@ -5631,18 +5669,20 @@ export const App = () => {
                     for (let i = 0; i < items.length; i++) {
                         const item1 = items[i];
                         const amount1 = parseFloat(normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00'));
-                        const date1 = (item1.dateTime || '').trim().toLowerCase();
+                        const rawDate1 = (item1.dateTime || '').trim();
+                        const normDate1 = normalizeDateForMatch(rawDate1);
                         const store1 = (item1.storeName || '').trim().toLowerCase();
                         
-                        if (!date1 || amount1 <= 0) continue;
+                        if (!normDate1 || amount1 <= 0) continue;
 
                         for (let j = i + 1; j < items.length; j++) {
                             const item2 = items[j];
                             const amount2 = parseFloat(normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00'));
-                            const date2 = (item2.dateTime || '').trim().toLowerCase();
+                            const rawDate2 = (item2.dateTime || '').trim();
+                            const normDate2 = normalizeDateForMatch(rawDate2);
                             const store2 = (item2.storeName || '').trim().toLowerCase();
 
-                            if (!date2 || amount2 <= 0) continue;
+                            if (!normDate2 || amount2 <= 0) continue;
 
                             // Skip if already in exact match
                             const bothInExact = exactDuplicates.some(d => 
@@ -5652,14 +5692,14 @@ export const App = () => {
 
                             // Near match criteria:
                             // 1. Same date + amount within $5
-                            const isNearAmountMatch = date1 === date2 && Math.abs(amount1 - amount2) <= 5;
+                            const isNearAmountMatch = normDate1 === normDate2 && Math.abs(amount1 - amount2) <= 5;
                             // 2. Same store + same date
-                            const isNearStoreMatch = store1 && store1 !== '-' && store1 === store2 && date1 === date2;
+                            const isNearStoreMatch = store1 && store1 !== '-' && store1 === store2 && normDate1 === normDate2;
 
                             if (isNearAmountMatch || isNearStoreMatch) {
                                 nearMatches.push({
                                     amount: `$${amount1.toFixed(2)} ~ $${amount2.toFixed(2)}`,
-                                    date: date1,
+                                    date: rawDate1, // Use original date for display
                                     rows: [i + 1, j + 1],
                                     matchType: 'near',
                                     storeName: store1 || item1.storeName
@@ -5668,12 +5708,12 @@ export const App = () => {
                                 if (!addedRowNums.has(i + 1)) {
                                     // Look up NAB Code from database (historyData)
                                     const normAmount1 = normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00');
-                                    const lookupKey1 = `${normAmount1}|${date1}`;
+                                    const lookupKey1 = `${normAmount1}|${normDate1}`;
                                     const dbNabCode1 = historyNabCodeMap.get(lookupKey1) || '-';
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
-                                        date: date1,
+                                        date: rawDate1,
                                         storeName: item1.storeName || '-',
                                         nabCode: dbNabCode1
                                     });
@@ -5682,12 +5722,12 @@ export const App = () => {
                                 if (!addedRowNums.has(j + 1)) {
                                     // Look up NAB Code from database (historyData)
                                     const normAmount2 = normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00');
-                                    const lookupKey2 = `${normAmount2}|${date2}`;
+                                    const lookupKey2 = `${normAmount2}|${normDate2}`;
                                     const dbNabCode2 = historyNabCodeMap.get(lookupKey2) || '-';
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
-                                        date: date2,
+                                        date: rawDate2,
                                         storeName: item2.storeName || '-',
                                         nabCode: dbNabCode2
                                     });
