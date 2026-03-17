@@ -5595,12 +5595,14 @@ export const App = () => {
                             rows.forEach(rowNum => {
                                 if (!addedRowNums.has(rowNum)) {
                                     const item = items[rowNum - 1];
+                                    // Try to get NAB Code from receiptNum first, then uniqueId
+                                    const nabCode = item.receiptNum || item.uniqueId || '-';
                                     fraudReceiptsList.push({
                                         rowNum,
                                         amount,
                                         date,
                                         storeName: item.storeName || '-',
-                                        nabCode: item.uniqueId || '-'
+                                        nabCode: nabCode !== '-' && nabCode !== String(rowNum) ? nabCode : '-'
                                     });
                                     addedRowNums.add(rowNum);
                                 }
@@ -5649,22 +5651,24 @@ export const App = () => {
                                 });
                                 // Add near match rows to fraud list
                                 if (!addedRowNums.has(i + 1)) {
+                                    const nabCode1 = item1.receiptNum || item1.uniqueId || '-';
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
                                         date: date1,
                                         storeName: item1.storeName || '-',
-                                        nabCode: item1.uniqueId || '-'
+                                        nabCode: nabCode1 !== '-' && nabCode1 !== String(i + 1) ? nabCode1 : '-'
                                     });
                                     addedRowNums.add(i + 1);
                                 }
                                 if (!addedRowNums.has(j + 1)) {
+                                    const nabCode2 = item2.receiptNum || item2.uniqueId || '-';
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
                                         date: date2,
                                         storeName: item2.storeName || '-',
-                                        nabCode: item2.uniqueId || '-'
+                                        nabCode: nabCode2 !== '-' && nabCode2 !== String(j + 1) ? nabCode2 : '-'
                                     });
                                     addedRowNums.add(j + 1);
                                 }
