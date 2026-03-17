@@ -745,19 +745,58 @@ const parseDateValue = (value: string): Date | null => {
     const raw = String(value || '').trim();
     if (!raw) return null;
 
-    const direct = new Date(raw);
+    const compact = raw.replace(/\s+/g, ' ').trim();
+
+    const monthMap: Record<string, number> = {
+        jan: 0,
+        feb: 1,
+        mar: 2,
+        apr: 3,
+        may: 4,
+        jun: 5,
+        jul: 6,
+        aug: 7,
+        sep: 8,
+        oct: 9,
+        nov: 10,
+        dec: 11
+    };
+
+    const dmyTextMatch = compact.match(/(\d{1,2})\s+([a-z]{3,9})\s+(\d{2,4})/i);
+    if (dmyTextMatch) {
+        const day = Number(dmyTextMatch[1]);
+        const monthToken = dmyTextMatch[2].slice(0, 3).toLowerCase();
+        const month = monthMap[monthToken];
+        const yearRaw = Number(dmyTextMatch[3]);
+        const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+        if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(year)) {
+            const parsed = new Date(year, month, day);
+            if (!Number.isNaN(parsed.getTime())) return parsed;
+        }
+    }
+
+    const slashMatch = compact.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (slashMatch) {
+        const day = Number(slashMatch[1]);
+        const month = Number(slashMatch[2]);
+        const yearRaw = Number(slashMatch[3]);
+        const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+        const parsed = new Date(year, month - 1, day);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const isoMatch = compact.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+        const year = Number(isoMatch[1]);
+        const month = Number(isoMatch[2]) - 1;
+        const day = Number(isoMatch[3]);
+        const parsed = new Date(year, month, day);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const direct = new Date(compact);
     if (!Number.isNaN(direct.getTime())) return direct;
-
-    const slashMatch = raw.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-    if (!slashMatch) return null;
-
-    const day = Number(slashMatch[1]);
-    const month = Number(slashMatch[2]);
-    const yearRaw = Number(slashMatch[3]);
-    const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-    const parsed = new Date(year, month - 1, day);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed;
+    return null;
 };
 
 const toDateKey = (value: string): string => {
@@ -785,8 +824,16 @@ const normalizeTextKey = (value: string): string => {
 const normalizeReferenceKey = (value: string): string => {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    if (!isValidNabReference(raw)) return '';
-    return raw.toLowerCase();
+    const normalized = raw
+        .toLowerCase()
+        .replace(/\(.*?\)/g, ' ')
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+    if (!normalized) return '';
+    if (normalized === 'na' || normalized === 'n/a' || normalized === 'pending') return '';
+    if (normalized === 'manualentry') return '';
+    if (normalized.startsWith('particular')) return '';
+    return normalized;
 };
 
 const WEEKDAY_RESET_HOUR = 6;
@@ -3101,19 +3148,10 @@ export const App = () => {
                     tableRowsFound = true;
                     uidIdx += 1;
 
-                    const dateMatch = normalized.dateTime.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-                    let receiptDate = dateMatch ? dateMatch[1] : dateProcessed;
-                    // Format receipt date to DD MMM YYYY if it's a date string
-                    if (receiptDate && receiptDate.includes('/')) {
-                        try {
-                            const parsed = new Date(receiptDate);
-                            if (!isNaN(parsed.getTime())) {
-                                receiptDate = parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
-                            }
-                        } catch (e) {
-                            // Keep original if parsing fails
-                        }
-                    }
+                    const parsedReceiptDate = parseDateValue(normalized.dateTime || '');
+                    let receiptDate = parsedReceiptDate
+                        ? parsedReceiptDate.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ')
+                        : dateProcessed;
                     const manualAmountFromRecord = normalizeMoneyValue(String(record.amount || totalAmount || '0.00'), '0.00');
                     const isManualEntryRow = String(normalized.uniqueId || '').trim().toUpperCase() === 'MANUAL-ENTRY';
                     const amountForDb = isManualEntryRow
@@ -6238,7 +6276,7 @@ export const App = () => {
                 normalizeTextKey(match.historyProduct),
                 normalizeTextKey(match.historyProcessedAt),
                 match.historyTotalAmount,
-                normalizeReferenceKey(match.historyNabCode)
+                isValidNabReference(match.historyNabCode) ? match.historyNabCode.toLowerCase() : ''
             ].join('|');
             if (!unique.has(dedupeKey)) {
                 unique.set(dedupeKey, match);
