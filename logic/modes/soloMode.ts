@@ -244,5 +244,5 @@ TOTAL AMOUNT: $${totalAmount.toFixed(2)}
         product: 'Reimbursement'
     }];
 
-    return { phase1, phase2, phase3, phase4, transactions, issues };
+    return { phase1, phase2, phase3, phase4, transactions, issues, parsedItems: items, formTotal: totalAmount, receiptGrandTotal };
 };

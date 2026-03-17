@@ -5475,7 +5475,7 @@ export const App = () => {
                 outstandingLiquidations: liquidationScope
             };
 
-            let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: any[] };
+            let result: ModeLogic.ProcessingResult & { errorMessage?: string, issues?: ManualAuditIssue[], parsedItems?: any[], formTotal?: number, receiptGrandTotal?: number | null };
 
             if (requestMode === 'manual') {
                 result = ModeLogic.processManualMode(options);
@@ -5492,10 +5492,41 @@ export const App = () => {
             }
 
             // For Solo Mode specific issues and rules blocking
-            if (requestMode === 'solo' && result.issues) {
-                const issues = result.issues;
-                if (issues.length > 0 && !bypassManualAuditRef.current) {
-                    const blockingIssues = issues.filter((issue) => issue.level === 'error');
+            if (requestMode === 'solo') {
+                // Extract form fields for duplicate detection
+                const clientNameMatch = reimbursementFormText.match(/^(?:Client(?:'|')?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
+                const addressMatch = reimbursementFormText.match(/Address:\s*(.+)/i);
+                const staffMatch = reimbursementFormText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
+                const approvedMatch = reimbursementFormText.match(/Approved\s*by:\s*(.+)/i);
+                
+                const clientName = clientNameMatch ? clientNameMatch[1].trim() : '';
+                const address = addressMatch ? addressMatch[1].trim() : '';
+                const staffMember = staffMatch ? staffMatch[1].trim() : '';
+                const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
+
+                // Build duplicate detection issues
+                let duplicateIssues: ManualAuditIssue[] = [];
+                if (result.parsedItems && result.parsedItems.length > 0) {
+                    const itemsWithOnCharge = result.parsedItems.map(item => ({
+                        ...item,
+                        onCharge: 'N'
+                    }));
+                    duplicateIssues = buildManualAuditIssues(
+                        itemsWithOnCharge,
+                        result.formTotal || 0,
+                        result.receiptGrandTotal ?? null,
+                        clientName,
+                        address,
+                        staffMember,
+                        approvedBy
+                    );
+                }
+
+                // Combine issues from mode logic + duplicate detection
+                const allIssues = [...(result.issues || []), ...duplicateIssues];
+                
+                if (allIssues.length > 0 && !bypassManualAuditRef.current) {
+                    const blockingIssues = allIssues.filter((issue) => issue.level === 'error');
                     if (blockingIssues.length > 0) {
                         setErrorMessage(blockingIssues.map((issue) => issue.message).join(' | '));
                         showWarningToast('Manual validation found blocking errors.');
@@ -5503,7 +5534,7 @@ export const App = () => {
                         setOcrStatus('Needs review');
                         return;
                     }
-                    setManualAuditIssues(issues.filter(i => i.level !== 'error'));
+                    setManualAuditIssues(allIssues.filter(i => i.level !== 'error'));
                 }
             }
             bypassManualAuditRef.current = false;

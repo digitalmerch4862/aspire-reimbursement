@@ -16,6 +16,20 @@ export interface ProcessingResult {
     phase3: string;
     phase4: string;
     transactions: TransactionRecord[];
+    parsedItems?: Array<{
+        receiptNum: string;
+        uniqueId: string;
+        storeName: string;
+        dateTime: string;
+        product: string;
+        category: string;
+        itemAmount: string;
+        receiptTotal: string;
+        notes: string;
+        amount: string;
+    }>;
+    formTotal?: number;
+    receiptGrandTotal?: number | null;
 }
 
 export interface ModeOptions {
