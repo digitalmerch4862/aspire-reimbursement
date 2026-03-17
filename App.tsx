@@ -1436,7 +1436,9 @@ export const App = () => {
 
     // Fraud Detection State
     const [showFraudPopup, setShowFraudPopup] = useState(false);
-    const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[]}>>([]);
+    const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[], matchType: 'exact' | 'near', storeName?: string}>>([]);
+    const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, matchType: string, matchedWith: number[]}>>([]);
+    const [showFraudReceiptsModal, setShowFraudReceiptsModal] = useState(false);
     const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
 
     // Processing status state
@@ -5445,6 +5447,7 @@ export const App = () => {
     // Fraud Detection Handlers
     const handleFraudProceedAnyway = () => {
         setShowFraudPopup(false);
+        setShowFraudReceiptsModal(false);
         if (pendingProcessResult) {
             const result = pendingProcessResult;
             // Continue with validation and show results
@@ -5493,12 +5496,16 @@ export const App = () => {
         }
         setPendingProcessResult(null);
         setFraudDuplicates([]);
+        setFraudReceiptRows([]);
+        setShowFraudReceiptsModal(false);
     };
 
     const handleFraudCancel = () => {
         setShowFraudPopup(false);
+        setShowFraudReceiptsModal(false);
         setPendingProcessResult(null);
         setFraudDuplicates([]);
+        setFraudReceiptRows([]);
         setProcessingState(ProcessingState.IDLE);
         setOcrStatus('Needs review');
     };
@@ -5559,38 +5566,123 @@ export const App = () => {
 
             // For Solo Mode specific issues and rules blocking
             if (requestMode === 'solo') {
-                // FRAUD DETECTION: Check for duplicate amount + date in current input
-                const fraudMap = new Map<string, number[]>();
+                // FRAUD DETECTION: Check for duplicate/near-match receipts
+                const fraudReceiptsList: Array<{rowNum: number, amount: string, date: string, storeName: string, matchType: string, matchedWith: number[]}> = [];
+                
                 if (result.parsedItems && result.parsedItems.length > 0) {
-                    result.parsedItems.forEach((item, idx) => {
+                    const items = result.parsedItems;
+                    
+                    // Check for exact matches (same amount + same date)
+                    const exactMatchMap = new Map<string, number[]>();
+                    items.forEach((item, idx) => {
                         const amount = normalizeMoneyValue(item.receiptTotal || item.amount || '0', '0.00');
                         const dateKey = (item.dateTime || '').trim().toLowerCase();
-                        // Skip if no date or amount
                         if (!dateKey || amount === '0.00') return;
                         const key = `${amount}|${dateKey}`;
-                        const existing = fraudMap.get(key) || [];
+                        const existing = exactMatchMap.get(key) || [];
                         existing.push(idx + 1);
-                        fraudMap.set(key, existing);
+                        exactMatchMap.set(key, existing);
                     });
-                }
 
-                // Find duplicates (same amount + date in 2+ rows)
-                const duplicates: Array<{amount: string, date: string, rows: number[]}> = [];
-                fraudMap.forEach((rows, key) => {
-                    if (rows.length > 1) {
-                        const [amount, date] = key.split('|');
-                        duplicates.push({ amount, date, rows });
+                    // Collect exact matches
+                    const exactDuplicates: Array<{amount: string, date: string, rows: number[], matchType: 'exact', storeName?: string}> = [];
+                    exactMatchMap.forEach((rows, key) => {
+                        if (rows.length > 1) {
+                            const [amount, date] = key.split('|');
+                            exactDuplicates.push({ amount, date, rows, matchType: 'exact' });
+                            // Add to fraud receipts list
+                            rows.forEach(rowNum => {
+                                const item = items[rowNum - 1];
+                                fraudReceiptsList.push({
+                                    rowNum,
+                                    amount,
+                                    date,
+                                    storeName: item.storeName || '-',
+                                    matchType: 'Exact Match',
+                                    matchedWith: rows.filter(r => r !== rowNum)
+                                });
+                            });
+                        }
+                    });
+
+                    // Check for near matches (same date + amount within $5 OR same store + same date)
+                    const nearMatches: Array<{amount: string, date: string, rows: number[], matchType: 'near', storeName?: string}> = [];
+                    
+                    for (let i = 0; i < items.length; i++) {
+                        const item1 = items[i];
+                        const amount1 = parseFloat(normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00'));
+                        const date1 = (item1.dateTime || '').trim().toLowerCase();
+                        const store1 = (item1.storeName || '').trim().toLowerCase();
+                        
+                        if (!date1 || amount1 <= 0) continue;
+
+                        for (let j = i + 1; j < items.length; j++) {
+                            const item2 = items[j];
+                            const amount2 = parseFloat(normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00'));
+                            const date2 = (item2.dateTime || '').trim().toLowerCase();
+                            const store2 = (item2.storeName || '').trim().toLowerCase();
+
+                            if (!date2 || amount2 <= 0) continue;
+
+                            // Skip if already in exact match
+                            const bothInExact = exactDuplicates.some(d => 
+                                d.rows.includes(i + 1) && d.rows.includes(j + 1)
+                            );
+                            if (bothInExact) continue;
+
+                            // Near match criteria:
+                            // 1. Same date + amount within $5
+                            const isNearAmountMatch = date1 === date2 && Math.abs(amount1 - amount2) <= 5;
+                            // 2. Same store + same date
+                            const isNearStoreMatch = store1 && store1 !== '-' && store1 === store2 && date1 === date2;
+
+                            if (isNearAmountMatch || isNearStoreMatch) {
+                                const matchType = isNearAmountMatch ? 'Near ($5)' : 'Near (Store)';
+                                nearMatches.push({
+                                    amount: `$${amount1.toFixed(2)} ~ $${amount2.toFixed(2)}`,
+                                    date: date1,
+                                    rows: [i + 1, j + 1],
+                                    matchType: 'near',
+                                    storeName: store1 || item1.storeName
+                                });
+                                // Add to fraud receipts list
+                                if (!fraudReceiptsList.find(r => r.rowNum === i + 1 && r.matchType === matchType)) {
+                                    fraudReceiptsList.push({
+                                        rowNum: i + 1,
+                                        amount: `$${amount1.toFixed(2)}`,
+                                        date: date1,
+                                        storeName: item1.storeName || '-',
+                                        matchType,
+                                        matchedWith: [j + 1]
+                                    });
+                                }
+                                if (!fraudReceiptsList.find(r => r.rowNum === j + 1 && r.matchType === matchType)) {
+                                    fraudReceiptsList.push({
+                                        rowNum: j + 1,
+                                        amount: `$${amount2.toFixed(2)}`,
+                                        date: date2,
+                                        storeName: item2.storeName || '-',
+                                        matchType,
+                                        matchedWith: [i + 1]
+                                    });
+                                }
+                            }
+                        }
                     }
-                });
 
-                // If fraud duplicates found, show popup and pause
-                if (duplicates.length > 0) {
-                    setFraudDuplicates(duplicates);
-                    setPendingProcessResult(result);
-                    setShowFraudPopup(true);
-                    setProcessingState(ProcessingState.IDLE);
-                    setOcrStatus('Fraud Check');
-                    return;
+                    // Combine exact + near matches
+                    const allDuplicates = [...exactDuplicates, ...nearMatches];
+                    
+                    // If fraud duplicates found, show popup and pause
+                    if (allDuplicates.length > 0) {
+                        setFraudDuplicates(allDuplicates);
+                        setFraudReceiptRows(fraudReceiptsList);
+                        setPendingProcessResult(result);
+                        setShowFraudPopup(true);
+                        setProcessingState(ProcessingState.IDLE);
+                        setOcrStatus('Fraud Check');
+                        return;
+                    }
                 }
 
                 // Extract form fields for validation
@@ -8269,22 +8361,43 @@ export const App = () => {
                                 </div>
 
                                 <div className="p-6 max-h-[55vh] overflow-y-auto space-y-3">
-                                    <p className="text-sm text-slate-300 mb-4">
-                                        The following receipts have <span className="text-red-400 font-bold">identical amount and date</span>:
+                                    <p className="text-sm text-slate-300 mb-2">
+                                        Found <span className="text-red-400 font-bold">{fraudDuplicates.length}</span> fraud match(es) with <span className="text-red-400 font-bold">{fraudReceiptRows.length}</span> flagged receipt rows
                                     </p>
-                                    {fraudDuplicates.map((dup, idx) => (
+                                    
+                                    {fraudDuplicates.slice(0, 3).map((dup, idx) => (
                                         <div key={idx} className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
                                             <p className="text-white font-semibold">
                                                 Amount: <span className="text-red-400">${dup.amount}</span>
+                                                <span className="text-xs ml-2 px-2 py-0.5 bg-red-500/30 rounded-full">{dup.matchType === 'exact' ? 'EXACT' : 'NEAR'}</span>
                                             </p>
                                             <p className="text-white font-semibold">
                                                 Date: <span className="text-red-400">{dup.date}</span>
                                             </p>
+                                            {dup.storeName && dup.storeName !== '-' && (
+                                                <p className="text-white font-semibold">
+                                                    Store: <span className="text-red-400">{dup.storeName}</span>
+                                                </p>
+                                            )}
                                             <p className="text-slate-300 text-sm mt-2">
-                                                Found in rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
+                                                Rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
                                             </p>
                                         </div>
                                     ))}
+
+                                    {fraudDuplicates.length > 3 && (
+                                        <p className="text-slate-400 text-sm text-center">
+                                            ...and {fraudDuplicates.length - 3} more matches
+                                        </p>
+                                    )}
+
+                                    <button
+                                        onClick={() => setShowFraudReceiptsModal(true)}
+                                        className="w-full mt-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
+                                    >
+                                        📋 View All ({fraudReceiptRows.length}) Fraud Receipts
+                                    </button>
+
                                     <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                                         <p className="text-xs text-amber-200">
                                             ⚠️ This could be a fraudulent duplicate submission. Please verify before proceeding.
@@ -8304,6 +8417,66 @@ export const App = () => {
                                         className="px-5 py-2.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-500 transition-colors"
                                     >
                                         I Understand, Proceed Anyway
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Fraud Receipts View All Modal */}
+                    {showFraudReceiptsModal && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-[#1c1e24] w-full max-w-3xl rounded-[28px] border border-red-500/50 shadow-2xl overflow-hidden">
+                                <div className="px-6 py-5 border-b border-white/10 bg-red-500/20 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <AlertCircle className="text-red-400" size={24} />
+                                        <div>
+                                            <h3 className="text-white font-bold text-lg">ALL FLAGGED RECEIPTS</h3>
+                                            <p className="text-xs text-red-200/90">{fraudReceiptRows.length} receipts with potential fraud issues</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowFraudReceiptsModal(false)} className="text-slate-400 hover:text-white">
+                                        <X size={24} />
+                                    </button>
+                                </div>
+
+                                <div className="p-4 max-h-[60vh] overflow-y-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-white/10">
+                                                <th className="text-left py-2 px-3">Row</th>
+                                                <th className="text-left py-2 px-3">Amount</th>
+                                                <th className="text-left py-2 px-3">Date</th>
+                                                <th className="text-left py-2 px-3">Store</th>
+                                                <th className="text-left py-2 px-3">Match Type</th>
+                                                <th className="text-left py-2 px-3">Matched With</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {fraudReceiptRows.map((row, idx) => (
+                                                <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
+                                                    <td className="py-2 px-3 text-white font-bold">{row.rowNum}</td>
+                                                    <td className="py-2 px-3 text-red-400 font-semibold">{row.amount}</td>
+                                                    <td className="py-2 px-3 text-red-400">{row.date}</td>
+                                                    <td className="py-2 px-3 text-slate-300">{row.storeName}</td>
+                                                    <td className="py-2 px-3">
+                                                        <span className={`text-xs px-2 py-1 rounded-full ${row.matchType === 'Exact Match' ? 'bg-red-500/30 text-red-300' : 'bg-amber-500/30 text-amber-300'}`}>
+                                                            {row.matchType}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2 px-3 text-slate-400">Rows {row.matchedWith.join(', ')}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end">
+                                    <button
+                                        onClick={() => setShowFraudReceiptsModal(false)}
+                                        className="px-5 py-2.5 rounded-lg bg-slate-600 text-white font-semibold hover:bg-slate-500 transition-colors"
+                                    >
+                                        Close
                                     </button>
                                 </div>
                             </div>
