@@ -5573,6 +5573,20 @@ export const App = () => {
                 if (result.parsedItems && result.parsedItems.length > 0) {
                     const items = result.parsedItems;
                     
+                    // Build map to find NAB Codes from historyData (database)
+                    const historyNabCodeMap = new Map<string, string>(); // key: "amount|date", value: nab_code
+                    historyData.forEach(record => {
+                        const amount = normalizeMoneyValue(String(record.amount || '0'), '0.00');
+                        const dateProcessed = record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB').toLowerCase() : '';
+                        if (amount !== '0.00' && dateProcessed) {
+                            const key = `${amount}|${dateProcessed}`;
+                            const nabCode = record.nab_code || record.nabCode || '';
+                            if (nabCode && !isPendingNabCodeValue(nabCode)) {
+                                historyNabCodeMap.set(key, nabCode);
+                            }
+                        }
+                    });
+                    
                     // Check for exact matches (same amount + same date)
                     const exactMatchMap = new Map<string, number[]>();
                     items.forEach((item, idx) => {
@@ -5595,14 +5609,15 @@ export const App = () => {
                             rows.forEach(rowNum => {
                                 if (!addedRowNums.has(rowNum)) {
                                     const item = items[rowNum - 1];
-                                    // Try to get NAB Code from receiptNum first, then uniqueId
-                                    const nabCode = item.receiptNum || item.uniqueId || '-';
+                                    // Look up NAB Code from database (historyData)
+                                    const lookupKey = `${amount}|${date}`;
+                                    const dbNabCode = historyNabCodeMap.get(lookupKey) || '-';
                                     fraudReceiptsList.push({
                                         rowNum,
                                         amount,
                                         date,
                                         storeName: item.storeName || '-',
-                                        nabCode: nabCode !== '-' && nabCode !== String(rowNum) ? nabCode : '-'
+                                        nabCode: dbNabCode
                                     });
                                     addedRowNums.add(rowNum);
                                 }
@@ -5651,24 +5666,30 @@ export const App = () => {
                                 });
                                 // Add near match rows to fraud list
                                 if (!addedRowNums.has(i + 1)) {
-                                    const nabCode1 = item1.receiptNum || item1.uniqueId || '-';
+                                    // Look up NAB Code from database (historyData)
+                                    const normAmount1 = normalizeMoneyValue(item1.receiptTotal || item1.amount || '0', '0.00');
+                                    const lookupKey1 = `${normAmount1}|${date1}`;
+                                    const dbNabCode1 = historyNabCodeMap.get(lookupKey1) || '-';
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
                                         date: date1,
                                         storeName: item1.storeName || '-',
-                                        nabCode: nabCode1 !== '-' && nabCode1 !== String(i + 1) ? nabCode1 : '-'
+                                        nabCode: dbNabCode1
                                     });
                                     addedRowNums.add(i + 1);
                                 }
                                 if (!addedRowNums.has(j + 1)) {
-                                    const nabCode2 = item2.receiptNum || item2.uniqueId || '-';
+                                    // Look up NAB Code from database (historyData)
+                                    const normAmount2 = normalizeMoneyValue(item2.receiptTotal || item2.amount || '0', '0.00');
+                                    const lookupKey2 = `${normAmount2}|${date2}`;
+                                    const dbNabCode2 = historyNabCodeMap.get(lookupKey2) || '-';
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
                                         date: date2,
                                         storeName: item2.storeName || '-',
-                                        nabCode: nabCode2 !== '-' && nabCode2 !== String(j + 1) ? nabCode2 : '-'
+                                        nabCode: dbNabCode2
                                     });
                                     addedRowNums.add(j + 1);
                                 }
