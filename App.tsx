@@ -1437,7 +1437,7 @@ export const App = () => {
     // Fraud Detection State
     const [showFraudPopup, setShowFraudPopup] = useState(false);
     const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[], matchType: 'exact' | 'near', storeName?: string}>>([]);
-    const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, matchType: string, matchedWith: number[]}>>([]);
+    const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string}>>([]);
     const [showFraudReceiptsModal, setShowFraudReceiptsModal] = useState(false);
     const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
 
@@ -5598,8 +5598,7 @@ export const App = () => {
                                     amount,
                                     date,
                                     storeName: item.storeName || '-',
-                                    matchType: 'Exact Match',
-                                    matchedWith: rows.filter(r => r !== rowNum)
+                                    nabCode: item.uniqueId || '-'
                                 });
                             });
                         }
@@ -5646,24 +5645,22 @@ export const App = () => {
                                     storeName: store1 || item1.storeName
                                 });
                                 // Add to fraud receipts list
-                                if (!fraudReceiptsList.find(r => r.rowNum === i + 1 && r.matchType === matchType)) {
+                                if (!fraudReceiptsList.find(r => r.rowNum === i + 1)) {
                                     fraudReceiptsList.push({
                                         rowNum: i + 1,
                                         amount: `$${amount1.toFixed(2)}`,
                                         date: date1,
                                         storeName: item1.storeName || '-',
-                                        matchType,
-                                        matchedWith: [j + 1]
+                                        nabCode: item1.uniqueId || '-'
                                     });
                                 }
-                                if (!fraudReceiptsList.find(r => r.rowNum === j + 1 && r.matchType === matchType)) {
+                                if (!fraudReceiptsList.find(r => r.rowNum === j + 1)) {
                                     fraudReceiptsList.push({
                                         rowNum: j + 1,
                                         amount: `$${amount2.toFixed(2)}`,
                                         date: date2,
                                         storeName: item2.storeName || '-',
-                                        matchType,
-                                        matchedWith: [i + 1]
+                                        nabCode: item2.uniqueId || '-'
                                     });
                                 }
                             }
@@ -8448,8 +8445,7 @@ export const App = () => {
                                                 <th className="text-left py-2 px-3">Amount</th>
                                                 <th className="text-left py-2 px-3">Date</th>
                                                 <th className="text-left py-2 px-3">Store</th>
-                                                <th className="text-left py-2 px-3">Match Type</th>
-                                                <th className="text-left py-2 px-3">Matched With</th>
+                                                <th className="text-left py-2 px-3">NAB Code</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -8459,12 +8455,7 @@ export const App = () => {
                                                     <td className="py-2 px-3 text-red-400 font-semibold">{row.amount}</td>
                                                     <td className="py-2 px-3 text-red-400">{row.date}</td>
                                                     <td className="py-2 px-3 text-slate-300">{row.storeName}</td>
-                                                    <td className="py-2 px-3">
-                                                        <span className={`text-xs px-2 py-1 rounded-full ${row.matchType === 'Exact Match' ? 'bg-red-500/30 text-red-300' : 'bg-amber-500/30 text-amber-300'}`}>
-                                                            {row.matchType}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-2 px-3 text-slate-400">Rows {row.matchedWith.join(', ')}</td>
+                                                    <td className="py-2 px-3 text-amber-400 font-mono">{row.nabCode}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
