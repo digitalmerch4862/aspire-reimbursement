@@ -5587,21 +5587,70 @@ export const App = () => {
                     // Helper to normalize date for matching (converts to ISO YYYY-MM-DD format)
                     const normalizeDateForMatch = (dateStr: string): string => {
                         if (!dateStr) return '';
-                        const parsed = new Date(dateStr);
+                        
+                        // Try direct parse first
+                        let parsed = new Date(dateStr);
                         if (!isNaN(parsed.getTime())) {
                             return parsed.toISOString().split('T')[0];
                         }
+                        
+                        // Try parsing DD/MMM/YYYY format (e.g., "13/Mar/2026" or "13-Mar-2026")
+                        const monthNames: Record<string, string> = {
+                            'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+                            'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
+                            'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+                        };
+                        const dmmMatch = dateStr.match(/(\d{1,2})[\/](\w{3})[\/](\d{2,4})/);
+                        if (dmmMatch) {
+                            const day = dmmMatch[1].padStart(2, '0');
+                            const month = monthNames[dmmMatch[2].toLowerCase()];
+                            let year = dmmMatch[3];
+                            if (year.length === 2) year = '20' + year;
+                            if (month) return `${year}-${month}-${day}`;
+                        }
+                        
+                        // Try parsing DD-MM-YYYY or DD/MM/YYYY format
+                        const dmyMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+                        if (dmyMatch) {
+                            const day = dmyMatch[1].padStart(2, '0');
+                            const month = dmyMatch[2].padStart(2, '0');
+                            let year = dmyMatch[3];
+                            if (year.length === 2) year = '20' + year;
+                            return `${year}-${month}-${day}`;
+                        }
+                        
                         return '';
                     };
                     
                     // Helper to format date for display (DD MMM YYYY format)
                     const formatDateForDisplay = (dateStr: string): string => {
                         if (!dateStr) return '-';
-                        const parsed = new Date(dateStr);
+                        
+                        // Try direct parse first
+                        let parsed = new Date(dateStr);
                         if (!isNaN(parsed.getTime())) {
                             return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
                         }
-                        // Try parsing direct string if Date constructor fails
+                        
+                        // Try parsing DD/MMM/YYYY format (e.g., "13/Mar/2026")
+                        const monthNames: Record<string, string> = {
+                            'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+                            'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
+                            'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+                        };
+                        const dmmMatch = dateStr.match(/(\d{1,2})[\/](\w{3})[\/](\d{2,4})/);
+                        if (dmmMatch) {
+                            const day = dmmMatch[1].padStart(2, '0');
+                            const month = monthNames[dmmMatch[2].toLowerCase()];
+                            let year = dmmMatch[3];
+                            if (year.length === 2) year = '20' + year;
+                            parsed = new Date(`${year}-${month}-${day}`);
+                            if (!isNaN(parsed.getTime())) {
+                                return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/-/g, ' ');
+                            }
+                        }
+                        
+                        // Try parsing DD-MM-YYYY or DD/MM/YYYY format
                         try {
                             const parts = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
                             if (parts) {
@@ -5611,6 +5660,8 @@ export const App = () => {
                                 }
                             }
                         } catch (e) {}
+                        
+                        // If already in DD MMM YYYY format, return as is
                         return dateStr;
                     };
                     
