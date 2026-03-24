@@ -8445,9 +8445,9 @@ export const App = () => {
                                                                 </button>
                                                             </div>
                                                             <div className="flex items-center gap-1 mt-1">
-                                                                <span className="text-emerald-300 font-semibold">${record.amount?.toFixed(2) || '0.00'}</span>
+                                                                <span className="text-emerald-300 font-semibold">${normalizeMoneyValue(String(record.amount ?? '0'))}</span>
                                                                 <button
-                                                                    onClick={() => handleCopyField(String(record.amount?.toFixed(2) || '0.00'), `pending-amount-${record.id}`)}
+                                                                    onClick={() => handleCopyField(normalizeMoneyValue(String(record.amount ?? '0')), `pending-amount-${record.id}`)}
                                                                     className="text-slate-400 hover:text-white transition-colors"
                                                                     title="Copy amount"
                                                                 >
