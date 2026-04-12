@@ -4031,6 +4031,61 @@ export const App = () => {
         setIsRowModalOpen(true);
     };
 
+    const getSourceRecordId = (row: any): any => row?.internalId ?? row?.id;
+
+    const openActivityRowModal = (row: any) => {
+        const sourceId = getSourceRecordId(row);
+        if (!sourceId || sourceId === 'idle-row') return;
+
+        const normalizedRow = {
+            ...row,
+            id: row?.id ?? sourceId,
+            internalId: sourceId,
+            staffName: row?.staffName || row?.staff_name || 'Unknown',
+            ypName: row?.ypName || row?.clientName || '',
+            youngPersonName: row?.youngPersonName || row?.location || '',
+            totalAmount: normalizeMoneyValue(String(row?.totalAmount ?? row?.amount ?? '0.00'), '0.00'),
+            amount: normalizeMoneyValue(String(row?.amount ?? row?.totalAmount ?? '0.00'), '0.00'),
+            nabCode: row?.nabCode || row?.nabRef || row?.nab_code || 'PENDING',
+            dateProcessed: row?.dateProcessed || row?.date || ''
+        };
+
+        handleRowClick(normalizedRow);
+    };
+
+    const handleDeleteRecordById = async (recordId: any) => {
+        if (!recordId || recordId === 'idle-row') return;
+        if (!confirm('Are you sure you want to delete this record? This action cannot be undone.')) return;
+
+        try {
+            if (!hasSupabaseEnv) {
+                const next = historyData.filter(item => item.id !== recordId);
+                setHistoryData(next);
+                saveLocalAuditLogs(next);
+                handleRowModalClose();
+                return;
+            }
+
+            const { error } = await supabase
+                .from('audit_logs')
+                .delete()
+                .eq('id', recordId);
+
+            if (error) throw error;
+
+            setHistoryData(prev => prev.filter(item => item.id !== recordId));
+            handleRowModalClose();
+        } catch (e) {
+            console.error("Delete failed", e);
+            showWarningToast('Failed to delete record.');
+        }
+    };
+
+    const handleDeleteActivityRow = async (row: any) => {
+        const sourceId = getSourceRecordId(row);
+        await handleDeleteRecordById(sourceId);
+    };
+
     const handleRowModalClose = () => {
         setIsRowModalOpen(false);
         setSelectedRow(null);
@@ -4039,32 +4094,7 @@ export const App = () => {
 
     const handleDeleteRow = async () => {
         if (!selectedRow) return;
-        if (confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
-            try {
-                if (!hasSupabaseEnv) {
-                    const next = historyData.filter(item => item.id !== selectedRow.internalId);
-                    setHistoryData(next);
-                    saveLocalAuditLogs(next);
-                    handleRowModalClose();
-                    return;
-                }
-
-                // Delete from Supabase
-                const { error } = await supabase
-                    .from('audit_logs')
-                    .delete()
-                    .eq('id', selectedRow.internalId);
-
-                if (error) throw error;
-
-                // Optimistic update
-                setHistoryData(prev => prev.filter(item => item.id !== selectedRow.internalId));
-                handleRowModalClose();
-            } catch (e) {
-                console.error("Delete failed", e);
-                showWarningToast('Failed to delete record.');
-            }
-        }
+        await handleDeleteRecordById(getSourceRecordId(selectedRow));
     };
 
     const handleMassDelete = async () => {
@@ -4115,7 +4145,8 @@ export const App = () => {
     const handleSaveRowChanges = async () => {
         if (!editedRowData) return;
 
-        const originalRecord = historyData.find(r => r.id === editedRowData.internalId);
+        const sourceRecordId = getSourceRecordId(editedRowData);
+        const originalRecord = historyData.find(r => r.id === sourceRecordId);
         if (!originalRecord) {
             console.error("Could not find original record to update");
             return;
@@ -4179,7 +4210,7 @@ export const App = () => {
 
         // Optimistic Update (Local State)
         const updatedHistory = historyData.map(item => {
-            if (item.id === editedRowData.internalId) {
+            if (item.id === sourceRecordId) {
                 return {
                     ...item,
                     staff_name: editedRowData.staffName,
@@ -4212,7 +4243,7 @@ export const App = () => {
                     nab_code: editedRowData.nabCode,
                     full_email_content: newContent
                 })
-                .eq('id', editedRowData.internalId);
+                .eq('id', sourceRecordId);
 
             if (error) throw error;
 
@@ -4512,6 +4543,8 @@ export const App = () => {
         const locationSpend: Record<string, number> = {};
         let maxItem = { product: '', amount: 0, staff: '' };
         let pendingCount = 0;
+        const formatReportCurrency = (value: number) => `$${value.toFixed(2)}`;
+        const formatReportDate = (value: Date) => value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
         relevantRows.forEach(row => {
             const amountStr = String(row.amount) || "0";
@@ -4533,6 +4566,88 @@ export const App = () => {
                 pendingCount++;
             }
         });
+
+        const rankedStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const rankedLocations = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const averageRequestValue = totalRequests > 0 ? totalSpend / totalRequests : 0;
+        const topStaffSummary = rankedStaff[0];
+        const topLocationSummary = rankedLocations[0];
+        const shareOfSpend = (value: number) => totalSpend > 0 ? `${((value / totalSpend) * 100).toFixed(1)}%` : '0.0%';
+        const categorizationStatus = pendingCount === 0
+            ? 'All reviewed records are fully categorised and suitable for circulation.'
+            : `${pendingCount} record${pendingCount === 1 ? '' : 's'} require staff or client data clean-up prior to distribution.`;
+        const followUpMessage = pendingCount === 0
+            ? 'No immediate data quality issues were identified within the selected reporting period.'
+            : 'Incomplete records should be reviewed before this report is circulated to stakeholders.';
+
+        const hasTopStaff = Boolean(topStaffSummary);
+        const hasTopLocation = Boolean(topLocationSummary);
+        const highestItemLabel = maxItem.amount > 0
+            ? `${formatReportCurrency(maxItem.amount)} for ${maxItem.product || 'N/A'} (${maxItem.staff || 'Unknown'})`
+            : 'No material single-item variance identified';
+
+        let professionalReport = `# ${reportTitle}\n\n`;
+        professionalReport += `This report has been prepared for management review and summarises reimbursement activity, expenditure concentration and follow-up items for the selected reporting period.\n\n`;
+        professionalReport += `## Report Details\n`;
+        professionalReport += `| Field | Detail |\n`;
+        professionalReport += `| :--- | :--- |\n`;
+        professionalReport += `| Reporting Period | ${formatReportDate(startDate)} to ${formatReportDate(now)} |\n`;
+        professionalReport += `| Report Date | ${formatReportDate(now)} |\n`;
+        professionalReport += `| Scope | Reimbursement transactions recorded within the selected period |\n\n`;
+
+        professionalReport += `## Executive Summary\n`;
+        professionalReport += `| Metric | Value |\n`;
+        professionalReport += `| :--- | :--- |\n`;
+        professionalReport += `| Total Spend | **${formatReportCurrency(totalSpend)}** |\n`;
+        professionalReport += `| Total Requests | **${totalRequests}** |\n`;
+        professionalReport += `| Average Request Value | **${formatReportCurrency(averageRequestValue)}** |\n`;
+        professionalReport += `| Data Quality Follow-Up | ${pendingCount} record${pendingCount === 1 ? '' : 's'} |\n`;
+        professionalReport += `| Highest Single Item | ${highestItemLabel} |\n`;
+        professionalReport += `| Highest Staff Spend | ${hasTopStaff ? `${topStaffSummary[0]} (${formatReportCurrency(topStaffSummary[1])})` : 'N/A'} |\n`;
+        professionalReport += `| Highest Client / Location Spend | ${hasTopLocation ? `${topLocationSummary[0]} (${formatReportCurrency(topLocationSummary[1])})` : 'N/A'} |\n\n`;
+
+        professionalReport += `## Key Findings\n`;
+        professionalReport += `- Total reimbursement expenditure for the period was **${formatReportCurrency(totalSpend)}** across **${totalRequests}** request${totalRequests === 1 ? '' : 's'}.\n`;
+        professionalReport += `- The average claim value was **${formatReportCurrency(averageRequestValue)}**, which provides a reference point for future period comparison.\n`;
+        professionalReport += `- ${hasTopStaff ? `The highest staff expenditure was attributed to **${topStaffSummary[0]}**, representing **${formatReportCurrency(topStaffSummary[1])}** or **${shareOfSpend(topStaffSummary[1])}** of total period spend.` : 'No material staff concentration was identified for the selected period.'}\n`;
+        professionalReport += `- ${hasTopLocation ? `The highest client or location expenditure was recorded against **${topLocationSummary[0]}**, totalling **${formatReportCurrency(topLocationSummary[1])}** or **${shareOfSpend(topLocationSummary[1])}** of total period spend.` : 'No material client or location concentration was identified for the selected period.'}\n`;
+        professionalReport += `- ${categorizationStatus}\n\n`;
+
+        professionalReport += `## Staff Expenditure Ranking\n`;
+        professionalReport += `| Rank | Staff Member | Total Spend | Share of Total Spend |\n`;
+        professionalReport += `| :--- | :--- | :--- | :--- |\n`;
+        rankedStaff.forEach((staffEntry, index) => {
+            professionalReport += `| ${index + 1} | ${staffEntry[0]} | **${formatReportCurrency(staffEntry[1])}** | ${shareOfSpend(staffEntry[1])} |\n`;
+        });
+        if (rankedStaff.length === 0) {
+            professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
+        }
+        professionalReport += `\n`;
+
+        professionalReport += `## Client / Location Expenditure Ranking\n`;
+        professionalReport += `| Rank | Client / Location | Total Spend | Share of Total Spend |\n`;
+        professionalReport += `| :--- | :--- | :--- | :--- |\n`;
+        rankedLocations.forEach((locationEntry, index) => {
+            professionalReport += `| ${index + 1} | ${locationEntry[0]} | **${formatReportCurrency(locationEntry[1])}** | ${shareOfSpend(locationEntry[1])} |\n`;
+        });
+        if (rankedLocations.length === 0) {
+            professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
+        }
+        professionalReport += `\n`;
+
+        professionalReport += `## Management Notes\n`;
+        professionalReport += `- The leading staff and client / location concentrations should be reviewed to confirm that expenditure patterns remain consistent with expected operational activity.\n`;
+        professionalReport += `- ${followUpMessage}\n`;
+        professionalReport += `- This report format is suitable for direct circulation within Outlook and other stakeholder reporting channels.\n`;
+
+        setGeneratedReport(professionalReport);
+        setReportEditableContent(professionalReport);
+        setIsEditingReport(false);
+
+        navigator.clipboard.writeText(professionalReport);
+        setReportCopied(type);
+        setTimeout(() => setReportCopied(null), 2000);
+        return;
 
         const topStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
         const topLoc = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
@@ -6360,7 +6475,7 @@ export const App = () => {
     const handleCopyGeneratedReport = async () => {
         const content = isEditingReport ? reportEditableContent : generatedReport;
         if (!content) return;
-        const element = document.getElementById('generated-report-content');
+        const element = document.getElementById('generated-report-copy-content') || document.getElementById('generated-report-content');
         if (element && !isEditingReport) {
             try {
                 const blobHtml = new Blob([element.innerHTML], { type: 'text/html' });
@@ -7426,7 +7541,7 @@ export const App = () => {
                                                 <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '280px' }}>Staff Member</th>
                                                 <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '120px' }}>Category</th>
                                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#ffffff', width: '100px' }}>Amount</th>
-                                                <th style={{ padding: '10px 12px', width: '40px' }}></th>
+                                                <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold', color: '#ffffff', width: '100px' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -7462,9 +7577,22 @@ export const App = () => {
                                                     </td>
 
                                                     <td style={{ padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
-                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <path d="m9 18 6-6-6-6" />
-                                                        </svg>
+                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                                            <button
+                                                                onClick={() => openActivityRowModal(row)}
+                                                                title="Edit NAB item"
+                                                                style={{ background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)', color: '#c7d2fe', borderRadius: '9999px', padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                            >
+                                                                <Edit2 size={12} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => void handleDeleteActivityRow(row)}
+                                                                title="Delete NAB item"
+                                                                style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#fca5a5', borderRadius: '9999px', padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                            >
+                                                                <Trash2 size={12} />
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -7528,6 +7656,7 @@ export const App = () => {
                                                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '200px' }}>Staff Name</th>
                                                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '120px' }}>Amount</th>
                                                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff' }}>Description / Status</th>
+                                                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 'bold', color: '#ffffff', width: '110px' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -7541,10 +7670,32 @@ export const App = () => {
                                                         {row.eodActivity === 'IDLE' ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
+                                                    <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
+                                                        {row.eodActivity === 'IDLE' ? (
+                                                            <span style={{ color: '#64748b', fontSize: '11px' }}>-</span>
+                                                        ) : (
+                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                                                <button
+                                                                    onClick={() => openActivityRowModal(row)}
+                                                                    title="Edit EOD item"
+                                                                    style={{ background: 'rgba(99, 102, 241, 0.15)', border: '1px solid rgba(99, 102, 241, 0.35)', color: '#c7d2fe', borderRadius: '9999px', padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                                >
+                                                                    <Edit2 size={12} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => void handleDeleteActivityRow(row)}
+                                                                    title="Delete EOD item"
+                                                                    style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#fca5a5', borderRadius: '9999px', padding: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                                >
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))}
                                             {todaysProcessedRecords.length === 0 && (
-                                                <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No activity recorded in the current cycle.</td></tr>
+                                                <tr><td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No activity recorded in the current cycle.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
@@ -7638,7 +7789,12 @@ export const App = () => {
                                             {isEditingReport ? (
                                                 <textarea value={reportEditableContent} onChange={(e) => setReportEditableContent(e.target.value)} className="w-full h-[400px] p-4 font-mono text-sm border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 text-white resize-none" placeholder="Edit report content here..." />
                                             ) : (
-                                                <MarkdownRenderer content={generatedReport} id="generated-report-content" theme="dark" />
+                                                <>
+                                                    <MarkdownRenderer content={generatedReport} id="generated-report-content" theme="dark" />
+                                                    <div className="hidden">
+                                                        <MarkdownRenderer content={generatedReport} id="generated-report-copy-content" theme="light" />
+                                                    </div>
+                                                </>
                                             )}
                                         </div>
                                     </div>
