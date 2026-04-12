@@ -1369,8 +1369,9 @@ const buildManualAuditIssues = (
         const receiptNum = (item.receiptNum || '').trim();
         const product = (item.product || '').trim().toLowerCase();
         const amount = normalizeMoneyValue(item.receiptTotal || item.amount, '0.00');
+        const amountNumber = Number(amount);
 
-        if (uid && uid !== '-' && uid !== 'n/a') {
+        if (amountNumber > 0 && uid && uid !== '-' && uid !== 'n/a') {
             duplicateUidMap.set(uid, [
                 ...(duplicateUidMap.get(uid) || []),
                 { rowNum, receiptNum, product, amount }
@@ -1383,7 +1384,7 @@ const buildManualAuditIssues = (
             amount
         ].join('|');
 
-        if (key !== '||0.00') {
+        if (amountNumber > 0 && key !== '||0.00') {
             duplicateReceiptKeyMap.set(key, [
                 ...(duplicateReceiptKeyMap.get(key) || []),
                 { rowNum, receiptNum, product, amount }
@@ -3564,19 +3565,25 @@ export const App = () => {
             const txDateKey = String(tx.dateKey || '').trim().toLowerCase();
             const txAmount = normalizeMoneyValue(String(tx.amount), '0.00');
             const txTotalAmount = normalizeMoneyValue(String(tx.totalAmount), txAmount);
+            const txAmountNumber = Number(txAmount);
+            const txTotalAmountNumber = Number(txTotalAmount);
             const txReference = normalizeReferenceKey(tx.uid);
             const txStoreKey = normalizeTextKey(tx.storeName || '');
 
-            if (!txTotalAmount) return;
+            if (!Number.isFinite(txTotalAmountNumber) || txTotalAmountNumber <= 0 || !Number.isFinite(txAmountNumber) || txAmountNumber <= 0) return;
 
             historyRows.forEach((row: any) => {
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
                 const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
                 const historyTotalAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
+                const historyAmountNumber = Number(historyAmount);
+                const historyTotalAmountNumber = Number(historyTotalAmount);
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
                 const historyNabCodeRaw = String(row.nabCode || row.uid || '').trim();
                 const historyNabCode = isValidNabReference(historyNabCodeRaw) ? historyNabCodeRaw.toUpperCase() : '';
                 const historyStoreKey = normalizeTextKey(String(row.storeName || '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim());
+
+                if (!Number.isFinite(historyTotalAmountNumber) || historyTotalAmountNumber <= 0 || !Number.isFinite(historyAmountNumber) || historyAmountNumber <= 0) return;
 
                 const totalAmountMatch = txTotalAmount === historyTotalAmount;
                 const hasTxDate = Boolean(txDateKey && txDateKey !== '-');

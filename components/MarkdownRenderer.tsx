@@ -13,6 +13,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
   
   let tableBuffer: string[] = [];
   let isProcessingTable = false;
+  let listBuffer: string[] = [];
 
   const isDark = theme === 'dark';
 
@@ -38,6 +39,51 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
 
   // INLINE STYLES FOR OUTLOOK COPYING (Applied when theme is LIGHT)
   const inlineStyles = {
+    container: !isDark ? {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '14px',
+      lineHeight: '1.55',
+      color: '#1f2937'
+    } : {},
+    h1: !isDark ? {
+      fontSize: '28px',
+      lineHeight: '1.2',
+      fontWeight: 700,
+      color: '#111827',
+      margin: '0 0 16px 0'
+    } : {},
+    h2: !isDark ? {
+      fontSize: '20px',
+      lineHeight: '1.3',
+      fontWeight: 700,
+      color: '#111827',
+      margin: '28px 0 12px 0',
+      paddingBottom: '8px',
+      borderBottom: '1px solid #e5e7eb'
+    } : {},
+    h3: !isDark ? {
+      fontSize: '16px',
+      lineHeight: '1.4',
+      fontWeight: 700,
+      color: '#1f2937',
+      margin: '20px 0 8px 0'
+    } : {},
+    p: !isDark ? {
+      margin: '0 0 8px 0',
+      color: '#374151'
+    } : {},
+    strong: !isDark ? {
+      fontWeight: 700,
+      color: '#111827'
+    } : {},
+    ul: !isDark ? {
+      margin: '0 0 12px 0',
+      paddingLeft: '20px',
+      color: '#374151'
+    } : {},
+    li: !isDark ? {
+      marginBottom: '6px'
+    } : {},
     table: !isDark ? { 
         borderCollapse: 'collapse' as const, 
         width: '100%', 
@@ -62,6 +108,30 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     tr: !isDark ? { backgroundColor: '#ffffff' } : {}
   };
 
+  const renderInlineParts = (value: string) => {
+    const parts = value.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className={`font-bold ${styles.strong}`} style={inlineStyles.strong}>{part.slice(2, -2)}</strong>;
+      }
+      return <React.Fragment key={i}>{part}</React.Fragment>;
+    });
+  };
+
+  const flushList = (key: string) => {
+    if (listBuffer.length === 0) return;
+    elements.push(
+      <ul key={key} className={`ml-4 list-disc ${styles.list} pl-1 mb-3`} style={inlineStyles.ul}>
+        {listBuffer.map((item, index) => (
+          <li key={`${key}-${index}`} style={inlineStyles.li}>
+            {renderInlineParts(item)}
+          </li>
+        ))}
+      </ul>
+    );
+    listBuffer = [];
+  };
+
   const renderTable = (rows: string[], key: string) => {
     if (rows.length < 2) return null; // Need at least header and separator or header and body
 
@@ -81,7 +151,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
                     className={`px-3 py-2 font-semibold ${styles.tableHeaderText} border-r ${styles.tableHeaderBorder} last:border-r-0 whitespace-nowrap`}
                     style={inlineStyles.th}
                 >
-                  {header.trim()}
+                  {renderInlineParts(header.trim())}
                 </th>
               ))}
             </tr>
@@ -95,7 +165,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
                     className={`px-3 py-2 ${styles.tableCellText} border-r ${styles.tableCellBorder} last:border-r-0 align-top`}
                     style={inlineStyles.td}
                   >
-                    {cell.trim()}
+                    {renderInlineParts(cell.trim())}
                   </td>
                 ))}
               </tr>
@@ -118,12 +188,14 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
     
     // If we were processing a table and hit a non-table line
     if (isProcessingTable) {
+      flushList(`list-before-table-${index}`);
       elements.push(renderTable(tableBuffer, `table-${index}`));
       tableBuffer = [];
       isProcessingTable = false;
     }
 
     if (trimmed === '') {
+        flushList(`list-blank-${index}`);
         elements.push(<div key={index} className="h-4"></div>);
         return;
     }
@@ -134,45 +206,44 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
 
     // Headers
     if (trimmed.startsWith('### ')) {
-      elements.push(<h3 key={index} className={`text-lg font-bold ${styles.h3} mt-6 mb-2 tracking-tight`}>{trimmed.replace('### ', '')}</h3>);
+      flushList(`list-before-h3-${index}`);
+      elements.push(<h3 key={index} className={`text-lg font-bold ${styles.h3} mt-6 mb-2 tracking-tight`} style={inlineStyles.h3}>{trimmed.replace('### ', '')}</h3>);
       return;
     }
     if (trimmed.startsWith('## ')) {
-      elements.push(<h2 key={index} className={`text-xl font-bold ${styles.h2} mt-8 mb-3 border-b pb-2`}>{trimmed.replace('## ', '')}</h2>);
+      flushList(`list-before-h2-${index}`);
+      elements.push(<h2 key={index} className={`text-xl font-bold ${styles.h2} mt-8 mb-3 border-b pb-2`} style={inlineStyles.h2}>{trimmed.replace('## ', '')}</h2>);
       return;
     }
     if (trimmed.startsWith('# ')) {
-      elements.push(<h1 key={index} className={`text-2xl font-bold ${styles.h1} mt-6 mb-4`}>{trimmed.replace('# ', '')}</h1>);
+      flushList(`list-before-h1-${index}`);
+      elements.push(<h1 key={index} className={`text-2xl font-bold ${styles.h1} mt-6 mb-4`} style={inlineStyles.h1}>{trimmed.replace('# ', '')}</h1>);
       return;
     }
 
     // Lists
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-       elements.push(<li key={index} className={`ml-4 list-disc ${styles.list} pl-1 mb-1`}>{trimmed.replace(/^[-*] /, '')}</li>);
+       listBuffer.push(trimmed.replace(/^[-*] /, ''));
        return;
     }
 
-    // Bold/Text parsing
-    const parts = line.split(/(\*\*.*?\*\*)/g);
+    flushList(`list-before-p-${index}`);
+
     elements.push(
-      <p key={index} className={`${styles.text} leading-relaxed min-h-[1.2em] mb-1`}>
-        {parts.map((part, i) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={i} className={`font-bold ${styles.strong}`}>{part.slice(2, -2)}</strong>;
-          }
-          return part;
-        })}
+      <p key={index} className={`${styles.text} leading-relaxed min-h-[1.2em] mb-1`} style={inlineStyles.p}>
+        {renderInlineParts(line)}
       </p>
     );
   });
 
   // Flush remaining table if file ends with table
+  flushList('list-end');
   if (isProcessingTable && tableBuffer.length > 0) {
       elements.push(renderTable(tableBuffer, `table-end`));
   }
 
   return (
-    <div id={id} className={`font-sans ${className}`}>
+    <div id={id} className={`font-sans ${className}`} style={inlineStyles.container}>
       {elements}
     </div>
   );

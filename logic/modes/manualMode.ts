@@ -9,7 +9,7 @@ export const processManualMode = (options: ModeOptions): ProcessingResult => {
 
 I hope this message finds you well.
 
-I am writing to confirm that your reimbursement request has been successfully processed and the amount has been na-transfer na today.
+I am writing to confirm that your reimbursement request has been successfully processed and the amount has been transfered today.
 
 **Staff Member:** [Enter Staff Name]
 **Amount Transferred:** $0.00
