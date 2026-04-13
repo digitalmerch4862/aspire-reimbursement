@@ -904,6 +904,21 @@ const stripClaimantConfirmation = (content: string): string => {
     return String(content || '').replace(/\n*Hi,[\s\S]*?I hope this message finds you well\.[\s\S]*?(?=\*\*Summary of Expenses\*\*|Summary of Expenses:|\*\*TOTAL AMOUNT:|TOTAL AMOUNT:|$)/gi, '\n');
 };
 
+const stripUniqueIdColumnFromSummary = (content: string): string => {
+    const text = String(content || '');
+    if (!text.includes('Unique ID / Fallback')) return text;
+
+    return text
+        .replace(/\|\s*Receipt #\s*\|\s*Unique ID \/ Fallback\s*\|\s*Store Name\s*\|/gi, '| Receipt # | Store Name |')
+        .replace(/\|\s*:---\s*\|\s*:---\s*\|\s*:---\s*\|/gi, '| :--- | :--- |')
+        .replace(
+            /^(\|\s*[^|\n]+\s*)\|\s*([^|\n]*)\s*\|\s*([^|\n]*)\s*\|\s*([^|\n]*)\|\s*([^|\n]*)\|\s*([^|\n]*)\|\s*([^|\n]*)\|\s*([^|\n]*)\|\s*([^|\n]*)\s*\|$/gm,
+            '| $1| $3 | $4 | $5 | $6 | $7 | $8 | $9 |'
+        )
+        .replace(/\|\s+/g, '| ')
+        .replace(/\s+\|/g, ' |');
+};
+
 const extractSummaryExpensesSection = (content: string): string => {
     const text = String(content || '');
     if (!text.trim()) return '';
@@ -1338,6 +1353,20 @@ const normalizeReceiptRow = (
     if (!normalized.uniqueId) normalized.uniqueId = fallbackUid;
 
     return normalized;
+};
+
+const formatStoreDateFallback = (storeName: string, dateValue: string): string => {
+    const store = String(storeName || '').trim() || 'Unknown Store';
+    const date = String(dateValue || '').trim() || 'Unknown Date';
+    return `${store} + ${date}`;
+};
+
+const resolveUidDisplayValue = (uid: string, storeName: string, dateValue: string): string => {
+    const normalizedUid = String(uid || '').trim();
+    if (/^RCP-\s*\d+/i.test(normalizedUid)) {
+        return formatStoreDateFallback(storeName, dateValue);
+    }
+    return normalizedUid || formatStoreDateFallback(storeName, dateValue);
 };
 
 const buildManualAuditIssues = (
@@ -3108,7 +3137,7 @@ export const App = () => {
                 tableRowsFound = true;
                 allRows.push({
                     id: `${internalId}-group`,
-                    uid: uidFallbacks[0] || receiptId,
+                    uid: resolveUidDisplayValue(uidFallbacks[0] || receiptId, '-', dateProcessed),
                     internalId: internalId,
                     isVipManual,
                     isReceiptLiquidation,
@@ -3163,7 +3192,7 @@ export const App = () => {
 
                     allRows.push({
                         id: `${internalId}-${i}`, // Unique key for React using DB ID
-                        uid: normalized.uniqueId || fallbackUid,
+                        uid: resolveUidDisplayValue(normalized.uniqueId || fallbackUid, normalized.storeName, receiptDate),
                         internalId: internalId,
                         isVipManual,
                         isReceiptLiquidation,
@@ -3191,7 +3220,7 @@ export const App = () => {
             if (!tableRowsFound) {
                 allRows.push({
                     id: `${internalId}-summary`,
-                    uid: uidFallbacks[0] || receiptId,
+                    uid: resolveUidDisplayValue(uidFallbacks[0] || receiptId, 'Petty Cash / Reimbursement', dateProcessed),
                     internalId: internalId,
                     isVipManual,
                     isReceiptLiquidation,
@@ -6535,6 +6564,10 @@ export const App = () => {
         return claimantEmailContent;
     }, [formVsReceiptTotals.isFormHigherMismatch, isJulianApprovalRequired, julianEmailContent, claimantEmailContent]);
 
+    const dashboardDisplayEmailContent = useMemo(() => {
+        return stripUniqueIdColumnFromSummary(displayEmailContent);
+    }, [displayEmailContent]);
+
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
         duplicateCheckResult.redMatches.forEach((match) => {
@@ -7550,7 +7583,7 @@ export const App = () => {
                                                     ) : (
                                                         <>
                                                             <MarkdownRenderer
-                                                                content={displayEmailContent}
+                                                                content={dashboardDisplayEmailContent}
                                                                 id="email-output-content"
                                                                 theme="dark"
                                                             />

@@ -2,6 +2,15 @@ import { ProcessingResult, ModeOptions, ManualAuditIssue } from './types';
 import { normalizeMoneyValue } from './helpers';
 import { processSoloMode } from './soloMode';
 
+const displayReceiptFallback = (uniqueId: string, storeName: string, dateTime: string): string => {
+    const normalizedUid = String(uniqueId || '').trim();
+    const fallbackValue = `${String(storeName || '').trim() || 'Unknown Store'} + ${String(dateTime || '').trim() || 'Unknown Date'}`;
+    if (/^RCP-\s*\d+/i.test(normalizedUid)) {
+        return fallbackValue;
+    }
+    return normalizedUid || fallbackValue;
+};
+
 export const processReceiptMode = (options: ModeOptions): ProcessingResult & { errorMessage?: string; issues?: ManualAuditIssue[] } => {
     const soloResult = processSoloMode({
         ...options,
@@ -33,13 +42,13 @@ Activity: Audit
 Description: Liquidation
 Amount: $${totalAmount.toFixed(2)}
 NAB Code:
-<!-- UID_FALLBACKS:${parsedItems.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
+<!-- UID_FALLBACKS:${parsedItems.map((item, i) => displayReceiptFallback(item.uniqueId || item.receiptNum || String(i + 1), item.storeName, item.dateTime)).join('||')} -->
 
 Summary of Expenses:
 
 | Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-${parsedItems.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${item.uniqueId || '-'} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
+${parsedItems.map((item, i) => `| ${item.receiptNum || (i + 1)} | ${displayReceiptFallback(item.uniqueId || '-', item.storeName, item.dateTime)} | ${item.storeName || '-'} | ${item.dateTime || '-'} | ${item.product || '-'} | ${item.category || 'Other'} | ${item.itemAmount === 'Included in total' ? 'Included in total' : `$${normalizeMoneyValue(item.itemAmount, item.amount)}`} | $${normalizeMoneyValue(item.receiptTotal, item.amount)} | ${item.notes || '-'} |`).join('\n')}
 
 TOTAL AMOUNT: $${totalAmount.toFixed(2)}
 `;
