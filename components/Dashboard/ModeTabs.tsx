@@ -1,7 +1,7 @@
 import React from 'react';
-import { User, Users, Edit3 } from 'lucide-react';
+import { User, Users, Edit3, ReceiptText } from 'lucide-react';
 
-export type DashboardMode = 'solo' | 'group' | 'manual';
+export type DashboardMode = 'solo' | 'group' | 'manual' | 'receipt';
 
 interface ModeTabsProps {
     currentMode: DashboardMode;
@@ -13,10 +13,11 @@ const ModeTabs: React.FC<ModeTabsProps> = ({ currentMode, onModeChange }) => {
         { id: 'solo', label: 'Solo Mode', icon: User, color: 'emerald' },
         { id: 'group', label: 'Group Mode', icon: Users, color: 'amber' },
         { id: 'manual', label: 'Manual Mode', icon: Edit3, color: 'cyan' },
+        { id: 'receipt', label: 'Receipt Mode', icon: ReceiptText, color: 'rose' },
     ];
 
     return (
-        <div className="grid grid-cols-3 gap-2 rounded-2xl bg-black/25 border border-white/10 p-1.5 mb-6">
+        <div className="grid grid-cols-4 gap-2 rounded-2xl bg-black/25 border border-white/10 p-1.5 mb-6">
             {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = currentMode === tab.id;
@@ -25,6 +26,7 @@ const ModeTabs: React.FC<ModeTabsProps> = ({ currentMode, onModeChange }) => {
                 if (tab.id === 'solo') activeStyles = 'text-emerald-100 bg-emerald-500/25 border border-emerald-400/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]';
                 if (tab.id === 'group') activeStyles = 'text-amber-100 bg-amber-500/25 border border-amber-400/40 shadow-[0_0_20px_rgba(245,158,11,0.3)]';
                 if (tab.id === 'manual') activeStyles = 'text-cyan-100 bg-cyan-500/25 border border-cyan-400/40 shadow-[0_0_20px_rgba(6,182,212,0.3)]';
+                if (tab.id === 'receipt') activeStyles = 'text-rose-100 bg-rose-500/25 border border-rose-400/40 shadow-[0_0_20px_rgba(244,63,94,0.3)]';
 
                 return (
                     <button

@@ -12,6 +12,7 @@ import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
 import ManualMode from './components/Dashboard/ManualMode';
+import ReceiptMode from './components/Dashboard/ReceiptMode';
 import LiquidationTracker from './components/Dashboard/LiquidationTracker';
 import ModeTabs, { DashboardMode } from './components/Dashboard/ModeTabs';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
@@ -541,7 +542,7 @@ interface WarningToastState {
     message: string;
 }
 
-type RequestMode = 'solo' | 'group' | 'manual';
+type RequestMode = 'solo' | 'group' | 'manual' | 'receipt';
 
 
 type QuickEditFieldKey =
@@ -1505,12 +1506,6 @@ export const App = () => {
     const [reportCopied, setReportCopied] = useState<'nab' | 'eod' | 'analytics' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'generated' | null>(null);
 
     const [activeTab, setActiveTab] = useState<'dashboard' | 'database' | 'nab_log' | 'eod' | 'analytics' | 'settings'>('dashboard');
-
-    useEffect(() => {
-        if (requestMode === 'manual' && activeTab === 'dashboard') {
-            handleProcess();
-        }
-    }, [requestMode, activeTab]);
 
     const [loadingSplash, setLoadingSplash] = useState(true);
     const [nowTick, setNowTick] = useState(() => Date.now());
@@ -2956,6 +2951,8 @@ export const App = () => {
             const content = record.full_email_content || "";
             const internalId = record.id;
             const isGroupTable = content.includes('<!-- GROUP_TABLE_FORMAT -->');
+            const isVipManual = content.includes('<!-- ENTRY TYPE: VIP_MANUAL -->');
+            const isReceiptLiquidation = content.includes('<!-- ENTRY TYPE: RECEIPT_LIQUIDATION -->');
 
             // Extract Unique Receipt ID from content
             const receiptIdMatch = content.match(/\*\*Receipt ID:\*\*\s*(.*?)(?:\n|$)/);
@@ -3113,6 +3110,8 @@ export const App = () => {
                     id: `${internalId}-group`,
                     uid: uidFallbacks[0] || receiptId,
                     internalId: internalId,
+                    isVipManual,
+                    isReceiptLiquidation,
                     timestamp,
                     rawDate,
                     ypName: matchedClient || '-',
@@ -3166,6 +3165,8 @@ export const App = () => {
                         id: `${internalId}-${i}`, // Unique key for React using DB ID
                         uid: normalized.uniqueId || fallbackUid,
                         internalId: internalId,
+                        isVipManual,
+                        isReceiptLiquidation,
                         timestamp,
                         rawDate,
                         ypName: ypName,
@@ -3192,6 +3193,8 @@ export const App = () => {
                     id: `${internalId}-summary`,
                     uid: uidFallbacks[0] || receiptId,
                     internalId: internalId,
+                    isVipManual,
+                    isReceiptLiquidation,
                     timestamp,
                     rawDate,
                     ypName: ypName,
@@ -3723,7 +3726,17 @@ export const App = () => {
             return [{
                 id: 'special',
                 title: 'Special Instruction Active',
-                detail: 'Manual validation rules are bypassed. Direct entry enabled.',
+                detail: 'VIP / special instruction flow is active. Structured request details will be tracked for monitoring.',
+                severity: 'info',
+                status: 'pass'
+            }];
+        }
+
+        if (requestMode === 'receipt') {
+            return [{
+                id: 'receipt-log',
+                title: 'Receipt Reference Active',
+                detail: 'Petty cash liquidation receipts will be logged for fraud history, Database reference, and EOD as Audit / Liquidation.',
                 severity: 'info',
                 status: 'pass'
             }];
@@ -4489,7 +4502,9 @@ export const App = () => {
         let totalSpend = 0;
         let totalRequests = 0;
 
-        databaseRows.forEach(row => {
+        databaseRows
+            .filter((row: any) => !row.isReceiptLiquidation)
+            .forEach(row => {
             const val = parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")) || 0;
 
             const yp = row.ypName || 'Unknown';
@@ -4536,7 +4551,7 @@ export const App = () => {
         }
 
         const relevantRows = databaseRows.filter(row => {
-            return row.rawDate >= startDate;
+            return !row.isReceiptLiquidation && row.rawDate >= startDate;
         });
 
         if (relevantRows.length === 0) {
@@ -5666,6 +5681,29 @@ export const App = () => {
         });
     };
 
+    const handleSaveReceiptLog = () => {
+        setSaveStatus('idle');
+        setErrorMessage(null);
+
+        if (!results?.phase4) {
+            setErrorMessage('Run Start Receipt Audit first to generate the liquidation reference log.');
+            return;
+        }
+
+        if (currentInputTransactions.length === 0) {
+            setErrorMessage('No receipt rows found for Receipt Mode.');
+            return;
+        }
+
+        const finalContent = appendDuplicateAuditMeta(results.phase4, duplicateCheckResult.signal !== 'green' ? {
+            signal: duplicateCheckResult.signal,
+            detail: 'Receipt Mode reference log saved for petty cash liquidation history.',
+            lookbackDays: DUPLICATE_LOOKBACK_DAYS
+        } : undefined);
+
+        handleSaveToCloud(finalContent);
+    };
+
     const handleApproveManualAudit = () => {
         setShowManualAuditModal(false);
         bypassManualAuditRef.current = true;
@@ -5750,6 +5788,24 @@ export const App = () => {
             return;
         }
 
+        if (!receiptDetailsText.trim() && requestMode === 'receipt') {
+            setErrorMessage('Paste receipt details first for Receipt Mode.');
+            return;
+        }
+
+        if (requestMode === 'manual') {
+            const formText = reimbursementFormText.trim();
+            const requestedBy = formText.match(/Requested\s*By:\s*(.+)/i)?.[1]?.trim() || '';
+            const staffMember = formText.match(/Staff\s*Member:\s*(.+)/i)?.[1]?.trim() || '';
+            const amount = formText.match(/Amount:\s*\$?(.+)/i)?.[1]?.trim() || '';
+            const reason = formText.match(/Reason\s*\/\s*Special\s*Instruction:\s*([\s\S]*?)(?:\nNotes:|\n*$)/i)?.[1]?.trim() || '';
+
+            if (!requestedBy || !staffMember || !amount || !reason) {
+                setErrorMessage('Manual Mode requires Requested By, Staff Member, Amount, and Reason / Special Instruction.');
+                return;
+            }
+        }
+
         setProcessingState(ProcessingState.PROCESSING);
         setErrorMessage(null);
         setResults(null);
@@ -5787,6 +5843,8 @@ export const App = () => {
 
             if (requestMode === 'manual') {
                 result = ModeLogic.processManualMode(options);
+            } else if (requestMode === 'receipt') {
+                result = ModeLogic.processReceiptMode(options);
             } else if (requestMode === 'group') {
                 result = ModeLogic.processGroupMode(options);
             } else {
@@ -6127,12 +6185,18 @@ export const App = () => {
     const processRecords = (records: any[]) => {
         return records.map(r => {
             const content = r.full_email_content || "";
+            const isVipManual = content.includes('<!-- ENTRY TYPE: VIP_MANUAL -->');
+            const isReceiptLiquidation = content.includes('<!-- ENTRY TYPE: RECEIPT_LIQUIDATION -->');
 
             const nabRefMatch = content.match(/\*\*NAB (?:Code|Reference):?\*\*?\s*(.*?)(?:\n|$)/i);
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (content.includes("<!-- STATUS: PENDING -->")) {
+            if (isVipManual) {
+                isDiscrepancy = content.includes("<!-- STATUS: PENDING -->");
+            } else if (isReceiptLiquidation) {
+                isDiscrepancy = false;
+            } else if (content.includes("<!-- STATUS: PENDING -->")) {
                 isDiscrepancy = true;
             } else if (content.includes("<!-- STATUS: PAID -->")) {
                 isDiscrepancy = false;
@@ -6150,7 +6214,9 @@ export const App = () => {
                 if (nabRefMatch) nabRef = nabRefMatch[1].trim();
             }
 
-            if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
+            if (isReceiptLiquidation) {
+                nabRef = 'REFERENCE';
+            } else if (!nabRef || isPendingNabCodeValue(nabRef) || (typeof nabRef === 'string' && nabRef.startsWith('DISC-'))) {
                 nabRef = isDiscrepancy ? 'N/A' : 'PENDING';
             }
 
@@ -6180,6 +6246,8 @@ export const App = () => {
                 nabRef: nabRef,
                 clientName: clientName,
                 isDiscrepancy: isDiscrepancy,
+                isVipManual: isVipManual,
+                isReceiptLiquidation: isReceiptLiquidation,
                 discrepancyReason: discrepancyReason,
                 time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 date: new Date(r.created_at).toLocaleDateString(),
@@ -6197,7 +6265,11 @@ export const App = () => {
 
         const scheduled = records.map(record => {
             const hasValidNabCode = isValidNabReference(record.nabRef);
-            const activity = hasValidNabCode ? 'Reimbursement' : 'Pending';
+            const activity = record.isReceiptLiquidation
+                ? 'Audit'
+                : record.isVipManual
+                ? 'Audit'
+                : hasValidNabCode ? 'Reimbursement' : 'Pending';
 
             const startTime = new Date(currentTime);
             startTime.setMinutes(startTime.getMinutes() + 1);
@@ -6217,7 +6289,13 @@ export const App = () => {
             const timeEndStr = endTime.toLocaleTimeString('en-GB', { hour12: false });
 
             let status = '';
-            if (activity === 'Pending') {
+            if (record.isReceiptLiquidation) {
+                status = 'Liquidation';
+            } else if (record.isVipManual) {
+                status = hasValidNabCode
+                    ? `Special Instruction - Paid to Nab [${record.nabRef}]`
+                    : 'Special Instruction';
+            } else if (activity === 'Pending') {
                 const reason = String(record.discrepancyReason || '').trim();
                 if (/for revision mismatch reimbursement form total is higher than receipt total/i.test(reason)) {
                     status = 'For revision mismatch reimbursement form total is higher than receipt total';
@@ -6363,8 +6441,8 @@ export const App = () => {
         });
         return uniqueNabCodes.size;
     }, [todaysProcessedRecords]);
-    const pendingCountToday = todaysProcessedRecords.filter(r => !isValidNabReference(r.nabRef)).length;
-    const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && r.nabRef !== 'PENDING' && r.nabRef !== '');
+    const pendingCountToday = todaysProcessedRecords.filter(r => !r.isReceiptLiquidation && !isValidNabReference(r.nabRef)).length;
+    const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && !r.isVipManual && !r.isReceiptLiquidation && r.nabRef !== 'PENDING' && r.nabRef !== '');
     const totalAmount = nabReportData.reduce((sum, r) => sum + parseFloat(String(r.amount).replace(/[^0-9.-]+/g, "")), 0);
 
     const getSaveButtonText = () => {
@@ -6375,6 +6453,9 @@ export const App = () => {
         if (requestMode === 'manual') {
 
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save to NAB/EOD</>;
+        }
+        if (requestMode === 'receipt') {
+            return <><CloudUpload size={12} strokeWidth={2.5} /> Save Receipt Log</>;
         }
         if (results?.phase4.toLowerCase().includes('discrepancy')) {
             return <><CloudUpload size={12} strokeWidth={2.5} /> Save Record</>;
@@ -6652,6 +6733,35 @@ export const App = () => {
                                 </div>
 
                                 <div className="space-y-4">
+                                    {String(selectedRow.full_email_content || '').includes('<!-- ENTRY TYPE: VIP_MANUAL -->') && (
+                                        <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4 space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full border border-cyan-400/30 bg-cyan-500/15 text-cyan-200 text-[11px] font-semibold uppercase tracking-wider">
+                                                    VIP Manual
+                                                </span>
+                                                <span className="text-xs text-cyan-100/80">Special Instruction</span>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Requested By</p>
+                                                    <p className="text-cyan-50">{String(selectedRow.full_email_content || '').match(/\*\*Requested By:\*\*\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Client / Location</p>
+                                                    <p className="text-cyan-50">{String(selectedRow.full_email_content || '').match(/\*\*Client\s*\/\s*Location:\*\*\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || '-'}</p>
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <p className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Reason / Special Instruction</p>
+                                                    <p className="text-cyan-50">{String(selectedRow.full_email_content || '').match(/\*\*Reason\s*\/\s*Special\s*Instruction:\*\*\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || '-'}</p>
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <p className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Notes</p>
+                                                    <p className="text-cyan-50">{String(selectedRow.full_email_content || '').match(/\*\*Notes:\*\*\s*(.*?)(?:\n|$)/i)?.[1]?.trim() || '-'}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-1">
                                             <label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Staff Name</label>
@@ -6823,6 +6933,7 @@ export const App = () => {
                                             <tbody className="divide-y divide-white/5">
                                                 {filteredDatabaseRows.map((row, index) => {
                                                     const isPending = String(row.nabCode || '').trim().toUpperCase() === 'PENDING';
+                                                    const typeLabel = row.isVipManual ? 'VIP Manual' : row.isReceiptLiquidation ? 'Liquidation' : (isPending ? '-' : row.expenseType);
                                                     return (
                                                         <tr
                                                             key={row.id}
@@ -6853,7 +6964,19 @@ export const App = () => {
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{row.youngPersonName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.expenseType}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">
+                                                                {row.isVipManual ? (
+                                                                    <span className="inline-flex items-center px-2 py-1 rounded-full border border-cyan-400/30 bg-cyan-500/15 text-cyan-200 font-semibold">
+                                                                        VIP Manual
+                                                                    </span>
+                                                                ) : row.isReceiptLiquidation ? (
+                                                                    <span className="inline-flex items-center px-2 py-1 rounded-full border border-rose-400/30 bg-rose-500/15 text-rose-200 font-semibold">
+                                                                        Liquidation
+                                                                    </span>
+                                                                ) : (
+                                                                    typeLabel
+                                                                )}
+                                                            </td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[200px]" title={row.product}>{isPending ? '-' : row.product}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.receiptDate}</td>
                                                             <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.dateProcessed}</td>
@@ -6915,6 +7038,20 @@ export const App = () => {
 
                                 {requestMode === 'manual' && (
                                     <ManualMode
+                                        reimbursementFormText={reimbursementFormText}
+                                        setReimbursementFormText={setReimbursementFormText}
+                                        handleProcess={handleProcess}
+                                        processingState={processingState}
+                                        errorMessage={errorMessage}
+                                        results={results}
+                                        resetAll={resetAll}
+                                    />
+                                )}
+
+                                {requestMode === 'receipt' && (
+                                    <ReceiptMode
+                                        receiptDetailsText={receiptDetailsText}
+                                        setReceiptDetailsText={setReceiptDetailsText}
                                         handleProcess={handleProcess}
                                         processingState={processingState}
                                         errorMessage={errorMessage}
@@ -7189,7 +7326,13 @@ export const App = () => {
                                                         <Plus size={12} strokeWidth={3} /> Add Box
                                                     </button>
                                                     <button
-                                                        onClick={saveStatus === 'success' ? handleStartNewAudit : (requestMode === 'manual' ? handleSaveSpecialInstruction : handleSmartSave)}
+                                                        onClick={saveStatus === 'success'
+                                                            ? handleStartNewAudit
+                                                            : requestMode === 'manual'
+                                                                ? handleSaveSpecialInstruction
+                                                                : requestMode === 'receipt'
+                                                                    ? handleSaveReceiptLog
+                                                                    : handleSmartSave}
 
 
                                                         disabled={isSaving || isEditing}
