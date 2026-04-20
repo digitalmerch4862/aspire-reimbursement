@@ -161,15 +161,24 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
         totalAmount = receiptGrandTotal;
     }
 
-    const formTotalValue = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : totalAmount;
-    const receiptTotalValue = receiptGrandTotal !== null ? receiptGrandTotal : totalAmount;
+    const safeNum = (v: any) => {
+        const n = parseFloat(normalizeMoneyValue(String(v ?? ''), '0.00'));
+        return Number.isFinite(n) ? n : 0;
+    };
+    const itemsFormSum = items.reduce((sum, item) => sum + safeNum(item.itemAmount || item.amount), 0);
+    const itemsReceiptSum = items.reduce((sum, item) => sum + safeNum(item.receiptTotal || item.amount), 0);
+
+    const parsedFormTotal = formTotalMatch ? parseFloat(formTotalMatch[1].replace(/,/g, '')) : NaN;
+    const formTotalValue = Number.isFinite(parsedFormTotal) && parsedFormTotal > 0
+        ? parsedFormTotal
+        : itemsFormSum;
+    const receiptTotalValue = receiptGrandTotal !== null && Number.isFinite(receiptGrandTotal) && receiptGrandTotal > 0
+        ? receiptGrandTotal
+        : itemsReceiptSum;
     const differenceAmount = Math.abs((formTotalValue || 0) - (receiptTotalValue || 0));
 
-    if (!formTotalMatch && !receiptTotalMatch && items.length > 0) {
-        totalAmount = items.reduce((sum, item) => {
-            const val = parseFloat(normalizeMoneyValue(item.receiptTotal || item.amount, '0.00'));
-            return sum + (isNaN(val) ? 0 : val);
-        }, 0);
+    if ((!formTotalMatch && !receiptTotalMatch && items.length > 0) || totalAmount <= 0) {
+        totalAmount = itemsReceiptSum > 0 ? itemsReceiptSum : itemsFormSum;
     }
 
     // Rules Blocking / Issues
@@ -206,9 +215,9 @@ Address: ${address || '[Enter Address]'}
 Approved By: ${approvedBy || '[Enter Approver]'}
 Amount: $${totalAmount.toFixed(2)}
 
-Reimbursement form total is ${formTotalValue.toFixed(2)}
-Receipt total is ${receiptTotalValue.toFixed(2)}
-Difference amount is ${differenceAmount.toFixed(2)}
+Reimbursement form total is $${formTotalValue.toFixed(2)}
+Receipt total is $${receiptTotalValue.toFixed(2)}
+Difference amount is $${differenceAmount.toFixed(2)}
 
 NAB Code:
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
