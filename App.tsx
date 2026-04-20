@@ -3735,7 +3735,7 @@ export const App = () => {
         fraudPopupSignalKeyRef.current = fraudPopupPayload.signalKey;
         setPendingProcessResult(null);
         setFraudDuplicates(fraudPopupPayload.duplicates);
-        setFraudReceiptRows(fraudPopupPayload.rows);
+        setFraudReceiptRows(fraudPopupPayload.rows.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
         setShowFraudPopup(true);
     }, [requestMode, processingState, showSaveModal, showFraudPopup, fraudPopupPayload]);
 
@@ -6118,7 +6118,7 @@ export const App = () => {
                     // If fraud detected, show popup
                     if (allFraudDuplicates.length > 0) {
                         setFraudDuplicates(allFraudDuplicates);
-                        setFraudReceiptRows(fraudReceiptsList);
+                        setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
                         setPendingProcessResult(result);
                         setShowFraudPopup(true);
                         setProcessingState(ProcessingState.IDLE);
