@@ -3607,7 +3607,7 @@ export const App = () => {
             historyRows.forEach((row: any) => {
                 const historyDateKey = toDateKey(String(row.receiptDate || row.dateProcessed || ''));
                 const historyAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
-                const historyTotalAmount = normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00');
+                const historyTotalAmount = normalizeMoneyValue(String(row.totalAmount || row.amount || '0.00'), historyAmount);
                 const historyAmountNumber = Number(historyAmount);
                 const historyTotalAmountNumber = Number(historyTotalAmount);
                 const historyReference = normalizeReferenceKey(String(row.uid || row.nabCode || ''));
@@ -3915,7 +3915,7 @@ export const App = () => {
                 id: 'r3',
                 title: rule3.title,
                 detail: isOver300ApprovalRequired
-                    ? `Total reimbursement amount is $${currentInputOverallAmount.toFixed(2)} (at or above $300): Save as Pending only with Julian approval.`
+                    ? `Total reimbursement amount is $${(Number.isFinite(currentInputOverallAmount) ? currentInputOverallAmount : 0).toFixed(2)} (at or above $300): Save as Pending only with Julian approval.`
                     : overLimitCount > 0
                         ? `${overLimitCount} transaction(s) are more than $300 (partial blocked: Save as Pending only).`
                         : 'Total reimbursement amount is below $300 threshold.',

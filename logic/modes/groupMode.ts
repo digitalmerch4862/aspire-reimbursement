@@ -73,7 +73,8 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
             const staffName = normalizeStaffName(lines[0] || '');
 
             const amountMatch = block.match(/Amount:\s*\$?([0-9,.]+(?:\.[0-9]{2})?)/i);
-            const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+            const parsedAmount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+            const amount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
 
             const ypMatch = block.match(/(?:YP|YB)\s*Name:\s*(.+)/i);
             const ypName = ypMatch ? ypMatch[1].trim() : '';
