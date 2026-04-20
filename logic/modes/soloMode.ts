@@ -175,7 +175,7 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     const receiptTotalValue = receiptGrandTotal !== null && Number.isFinite(receiptGrandTotal) && receiptGrandTotal > 0
         ? receiptGrandTotal
         : itemsReceiptSum;
-    const differenceAmount = Math.abs((formTotalValue || 0) - (receiptTotalValue || 0));
+    const differenceAmount = Math.abs(formTotalValue - receiptTotalValue);
 
     if ((!formTotalMatch && !receiptTotalMatch && items.length > 0) || totalAmount <= 0) {
         totalAmount = itemsReceiptSum > 0 ? itemsReceiptSum : itemsFormSum;
@@ -215,9 +215,8 @@ Address: ${address || '[Enter Address]'}
 Approved By: ${approvedBy || '[Enter Approver]'}
 Amount: $${totalAmount.toFixed(2)}
 
-Reimbursement form total is $${formTotalValue.toFixed(2)}
-Receipt total is $${receiptTotalValue.toFixed(2)}
-Difference amount is $${differenceAmount.toFixed(2)}
+Reimbursement Form Total: $${formTotalValue.toFixed(2)}
+Receipt Total:            $${receiptTotalValue.toFixed(2)}${differenceAmount > 0.01 ? `\n⚠ Discrepancy:           $${differenceAmount.toFixed(2)}` : ''}
 
 NAB Code:
 <!-- UID_FALLBACKS:${items.map((item, i) => item.uniqueId || item.receiptNum || String(i + 1)).join('||')} -->
