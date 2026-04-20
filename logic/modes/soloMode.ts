@@ -191,9 +191,12 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
         issues.push({ level: 'error', message: 'No valid receipt rows found. Check table format.' });
     } else {
         // Amount Mismatch Rule
-        if (receiptGrandTotal !== null && Number.isFinite(receiptGrandTotal) && totalAmount > 0) {
-            if (Math.abs(totalAmount - receiptGrandTotal) > 0.01) {
-                issues.push({ level: 'warning', message: `Total mismatch: Form $${totalAmount.toFixed(2)} vs Receipt $${receiptGrandTotal.toFixed(2)}.` });
+        if (formTotalValue > 0 && receiptTotalValue > 0) {
+            if (Math.abs(formTotalValue - receiptTotalValue) > 0.01) {
+                issues.push({
+                    level: 'warning',
+                    message: `Total mismatch: Form $${formTotalValue.toFixed(2)} vs Receipt $${receiptTotalValue.toFixed(2)} (difference: $${differenceAmount.toFixed(2)}).`
+                });
             }
         }
     }
