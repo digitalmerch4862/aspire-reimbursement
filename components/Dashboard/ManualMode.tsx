@@ -13,12 +13,12 @@ interface ManualModeProps {
 }
 
 const FIELD_PATTERNS = {
-    requestedBy: /Requested\s*By:\s*(.+)/i,
-    staffMember: /Staff\s*Member:\s*(.+)/i,
-    amount: /Amount:\s*\$?(.+)/i,
-    clientLocation: /Client\s*\/\s*Location:\s*(.+)/i,
-    reason: /Reason\s*\/\s*Special\s*Instruction:\s*([\s\S]*?)(?:\nNotes:|\n*$)/i,
-    notes: /Notes:\s*([\s\S]*)/i
+    requestedBy: /Requested[ \t]*By:[ \t]*([^\n]+)/i,
+    staffMember: /Staff[ \t]*Member:[ \t]*([^\n]+)/i,
+    amount: /Amount:[ \t]*\$?([^\n]+)/i,
+    clientLocation: /Client[ \t]*\/[ \t]*Location:[ \t]*([^\n]+)/i,
+    reason: /Reason[ \t]*\/[ \t]*Special[ \t]*Instruction:[ \t]*([\s\S]*?)(?:\nNotes:|\n*$)/i,
+    notes: /Notes:[ \t]*([\s\S]*)/i
 };
 
 const parseManualForm = (text: string) => ({
