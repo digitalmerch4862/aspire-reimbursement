@@ -7394,6 +7394,15 @@ export const App = () => {
                                                 const amountOptionsRaw = Array.from(new Set(parsedTransactions.map((entry) => entry.amount.replace(/[^0-9.\-]/g, '')).filter(Boolean)));
                                                 const selectedAmount = amountSelectionByTx.get(txKey) || tx.amount.replace(/[^0-9.\-]/g, '') || '0.00';
                                                 const amountOptions = amountOptionsRaw.length > 0 ? amountOptionsRaw : [selectedAmount];
+                                                const numericSelectedAmount = parseFloat(selectedAmount) || 0;
+                                                const totalsHaveBoth = formVsReceiptTotals.formTotal !== null && formVsReceiptTotals.receiptTotal !== null;
+                                                const totalsMatch = totalsHaveBoth && Math.abs((formVsReceiptTotals.formTotal as number) - (formVsReceiptTotals.receiptTotal as number)) <= 0.01;
+                                                const totalsMismatch = totalsHaveBoth && !totalsMatch;
+                                                const amountColorClass = requestMode === 'solo' && numericSelectedAmount > 300 && totalsMismatch
+                                                    ? 'text-red-400'
+                                                    : requestMode === 'solo' && totalsMatch
+                                                        ? 'text-emerald-400'
+                                                        : 'text-emerald-400';
 
                                                 return (
                                                     <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
@@ -7460,7 +7469,7 @@ export const App = () => {
                                                                         </button>
                                                                     )}
                                                                 </div>
-                                                                <div className="bg-black/30 rounded-xl p-3 border border-white/5 hover:border-emerald-500/30 transition-colors">
+                                                                <div className={`bg-black/30 rounded-xl p-3 border border-white/5 transition-colors ${requestMode === 'solo' && numericSelectedAmount > 300 && totalsMismatch ? 'hover:border-red-500/30' : 'hover:border-emerald-500/30'}`}>
                                                                     <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
                                                                     <div className="flex justify-between items-center">
                                                                         <input
@@ -7468,9 +7477,9 @@ export const App = () => {
                                                                             value={selectedAmount}
                                                                             onChange={(e) => handleTransactionAmountChange(txKey, e.target.value)}
                                                                             placeholder="0.00"
-                                                                            className="w-full bg-transparent text-emerald-400 font-bold text-lg border-none outline-none"
+                                                                            className={`w-full bg-transparent font-bold text-lg border-none outline-none ${amountColorClass}`}
                                                                         />
-                                                                        <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className="text-emerald-500 hover:text-white transition-colors ml-2">
+                                                                        <button onClick={() => handleCopyField(selectedAmount, `amount-${txKey}`)} className={`${amountColorClass} hover:text-white transition-colors ml-2`}>
                                                                             {copiedField === `amount-${txKey}` ? <Check size={14} /> : <Copy size={14} />}
                                                                         </button>
                                                                     </div>
