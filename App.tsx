@@ -528,6 +528,8 @@ interface DuplicateCheckResult {
 interface SaveModalDecision {
     mode: 'nab' | 'red' | 'yellow' | 'already-paid';
     detail: string;
+    pendingSignal?: string;
+    pendingDetail?: string;
 }
 
 interface SaveToastState {
@@ -5617,7 +5619,7 @@ export const App = () => {
             };
             
             const isBlockSignal = signal === 'red' || signal === 'orange';
-            
+
             const detail = `⚠️ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
                 `Amount: $${amountPreview}\n` +
                 `Date: ${datePreview}\n` +
@@ -5625,11 +5627,23 @@ export const App = () => {
                 `Staff Name: ${staffNamePreview}\n` +
                 `Unique ID / Fallback: ${uniqueIdPreview}\n` +
                 `NAB Code: ${nabCodePreview}\n\n` +
-                (isBlockSignal 
+                (isBlockSignal
                     ? `❌ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
                     : `Do you want to proceed anyway?`);
-            
-            setSaveModalDecision({ mode: isBlockSignal ? 'red' : 'yellow', detail });
+
+            if (isBlockSignal) {
+                // Show already-paid check first before the duplicate block modal
+                setSaveModalDecision({
+                    mode: 'already-paid',
+                    detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?',
+                    pendingSignal: signal,
+                    pendingDetail: detail
+                });
+                setShowSaveModal(true);
+                return;
+            }
+
+            setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
         }
@@ -5734,14 +5748,6 @@ export const App = () => {
     };
 
     const handleProcess = () => {
-        if (requestMode === 'solo') {
-            setSaveModalDecision({
-                mode: 'already-paid',
-                detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?'
-            });
-            setShowSaveModal(true);
-            return;
-        }
         handleProcessCore();
     };
 
@@ -5753,9 +5759,11 @@ export const App = () => {
     };
 
     const handleAlreadyPaidContinue = () => {
-        setShowSaveModal(false);
-        setSaveModalDecision(null);
-        handleProcessCore();
+        const pending = saveModalDecision;
+        const signal = pending?.pendingSignal || 'red';
+        const detail = pending?.pendingDetail || '';
+        setSaveModalDecision({ mode: signal === 'red' ? 'red' : 'yellow', detail });
+        setShowSaveModal(true);
     };
 
     const handleApproveManualAudit = () => {
