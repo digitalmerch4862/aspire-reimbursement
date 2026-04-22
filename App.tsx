@@ -5632,14 +5632,20 @@ export const App = () => {
                     : `Do you want to proceed anyway?`);
 
             if (isBlockSignal) {
-                // Show already-paid check first before the duplicate block modal
-                setSaveModalDecision({
-                    mode: 'already-paid',
-                    detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?',
-                    pendingSignal: signal,
-                    pendingDetail: detail
-                });
-                setShowSaveModal(true);
+                const hasConfirmedNabCode = nabCodePreview !== '-' && nabCodePreview.trim().length > 0;
+                if (hasConfirmedNabCode) {
+                    // Duplicate has a paid NAB code — ask if already paid before blocking
+                    setSaveModalDecision({
+                        mode: 'already-paid',
+                        detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?',
+                        pendingSignal: signal,
+                        pendingDetail: detail
+                    });
+                    setShowSaveModal(true);
+                    return;
+                }
+                // Duplicate has no NAB code — still pending, all clear, proceed to save
+                confirmSave('PAID', { duplicateSignal: 'green', detail: 'Duplicate matched but no confirmed NAB code — treated as clear.' });
                 return;
             }
 
