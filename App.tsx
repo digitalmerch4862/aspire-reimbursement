@@ -526,7 +526,7 @@ interface DuplicateCheckResult {
 }
 
 interface SaveModalDecision {
-    mode: 'nab' | 'red' | 'yellow';
+    mode: 'nab' | 'red' | 'yellow' | 'already-paid';
     detail: string;
 }
 
@@ -5733,10 +5733,35 @@ export const App = () => {
         handleSaveToCloud(finalContent);
     };
 
+    const handleProcess = () => {
+        if (requestMode === 'solo') {
+            setSaveModalDecision({
+                mode: 'already-paid',
+                detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?'
+            });
+            setShowSaveModal(true);
+            return;
+        }
+        handleProcessCore();
+    };
+
+    const handleAlreadyPaidBlock = () => {
+        setShowSaveModal(false);
+        setSaveModalDecision(null);
+        setProcessingState(ProcessingState.IDLE);
+        setErrorMessage('⛔ Processing blocked: This expense was marked as already paid. Do not process to avoid double payment.');
+    };
+
+    const handleAlreadyPaidContinue = () => {
+        setShowSaveModal(false);
+        setSaveModalDecision(null);
+        handleProcessCore();
+    };
+
     const handleApproveManualAudit = () => {
         setShowManualAuditModal(false);
         bypassManualAuditRef.current = true;
-        handleProcess();
+        handleProcessCore();
     };
 
     const handleCancelManualAudit = () => {
@@ -5811,7 +5836,7 @@ export const App = () => {
         setOcrStatus('Needs review');
     };
 
-    const handleProcess = async () => {
+    const handleProcessCore = async () => {
         if (!reimbursementFormText.trim() && !receiptDetailsText.trim() && requestMode === 'solo') {
             setErrorMessage("Please paste Reimbursement Form or Receipt Details first.");
             return;
@@ -8552,12 +8577,14 @@ export const App = () => {
                     {/* Save Status Modal */}
                     {showSaveModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className={`bg-[#1c1e24] w-full max-w-xl rounded-[24px] border shadow-2xl overflow-hidden ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'border-red-400/70 animate-pulse shadow-[0_0_45px_rgba(248,113,113,0.45)]' : 'border-white/10'}`}>
-                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${saveModalDecision?.mode === 'red' ? (isRedPopupAlertActive ? 'bg-red-500/30 animate-pulse' : 'bg-red-500/10') : saveModalDecision?.mode === 'yellow' ? 'bg-amber-500/10' : 'bg-white/5'}`}>
+                            <div className={`bg-[#1c1e24] w-full max-w-xl rounded-[24px] border shadow-2xl overflow-hidden ${saveModalDecision?.mode === 'red' && isRedPopupAlertActive ? 'border-red-400/70 animate-pulse shadow-[0_0_45px_rgba(248,113,113,0.45)]' : saveModalDecision?.mode === 'already-paid' ? 'border-orange-400/40' : 'border-white/10'}`}>
+                                <div className={`px-6 py-5 border-b border-white/10 flex items-center gap-3 ${saveModalDecision?.mode === 'red' ? (isRedPopupAlertActive ? 'bg-red-500/30 animate-pulse' : 'bg-red-500/10') : saveModalDecision?.mode === 'yellow' ? 'bg-amber-500/10' : saveModalDecision?.mode === 'already-paid' ? 'bg-orange-500/10' : 'bg-white/5'}`}>
                                     {saveModalDecision?.mode === 'red' ? (
                                         <AlertCircle className={`${isRedPopupAlertActive ? 'text-red-100 animate-pulse drop-shadow-[0_0_10px_rgba(248,113,113,0.9)]' : 'text-red-300'}`} size={20} />
                                     ) : saveModalDecision?.mode === 'yellow' ? (
                                         <AlertCircle className="text-amber-300" size={20} />
+                                    ) : saveModalDecision?.mode === 'already-paid' ? (
+                                        <AlertCircle className="text-orange-300" size={20} />
                                     ) : (
                                         <HelpCircle className="text-indigo-300" size={20} />
                                     )}
@@ -8567,6 +8594,7 @@ export const App = () => {
                                             {saveModalDecision?.mode === 'yellow' && isJulianApprovalDetail(saveModalDecision?.detail) && 'Pending - Subject to Julian Approval'}
                                             {saveModalDecision?.mode === 'yellow' && isFormHigherMismatchDetail(saveModalDecision?.detail) && 'Reject and Request Revision'}
                                             {saveModalDecision?.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && 'Potential Duplicate Needs Review'}
+                                            {saveModalDecision?.mode === 'already-paid' && 'Already Paid Check'}
                                             {(!saveModalDecision || saveModalDecision.mode === 'nab') && 'Choose Save Status'}
                                         </h3>
                                         <p className="text-xs text-slate-300">
@@ -8651,6 +8679,12 @@ export const App = () => {
                                             </div>
                                         </>
                                     )}
+                                    {saveModalDecision?.mode === 'already-paid' && (
+                                        <div className="rounded-xl border border-orange-400/20 bg-orange-500/5 p-4 space-y-2">
+                                            <p className="text-slate-200 text-sm">If this expense was already paid by another means, processing it here will cause a <span className="text-orange-300 font-semibold">double payment</span>.</p>
+                                            <p className="text-xs text-slate-400">Examples: coordinator cash advance, petty cash, direct card payment by staff.</p>
+                                        </div>
+                                    )}
                                     {saveModalDecision?.mode === 'nab' && (
                                         <div className="space-y-2">
                                             <label className="text-xs text-slate-400 block mb-1">Provide NAB Code (manual)</label>
@@ -8673,12 +8707,30 @@ export const App = () => {
                                     )}
                                 </div>
                                 <div className="px-6 py-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
-                                    <button
-                                        onClick={closeSaveModal}
-                                        className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
+                                    {saveModalDecision?.mode !== 'already-paid' && (
+                                        <button
+                                            onClick={closeSaveModal}
+                                            className="px-4 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                    )}
+                                    {saveModalDecision?.mode === 'already-paid' && (
+                                        <>
+                                            <button
+                                                onClick={handleAlreadyPaidBlock}
+                                                className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-semibold hover:bg-red-500 transition-colors"
+                                            >
+                                                Yes, already paid — block
+                                            </button>
+                                            <button
+                                                onClick={handleAlreadyPaidContinue}
+                                                className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-500 transition-colors"
+                                            >
+                                                No, not yet paid — proceed
+                                            </button>
+                                        </>
+                                    )}
                                     {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') ? (
                                         <button
                                             onClick={() => confirmSave('PENDING', {
