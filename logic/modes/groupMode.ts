@@ -65,6 +65,36 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
     }
 
     if (extracted.length === 0) {
+        // Plain text space-aligned columns: "Staff Name   YP Name   Amount"
+        const plainHeaderIdx = allLines.findIndex((line) =>
+            /staff\s+name/i.test(line) && /yp\s*name|yb\s*name/i.test(line) && /amount/i.test(line)
+        );
+
+        if (plainHeaderIdx >= 0) {
+            const headerLine = allLines[plainHeaderIdx];
+            const staffCol = headerLine.search(/staff\s+name/i);
+            const ypCol = headerLine.search(/yp\s*name|yb\s*name/i);
+            const amtCol = headerLine.search(/amount/i);
+
+            for (let i = plainHeaderIdx + 1; i < allLines.length; i++) {
+                const line = allLines[i];
+                if (!line) continue;
+                // stop if we hit another section header or separator
+                if (/^[-=]{3,}/.test(line)) break;
+
+                const staffName = normalizeStaffName(line.substring(staffCol, ypCol).trim());
+                const ypName = line.substring(ypCol, amtCol).trim();
+                const amountStr = line.substring(amtCol).trim();
+                const amount = normalizeAmount(amountStr);
+
+                if (staffName) {
+                    extracted.push({ staffName, amount, ypName, location: commonLocation });
+                }
+            }
+        }
+    }
+
+    if (extracted.length === 0) {
         const blocks = rawText.split(/Staff\s*Member\s*:/gi);
 
         for (let i = 1; i < blocks.length; i++) {
