@@ -7092,6 +7092,7 @@ export const App = () => {
                                         results={results}
                                         resetAll={resetAll}
                                         reimbursementFormRef={reimbursementFormRef}
+                                        formVsReceiptTotals={formVsReceiptTotals}
                                     />
                                 )}
 
@@ -7437,21 +7438,30 @@ export const App = () => {
                                                 const totalsHaveBoth = formVsReceiptTotals.formTotal !== null && formVsReceiptTotals.receiptTotal !== null;
                                                 const totalsMatch = totalsHaveBoth && Math.abs((formVsReceiptTotals.formTotal as number) - (formVsReceiptTotals.receiptTotal as number)) <= 0.01;
                                                 const totalsMismatch = totalsHaveBoth && !totalsMatch;
-                                                const amountColorClass = requestMode === 'solo' && numericSelectedAmount > 300 && totalsMismatch
+                                                const amountColorClass = requestMode === 'solo' && totalsMismatch
                                                     ? 'text-red-400'
                                                     : requestMode === 'solo' && totalsMatch
                                                         ? 'text-emerald-400'
-                                                        : 'text-emerald-400';
+                                                        : 'text-slate-300';
+                                                const bankCardBorderClass = requestMode === 'solo' && totalsHaveBoth
+                                                    ? totalsMismatch ? 'border-red-500/40' : 'border-emerald-500/40'
+                                                    : 'border-indigo-500/30';
+                                                const bankCardHeaderDotClass = requestMode === 'solo' && totalsHaveBoth
+                                                    ? totalsMismatch ? 'bg-red-400' : 'bg-emerald-400'
+                                                    : 'bg-indigo-400';
+                                                const bankFieldTextClass = requestMode === 'solo' && totalsHaveBoth
+                                                    ? totalsMismatch ? 'text-red-300' : 'text-emerald-300'
+                                                    : 'text-slate-300';
 
                                                 return (
-                                                    <div key={idx} className="mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-2xl p-6 relative overflow-hidden group">
+                                                    <div key={idx} className={`mx-8 mt-6 bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border ${bankCardBorderClass} rounded-2xl p-6 relative overflow-hidden group`}>
                                                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                                                             <CreditCard size={80} className="text-white" />
                                                         </div>
                                                         <div className="relative z-10">
                                                             <div className="flex justify-between items-center mb-4">
                                                                 <h4 className="text-sm font-bold text-indigo-200 uppercase tracking-widest flex items-center gap-2">
-                                                                    <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                                    <div className={`w-2 h-2 rounded-full ${bankCardHeaderDotClass}`}></div>
                                                                     Banking Details ({idx + 1}/{parsedTransactions.length})
                                                                 </h4>
                                                                 {parsedTransactions.length > 1 && (
@@ -7508,7 +7518,7 @@ export const App = () => {
                                                                         </button>
                                                                     )}
                                                                 </div>
-                                                                <div className={`bg-black/30 rounded-xl p-3 border border-white/5 transition-colors ${requestMode === 'solo' && numericSelectedAmount > 300 && totalsMismatch ? 'hover:border-red-500/30' : 'hover:border-emerald-500/30'}`}>
+                                                                <div className={`bg-black/30 rounded-xl p-3 border border-white/5 transition-colors ${requestMode === 'solo' && totalsMismatch ? 'hover:border-red-500/30' : 'hover:border-emerald-500/30'}`}>
                                                                     <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Amount</p>
                                                                     <div className="flex justify-between items-center">
                                                                         <input
@@ -7531,7 +7541,7 @@ export const App = () => {
                                                                 <div className="bg-black/20 rounded-xl p-3 border border-white/5">
                                                                     <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">BSB</p>
                                                                     <div className="flex justify-between items-center">
-                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.bsb || '---'}</p>
+                                                                        <p className={`${bankFieldTextClass} font-mono`}>{selectedEmployee?.bsb || '---'}</p>
                                                                         <button
                                                                             onClick={() => selectedEmployee?.bsb && handleCopyField(selectedEmployee.bsb, `bsb-${txKey}`)}
                                                                             className="text-slate-500 hover:text-white transition-colors"
@@ -7544,7 +7554,7 @@ export const App = () => {
                                                                 <div className="bg-black/20 rounded-xl p-3 border border-white/5">
                                                                     <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Account #</p>
                                                                     <div className="flex justify-between items-center">
-                                                                        <p className="text-slate-300 font-mono">{selectedEmployee?.account || '---'}</p>
+                                                                        <p className={`${bankFieldTextClass} font-mono`}>{selectedEmployee?.account || '---'}</p>
                                                                         <button
                                                                             onClick={() => selectedEmployee?.account && handleCopyField(selectedEmployee.account, `account-${txKey}`)}
                                                                             className="text-slate-500 hover:text-white transition-colors"
