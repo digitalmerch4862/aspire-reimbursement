@@ -2,6 +2,13 @@ import React from 'react';
 import { AlertCircle, Send, RefreshCw } from 'lucide-react';
 import { ProcessingState } from '../../types';
 
+interface FormVsReceiptTotals {
+    formTotal: number | null;
+    receiptTotal: number | null;
+    difference: number | null;
+    isFormHigherMismatch: boolean;
+}
+
 interface SoloModeProps {
     reimbursementFormText: string;
     setReimbursementFormText: (text: string) => void;
@@ -13,6 +20,7 @@ interface SoloModeProps {
     results: any;
     resetAll: () => void;
     reimbursementFormRef: React.RefObject<HTMLTextAreaElement>;
+    formVsReceiptTotals: FormVsReceiptTotals;
 }
 
 const SoloMode: React.FC<SoloModeProps> = ({
@@ -25,7 +33,8 @@ const SoloMode: React.FC<SoloModeProps> = ({
     errorMessage,
     results,
     resetAll,
-    reimbursementFormRef
+    reimbursementFormRef,
+    formVsReceiptTotals,
 }) => {
     return (
         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden relative group">
@@ -69,6 +78,34 @@ const SoloMode: React.FC<SoloModeProps> = ({
                         <span className="bg-[#1c1e24] px-2 text-xs text-slate-500 uppercase tracking-widest">And/Or</span>
                     </div>
                 </div>
+                {/* Totals Mismatch Banner */}
+                {(() => {
+                    const { formTotal, receiptTotal, difference } = formVsReceiptTotals;
+                    const hasBoth = formTotal !== null && receiptTotal !== null;
+                    if (!hasBoth) return null;
+                    const match = difference !== null && difference <= 0.01;
+                    return (
+                        <div className={`rounded-xl px-4 py-3 flex items-center justify-between gap-3 border ${
+                            match
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                : 'bg-red-500/10 border-red-500/30 text-red-300'
+                        }`}>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${match ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`}></div>
+                                <span className="text-xs font-bold uppercase tracking-widest">
+                                    {match ? 'Totals Match' : 'Totals Mismatch'}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs font-mono">
+                                <span>Form: <strong>${(formTotal as number).toFixed(2)}</strong></span>
+                                <span>Receipts: <strong>${(receiptTotal as number).toFixed(2)}</strong></span>
+                                {!match && difference !== null && (
+                                    <span className="text-red-200 font-bold">Δ ${difference.toFixed(2)}</span>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })()}
                 {errorMessage && (
                     <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
                         <AlertCircle className="text-red-400 mt-0.5 flex-shrink-0" size={18} />
