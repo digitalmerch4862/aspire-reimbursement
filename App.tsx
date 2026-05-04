@@ -5753,7 +5753,31 @@ export const App = () => {
         handleSaveToCloud(finalContent);
     };
 
+    const playAlertSiren = () => {
+        try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+            // Oscillate frequency between 880Hz and 1200Hz rapidly for siren effect
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            for (let i = 0; i < 12; i++) {
+                osc.frequency.linearRampToValueAtTime(i % 2 === 0 ? 1200 : 880, ctx.currentTime + (i + 1) * 0.25);
+            }
+            gain.gain.setValueAtTime(0.4, ctx.currentTime + 2.7);
+            gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 3);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 3);
+            osc.onended = () => ctx.close();
+        } catch (_) {}
+    };
+
     const handleProcess = () => {
+        if (isOver300ApprovalRequired) {
+            playAlertSiren();
+        }
         handleProcessCore();
     };
 
