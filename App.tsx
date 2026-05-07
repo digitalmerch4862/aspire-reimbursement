@@ -26,6 +26,11 @@ const DEFAULT_EMPLOYEE_DATA = `First Names	Surname	Concatenate	BSB	Account
 John	Smith	Smith, John	000000	00000000
 Jane	Doe	Doe, Jane	000000	00000000`;
 
+const EOD_SPECIAL_ROW_ID = 'idle-row';
+const EOD_SPECIAL_ACTIVITY_LABEL = `Data Validation & Reconciliation
+Records Review
+Internal Audit / Quality Check`;
+
 interface Employee {
     id: string;
     firstName: string;
@@ -6421,10 +6426,10 @@ export const App = () => {
         }
 
         const idleRow = {
-            id: 'idle-row',
+            id: EOD_SPECIAL_ROW_ID,
             eodTimeStart: idleStartTime.toLocaleTimeString('en-GB', { hour12: false }),
             eodTimeEnd: idleEndTime.toLocaleTimeString('en-GB', { hour12: false }),
-            eodActivity: 'IDLE',
+            eodActivity: EOD_SPECIAL_ACTIVITY_LABEL,
             clientName: '',
             staff_name: '',
             amount: '',
@@ -7929,14 +7934,14 @@ export const App = () => {
                                                 <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeStart}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeEnd}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: row.eodActivity === 'IDLE' ? 'bold' : 'normal' }}>{row.eodActivity}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: row.id === EOD_SPECIAL_ROW_ID ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staff_name}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>
-                                                        {row.eodActivity === 'IDLE' ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
+                                                        {row.id === EOD_SPECIAL_ROW_ID ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
                                                     <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
-                                                        {row.eodActivity === 'IDLE' ? (
+                                                        {row.id === EOD_SPECIAL_ROW_ID ? (
                                                             <span style={{ color: '#64748b', fontSize: '11px' }}>-</span>
                                                         ) : (
                                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
