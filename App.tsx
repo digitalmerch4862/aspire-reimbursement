@@ -582,7 +582,7 @@ const getDefaultBuiltInRules = (): RuleConfig[] => {
         { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using receipt amount + purchase date (per receipt line).', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using receipt amount when purchase date is mismatch or missing.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r4', title: 'Purchase Date Age (> 60 days)', detail: 'Flags receipts older than 60 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r7', title: 'Form and Receipt Total Consistency', detail: 'Compares reimbursement form total and receipt total and applies mismatch policy.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r6', title: 'Subject for Approval', detail: 'Marks if request needs approval based on rule outcomes.', severity: 'info', enabled: true, isBuiltIn: true, updatedAt: now }
@@ -956,10 +956,10 @@ const isOver300Detail = (detail?: string): boolean => {
 
 const isOver30DaysDetail = (detail?: string): boolean => {
     const text = String(detail || '').toLowerCase();
-    return text.includes('older than 30 days')
-        || text.includes('over 30 days')
-        || text.includes('> 30 days')
-        || text.includes('30-day receipt age');
+    return text.includes('older than 60 days')
+        || text.includes('over 60 days')
+        || text.includes('> 60 days')
+        || text.includes('60-day receipt age');
 };
 
 const isJulianApprovalDetail = (detail?: string): boolean => isOver300Detail(detail) || isOver30DaysDetail(detail);
@@ -1017,8 +1017,8 @@ const upsertJulianApprovalSection = (
     ]);
     const approvalReason = String(options?.approvalReason || 'Total reimbursement amount is at or above $300').trim();
     const fraudReceiptStatus = String(options?.fraudReceiptStatus || 'Not matched in duplicate history').trim();
-    const subjectLine = /older than 30 days/i.test(approvalReason)
-        ? 'Approval Request - Reimbursement Over 30 Days'
+    const subjectLine = /older than 60 days/i.test(approvalReason)
+        ? 'Approval Request - Reimbursement Over 60 Days'
         : 'Approval Request - Reimbursement At or Above $300';
 
     const approvalSection = [
@@ -3532,7 +3532,7 @@ export const App = () => {
         if (!parsedDate) return false;
         const ageMs = Date.now() - parsedDate.getTime();
         const days = ageMs / (1000 * 60 * 60 * 24);
-        return days > 30;
+        return days > 60;
     }).length, [currentInputTransactions]);
 
     const fraudInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
@@ -3742,6 +3742,8 @@ export const App = () => {
         if (fraudPopupSignalKeyRef.current === fraudPopupPayload.signalKey) return;
 
         fraudPopupSignalKeyRef.current = fraudPopupPayload.signalKey;
+        const hasConfirmedNab = fraudPopupPayload.rows.some(r => r.nabCode && r.nabCode.trim() !== '-' && r.nabCode.trim().length > 0);
+        if (!hasConfirmedNab) return;
         setPendingProcessResult(null);
         setFraudDuplicates(fraudPopupPayload.duplicates);
         setFraudReceiptRows(fraudPopupPayload.rows.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
@@ -3933,16 +3935,16 @@ export const App = () => {
             });
         }
 
-        const rule4 = getRuleMeta('r4', 'Receipt Age (> 30 days)', 'medium');
+        const rule4 = getRuleMeta('r4', 'Receipt Age (> 60 days)', 'medium');
         if (rule4) {
             items.push({
                 id: 'r4',
                 title: rule4.title,
                 detail: agedCount > 0
                     ? hasFraudDuplicate
-                        ? `${agedCount} receipt(s) appear older than 30 days from purchase date, but fraud duplicate handling takes priority.`
-                        : `${agedCount} receipt(s) appear older than 30 days from purchase date: Save as Pending only with Julian approval.`
-                    : 'No receipts older than 30 days detected.',
+                        ? `${agedCount} receipt(s) appear older than 60 days from purchase date, but fraud duplicate handling takes priority.`
+                        : `${agedCount} receipt(s) appear older than 60 days from purchase date: Save as Pending only with Julian approval.`
+                    : 'No receipts older than 60 days detected.',
                 severity: rule4.severity,
                 status: agedCount > 0 ? 'warning' : 'pass'
             });
@@ -5169,7 +5171,7 @@ export const App = () => {
 
         const julianApprovalContext = {
             approvalReason: isOver30DaysDetail(options?.detail)
-                ? 'Receipt is older than 30 days from purchase date'
+                ? 'Receipt is older than 60 days from purchase date'
                 : 'Total reimbursement amount is at or above $300',
             fraudReceiptStatus: options?.duplicateSignal === 'red'
                 ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
@@ -5669,7 +5671,7 @@ export const App = () => {
         }
 
         if (isOver30DaysApprovalRequired) {
-            const detail = `${currentInputAgedCount} receipt(s) are older than 30 days from purchase date (30-day receipt age). Save as Pending only and subject to Julian approval. Fraud receipt check: Not matched in duplicate history.`;
+            const detail = `${currentInputAgedCount} receipt(s) are older than 60 days from purchase date (60-day receipt age). Save as Pending only and subject to Julian approval. Fraud receipt check: Not matched in duplicate history.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -6185,15 +6187,18 @@ export const App = () => {
                         });
                     }
                     
-                    // If fraud detected, show popup
+                    // If fraud detected and has confirmed NAB code, show popup
                     if (allFraudDuplicates.length > 0) {
-                        setFraudDuplicates(allFraudDuplicates);
-                        setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
-                        setPendingProcessResult(result);
-                        setShowFraudPopup(true);
-                        setProcessingState(ProcessingState.IDLE);
-                        setOcrStatus('Fraud Check');
-                        return;
+                        const hasConfirmedNab = fraudReceiptsList.some(r => r.nabCode && r.nabCode.trim() !== '-' && r.nabCode.trim().length > 0);
+                        if (hasConfirmedNab) {
+                            setFraudDuplicates(allFraudDuplicates);
+                            setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
+                            setPendingProcessResult(result);
+                            setShowFraudPopup(true);
+                            setProcessingState(ProcessingState.IDLE);
+                            setOcrStatus('Fraud Check');
+                            return;
+                        }
                     }
                 }
 
@@ -6608,7 +6613,7 @@ export const App = () => {
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
-            ? 'Receipt is older than 30 days from purchase date'
+            ? 'Receipt is older than 60 days from purchase date'
             : 'Total reimbursement amount is at or above $300',
         fraudReceiptStatus: duplicateCheckResult.signal === 'red'
             ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
@@ -8792,7 +8797,7 @@ export const App = () => {
                                                 duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode,
                                                 reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
                                                     ? (isOver30DaysDetail(saveModalDecision?.detail)
-                                                        ? 'Auto-routed: receipt is older than 30 days, pending Julian approval.'
+                                                        ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
                                                         : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
                                                     : isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                         ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
