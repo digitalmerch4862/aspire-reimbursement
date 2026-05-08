@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
@@ -580,7 +580,7 @@ const getDefaultBuiltInRules = (): RuleConfig[] => {
         { id: 'r1', title: 'Fraud Exact Match', detail: 'Exact match using receipt amount + purchase date (per receipt line).', severity: 'critical', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r2', title: 'Fraud Near Match', detail: 'Near match using receipt amount when purchase date is mismatch or missing.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r3', title: 'Receipt Amount > $300', detail: 'More than $300 is partial blocked and routed for approval.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
-        { id: 'r4', title: 'Purchase Date Age (> 30 days)', detail: 'Flags receipts older than 30 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
+        { id: 'r4', title: 'Purchase Date Age (> 60 days)', detail: 'Flags receipts older than 60 days from purchase date.', severity: 'medium', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r5', title: 'Staff & Store Integrity', detail: 'Checks if staff name and store name are present for fraud validation.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r7', title: 'Form and Receipt Total Consistency', detail: 'Compares reimbursement form total and receipt total and applies mismatch policy.', severity: 'high', enabled: true, isBuiltIn: true, updatedAt: now },
         { id: 'r6', title: 'Subject for Approval', detail: 'Marks if request needs approval based on rule outcomes.', severity: 'info', enabled: true, isBuiltIn: true, updatedAt: now }
@@ -698,7 +698,7 @@ const parseGroupPettyCashEntries = (rawText: string): GroupPettyCashEntry[] => {
     if (extracted.length === 0) {
         const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
         for (const line of lines) {
-            const match = line.match(/^([A-Za-z][A-Za-z .,'’\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
+            const match = line.match(/^([A-Za-z][A-Za-z .,'â€™\-]{1,80}?)(?:\s*[:\-]\s*|\s+)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$/);
             if (!match) continue;
 
             let staffName = match[1].replace(/\s+/g, ' ').trim();
@@ -732,7 +732,7 @@ const parseParticularAmountLines = (rawText: string): ParticularAmountLine[] => 
         const normalizedLine = line
             .replace(/[\u2013\u2014]/g, '-')
             .replace(/\s+/g, ' ')
-            .replace(/^[\-*•]+\s*/, '')
+            .replace(/^[\-*â€¢]+\s*/, '')
             .trim();
 
         const match = normalizedLine.match(/^(.+?)\s*-\s*date\s*:\s*(.+?)\s*-\s*amount\s*:\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
@@ -954,10 +954,10 @@ const isOver300Detail = (detail?: string): boolean => {
 
 const isOver30DaysDetail = (detail?: string): boolean => {
     const text = String(detail || '').toLowerCase();
-    return text.includes('older than 30 days')
-        || text.includes('over 30 days')
-        || text.includes('> 30 days')
-        || text.includes('30-day receipt age');
+    return text.includes('older than 60 days')
+        || text.includes('over 60 days')
+        || text.includes('> 60 days')
+        || text.includes('60-day receipt age');
 };
 
 const isJulianApprovalDetail = (detail?: string): boolean => isOver300Detail(detail) || isOver30DaysDetail(detail);
@@ -1000,8 +1000,8 @@ const upsertJulianApprovalSection = (
         /Staff\s*Member:\s*(.+)/i
     ]);
     const clientName = extractFieldValue(stripped, [
-        /\*\*Client(?:'|’)?s?\s*Full\s*Name:\*\*\s*(.+)/i,
-        /Client(?:'|’)?s?\s*full\s*name:\s*(.+)/i
+        /\*\*Client(?:'|â€™)?s?\s*Full\s*Name:\*\*\s*(.+)/i,
+        /Client(?:'|â€™)?s?\s*full\s*name:\s*(.+)/i
     ]);
     const approvedBy = extractFieldValue(stripped, [
         /\*\*Approved\s*By:\*\*\s*(.+)/i,
@@ -1015,8 +1015,8 @@ const upsertJulianApprovalSection = (
     ]);
     const approvalReason = String(options?.approvalReason || 'Total reimbursement amount is at or above $300').trim();
     const fraudReceiptStatus = String(options?.fraudReceiptStatus || 'Not matched in duplicate history').trim();
-    const subjectLine = /older than 30 days/i.test(approvalReason)
-        ? 'Approval Request - Reimbursement Over 30 Days'
+    const subjectLine = /older than 60 days/i.test(approvalReason)
+        ? 'Approval Request - Reimbursement over 60 days'
         : 'Approval Request - Reimbursement At or Above $300';
 
     const approvalSection = [
@@ -1175,7 +1175,7 @@ const getQuickFieldPatterns = (key: QuickEditFieldKey): RegExp[] => {
     const base = {
         staffMember: [/\*\*Staff Member:\*\*\s*(.*?)(?:\n|$)/i, /Staff Member:\s*(.*?)(?:\n|$)/i],
         clientFullName: [
-            /^(?:\*\*\s*)?(?:Client(?:'|’)?s\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
+            /^(?:\*\*\s*)?(?:Client(?:'|â€™)?s\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
         ],
         clientLocation: [/\*\*Client\s*\/\s*Location:\*\*\s*(.*?)(?:\n|$)/i],
         address: [/\*\*Address:\*\*\s*(.*?)(?:\n|$)/i, /Address:\s*(.*?)(?:\n|$)/i],
@@ -3021,7 +3021,7 @@ export const App = () => {
                 /(?:\*\*\s*Address\s*:\s*\*\*|Address\s*:)\s*(.*?)(?:\n|$)/i
             ]);
             const clientFullNameValue = extractFieldValue(content, [
-                /^(?:\*\*\s*)?(?:Client(?:'|’)?s?\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
+                /^(?:\*\*\s*)?(?:Client(?:'|â€™)?s?\s+Full\s+Name|Name)\s*:(?:\s*\*\*)?\s*(.*?)(?:\r?\n|$)/im
             ]);
             const clientLocationValue = extractFieldValue(content, [
                 /(?:\*\*\s*Client\s*\/\s*Location\s*:\s*\*\*|Client\s*\/\s*Location\s*:)\s*(.*?)(?:\n|$)/i
@@ -3530,7 +3530,7 @@ export const App = () => {
         if (!parsedDate) return false;
         const ageMs = Date.now() - parsedDate.getTime();
         const days = ageMs / (1000 * 60 * 60 * 24);
-        return days > 30;
+        return days > 60;
     }).length, [currentInputTransactions]);
 
     const fraudInputTransactions = useMemo<InputTransactionFingerprint[]>(() => {
@@ -3829,7 +3829,7 @@ export const App = () => {
             return !store || store === '-';
         }).length;
 
-        const clientMatch = formText.match(/^(?:Client(?:'|’)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
+        const clientMatch = formText.match(/^(?:Client(?:'|â€™)?s?\s*full\s*name|Name)\s*:\s*(.+)$/im);
         const addressMatch = formText.match(/Address:\s*(.+)/i);
         const staffMatch = formText.match(/Staff\s*member\s*to\s*reimburse:\s*(.+)/i);
         const approvedMatch = formText.match(/Approved\s*by:\s*(.+)/i);
@@ -3863,7 +3863,7 @@ export const App = () => {
             const redDetail = !hasSoloReceiptFraudInput
                 ? 'No valid Receipt Details rows found for exact fraud check.'
                 : matchFound
-                ? `⚠️ ${duplicateCheckResult.redMatches.length} EXACT fraud match(es) found (BLOCKED):\n` +
+                ? `âš ï¸ ${duplicateCheckResult.redMatches.length} EXACT fraud match(es) found (BLOCKED):\n` +
                   `Amount: $${redMatch?.historyTotalAmount || redMatch?.txTotalAmount || '0.00'}\n` +
                   `Date: ${redMatch?.historyDateTime || redMatch?.txDateTime || '-'}\n` +
                   `Store: ${redMatch?.historyStoreName || redMatch?.txStoreName || '-'}\n` +
@@ -3891,7 +3891,7 @@ export const App = () => {
             const yellowDetail = !hasSoloReceiptFraudInput
                 ? 'Fraud check requires valid Receipt Details rows.'
                 : hasOrangeOrYellow
-                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} ${signal.toUpperCase()} fraud match(es) found:\n` +
+                ? `âš ï¸ ${duplicateCheckResult.yellowMatches.length} ${signal.toUpperCase()} fraud match(es) found:\n` +
                   `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
                   `Date: ${yellowMatch?.historyDateTime || yellowMatch?.txDateTime || '-'}\n` +
                   `Store: ${yellowMatch?.historyStoreName || yellowMatch?.txStoreName || '-'}\n` +
@@ -3899,7 +3899,7 @@ export const App = () => {
                   `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
                   `NAB: ${yellowMatch?.historyNabCode || '-'}`
                 : hasAmber
-                ? `⚠️ ${duplicateCheckResult.yellowMatches.length} AMBER (Weak) fraud match(es) found:\n` +
+                ? `âš ï¸ ${duplicateCheckResult.yellowMatches.length} AMBER (Weak) fraud match(es) found:\n` +
                   `Amount: $${yellowMatch?.historyTotalAmount || yellowMatch?.txTotalAmount || '0.00'}\n` +
                   `Unique ID: ${yellowMatch?.txReference || yellowMatch?.historyReference || '-'}\n` +
                   `NAB: ${yellowMatch?.historyNabCode || '-'}\n` +
@@ -3931,16 +3931,16 @@ export const App = () => {
             });
         }
 
-        const rule4 = getRuleMeta('r4', 'Receipt Age (> 30 days)', 'medium');
+        const rule4 = getRuleMeta('r4', 'Receipt Age (> 60 days)', 'medium');
         if (rule4) {
             items.push({
                 id: 'r4',
                 title: rule4.title,
                 detail: agedCount > 0
                     ? hasFraudDuplicate
-                        ? `${agedCount} receipt(s) appear older than 30 days from purchase date, but fraud duplicate handling takes priority.`
-                        : `${agedCount} receipt(s) appear older than 30 days from purchase date: Save as Pending only with Julian approval.`
-                    : 'No receipts older than 30 days detected.',
+                        ? `${agedCount} receipt(s) appear older than 60 days from purchase date, but fraud duplicate handling takes priority.`
+                        : `${agedCount} receipt(s) appear older than 60 days from purchase date: Save as Pending only with Julian approval.`
+                    : 'No receipts older than 60 days detected.',
                 severity: rule4.severity,
                 status: agedCount > 0 ? 'warning' : 'pass'
             });
@@ -4710,11 +4710,11 @@ export const App = () => {
         const topStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
         const topLoc = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
 
-        let report = `[≡ƒôï CLICK TO COPY REPORT]\n\n`;
+        let report = `[â‰¡Æ’Ã´Ã¯ CLICK TO COPY REPORT]\n\n`;
         report += `# ${reportTitle}\n`;
         report += `**Date Range:** ${startDate.toLocaleDateString()} - ${now.toLocaleDateString()}\n\n`;
 
-        report += `## ≡ƒôè EXECUTIVE SUMMARY\n`;
+        report += `## â‰¡Æ’Ã´Ã¨ EXECUTIVE SUMMARY\n`;
         report += `| Metric | Value |\n`;
         report += `| :--- | :--- |\n`;
         report += `| **Total Spend** | **$${totalSpend.toFixed(2)}** |\n`;
@@ -4722,7 +4722,7 @@ export const App = () => {
         report += `| **Pending Categorization** | ${pendingCount} |\n`;
         report += `| **Highest Single Item** | $${maxItem.amount.toFixed(2)} (${maxItem.product}) |\n\n`;
 
-        report += `## ≡ƒÅå TOP SPENDERS (STAFF)\n`;
+        report += `## â‰¡Æ’Ã…Ã¥ TOP SPENDERS (STAFF)\n`;
         report += `| Rank | Staff Member | Total Amount |\n`;
         report += `| :--- | :--- | :--- |\n`;
         topStaff.forEach((s, i) => {
@@ -4730,7 +4730,7 @@ export const App = () => {
         });
         report += `\n`;
 
-        report += `## ≡ƒôì SPENDING BY YP\n`;
+        report += `## â‰¡Æ’Ã´Ã¬ SPENDING BY YP\n`;
         report += `| Rank | YP Name | Total Amount |\n`;
         report += `| :--- | :--- | :--- |\n`;
         topLoc.forEach((l, i) => {
@@ -5051,8 +5051,8 @@ export const App = () => {
                 const amountMatch = contentToSave.match(/\*\*Amount(?: Transferred)?:\*\*\s*(.*)/i) || contentToSave.match(/Amount:\s*(.*)/i);
                 const nabMatch = contentToSave.match(/NAB (?:Code|Reference):(?:\*\*|)\s*(.*)/i);
                 const fallbackClient = extractFieldValue(contentToSave, [
-                    /\*\*Client(?:'|’)?s?\s*Full\s*Name:\*\*\s*(.*)/i,
-                    /Client(?:'|’)?s?\s*Full\s*Name:\s*(.*)/i,
+                    /\*\*Client(?:'|â€™)?s?\s*Full\s*Name:\*\*\s*(.*)/i,
+                    /Client(?:'|â€™)?s?\s*Full\s*Name:\s*(.*)/i,
                     /\*\*Client:\*\*\s*(.*)/i,
                     /Client:\s*(.*)/i,
                     /\*\*YP Name:\*\*\s*(.*)/i,
@@ -5167,7 +5167,7 @@ export const App = () => {
 
         const julianApprovalContext = {
             approvalReason: isOver30DaysDetail(options?.detail)
-                ? 'Receipt is older than 30 days from purchase date'
+                ? 'Receipt is older than 60 days from purchase date'
                 : 'Total reimbursement amount is at or above $300',
             fraudReceiptStatus: options?.duplicateSignal === 'red'
                 ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
@@ -5625,7 +5625,7 @@ export const App = () => {
             
             const isBlockSignal = signal === 'red' || signal === 'orange';
 
-            const detail = `⚠️ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
+            const detail = `âš ï¸ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
                 `Amount: $${amountPreview}\n` +
                 `Date: ${datePreview}\n` +
                 `Store: ${storePreview}\n` +
@@ -5633,13 +5633,13 @@ export const App = () => {
                 `Unique ID / Fallback: ${uniqueIdPreview}\n` +
                 `NAB Code: ${nabCodePreview}\n\n` +
                 (isBlockSignal
-                    ? `❌ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
+                    ? `âŒ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
                     : `Do you want to proceed anyway?`);
 
             if (isBlockSignal) {
                 const hasConfirmedNabCode = nabCodePreview !== '-' && nabCodePreview.trim().length > 0;
                 if (hasConfirmedNabCode) {
-                    // Duplicate has a paid NAB code — ask if already paid before blocking
+                    // Duplicate has a paid NAB code â€” ask if already paid before blocking
                     setSaveModalDecision({
                         mode: 'already-paid',
                         detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?',
@@ -5649,8 +5649,8 @@ export const App = () => {
                     setShowSaveModal(true);
                     return;
                 }
-                // Duplicate has no NAB code — still pending, all clear, proceed to save
-                confirmSave('PAID', { duplicateSignal: 'green', detail: 'Duplicate matched but no confirmed NAB code — treated as clear.' });
+                // Duplicate has no NAB code â€” still pending, all clear, proceed to save
+                confirmSave('PAID', { duplicateSignal: 'green', detail: 'Duplicate matched but no confirmed NAB code â€” treated as clear.' });
                 return;
             }
 
@@ -5667,7 +5667,7 @@ export const App = () => {
         }
 
         if (isOver30DaysApprovalRequired) {
-            const detail = `${currentInputAgedCount} receipt(s) are older than 30 days from purchase date (30-day receipt age). Save as Pending only and subject to Julian approval. Fraud receipt check: Not matched in duplicate history.`;
+            const detail = `${currentInputAgedCount} receipt(s) are older than 60 days from purchase date (60-day receipt age). Save as Pending only and subject to Julian approval. Fraud receipt check: Not matched in duplicate history.`;
             setSaveModalDecision({ mode: 'yellow', detail });
             setShowSaveModal(true);
             return;
@@ -5790,7 +5790,7 @@ export const App = () => {
         setShowSaveModal(false);
         setSaveModalDecision(null);
         setProcessingState(ProcessingState.IDLE);
-        setErrorMessage('⛔ Processing blocked: This expense was marked as already paid. Do not process to avoid double payment.');
+        setErrorMessage('â›” Processing blocked: This expense was marked as already paid. Do not process to avoid double payment.');
     };
 
     const handleAlreadyPaidContinue = () => {
@@ -6606,7 +6606,7 @@ export const App = () => {
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
-            ? 'Receipt is older than 30 days from purchase date'
+            ? 'Receipt is older than 60 days from purchase date'
             : 'Total reimbursement amount is at or above $300',
         fraudReceiptStatus: duplicateCheckResult.signal === 'red'
             ? `Matched exact fraud duplicate (${duplicateCheckResult.redMatches.length})`
@@ -8774,13 +8774,13 @@ export const App = () => {
                                                 onClick={handleAlreadyPaidBlock}
                                                 className="px-4 py-2 rounded-lg bg-red-500/80 text-white font-semibold hover:bg-red-500 transition-colors"
                                             >
-                                                Yes, already paid — block
+                                                Yes, already paid â€” block
                                             </button>
                                             <button
                                                 onClick={handleAlreadyPaidContinue}
                                                 className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-500 transition-colors"
                                             >
-                                                No, not yet paid — proceed
+                                                No, not yet paid â€” proceed
                                             </button>
                                         </>
                                     )}
@@ -8790,7 +8790,7 @@ export const App = () => {
                                                 duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode,
                                                 reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
                                                     ? (isOver30DaysDetail(saveModalDecision?.detail)
-                                                        ? 'Auto-routed: receipt is older than 30 days, pending Julian approval.'
+                                                        ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
                                                         : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
                                                     : isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                         ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
@@ -9042,7 +9042,7 @@ export const App = () => {
                                     <AlertCircle className={(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? 'text-red-400' : 'text-orange-400'} size={24} />
                                     <div>
                                         <h3 className="text-white font-bold text-lg">
-                                            {(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? '🔴 CRITICAL FRAUD ALERT' : '🟠 FRAUD WARNING'}
+                                            {(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') ? 'ðŸ”´ CRITICAL FRAUD ALERT' : 'ðŸŸ  FRAUD WARNING'}
                                         </h3>
                                         <p className="text-xs text-red-200/90">
                                             {(fraudDuplicates[0]?.matchType === 'UNIQUE ID DUPLICATE' || fraudDuplicates[0]?.matchType === 'exact') 
@@ -9097,12 +9097,12 @@ export const App = () => {
                                                     onClick={() => setShowFraudReceiptsModal(true)}
                                                     className="w-full mt-2 py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
                                                 >
-                                                    📋 View All ({fraudReceiptRows.length}) Fraud Receipts
+                                                    ðŸ“‹ View All ({fraudReceiptRows.length}) Fraud Receipts
                                                 </button>
 
                                                 <div className={`mt-4 p-3 border rounded-lg ${isUniqueIdDuplicate ? 'bg-red-500/10 border-red-500/30' : 'bg-orange-500/10 border-orange-500/30'}`}>
                                                     <p className="text-xs text-amber-200">
-                                                        ⚠️ {isUniqueIdDuplicate 
+                                                        âš ï¸ {isUniqueIdDuplicate 
                                                             ? 'CRITICAL: This appears to match an already processed receipt. Possible fraud duplicate.' 
                                                             : 'WARNING: Same amount on same date. Please verify before proceeding.'}
                                                     </p>
@@ -9271,4 +9271,5 @@ export const App = () => {
         </div>
     );
 };
+
 
