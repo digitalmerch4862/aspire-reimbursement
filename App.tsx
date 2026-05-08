@@ -3757,6 +3757,35 @@ export const App = () => {
 
     const isJulianApprovalRequired = isOver300ApprovalRequired || isOver30DaysApprovalRequired;
 
+    const rulingAlarmFiredRef = React.useRef(false);
+    React.useEffect(() => {
+        const anyRuling = isJulianApprovalRequired || hasFraudDuplicate;
+        if (anyRuling && !rulingAlarmFiredRef.current) {
+            rulingAlarmFiredRef.current = true;
+            // playRulingAlarm defined below — use timeout so it's in scope
+            setTimeout(() => {
+                try {
+                    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    [0, 0.35, 0.7].forEach((offset) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.type = 'square';
+                        osc.frequency.setValueAtTime(1100, ctx.currentTime + offset);
+                        gain.gain.setValueAtTime(0, ctx.currentTime + offset);
+                        gain.gain.linearRampToValueAtTime(0.6, ctx.currentTime + offset + 0.04);
+                        gain.gain.setValueAtTime(0.6, ctx.currentTime + offset + 0.22);
+                        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + offset + 0.3);
+                        osc.start(ctx.currentTime + offset);
+                        osc.stop(ctx.currentTime + offset + 0.35);
+                    });
+                } catch (_) {}
+            }, 0);
+        }
+        if (!anyRuling) rulingAlarmFiredRef.current = false;
+    }, [isJulianApprovalRequired, hasFraudDuplicate]);
+
     const rulesStatusItems = useMemo<RuleStatusItem[]>(() => {
         const formText = reimbursementFormText.trim();
         const receiptText = receiptDetailsText.trim();
@@ -5783,6 +5812,27 @@ export const App = () => {
         } catch (_) {}
     };
 
+    const playRulingAlarm = () => {
+        try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            [0, 0.35, 0.7].forEach((offset) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(1100, ctx.currentTime + offset);
+                gain.gain.setValueAtTime(0, ctx.currentTime + offset);
+                gain.gain.linearRampToValueAtTime(0.6, ctx.currentTime + offset + 0.04);
+                gain.gain.setValueAtTime(0.6, ctx.currentTime + offset + 0.22);
+                gain.gain.linearRampToValueAtTime(0, ctx.currentTime + offset + 0.3);
+                osc.start(ctx.currentTime + offset);
+                osc.stop(ctx.currentTime + offset + 0.35);
+                osc.onended = () => { try { ctx.close(); } catch (_) {} };
+            });
+        } catch (_) {}
+    };
+
     const handleProcess = () => {
         if (isOver300ApprovalRequired) {
             playAlertSiren();
@@ -6717,6 +6767,7 @@ export const App = () => {
 
     return (
         <div className="min-h-screen bg-[#0f1115] text-slate-300 font-sans">
+            <style>{`@keyframes rulingBlink { 0%,100% { opacity:1; box-shadow:0 0 16px 4px rgba(239,68,68,0.7); } 50% { opacity:0.4; box-shadow:0 0 4px 1px rgba(239,68,68,0.2); } }`}</style>
             {saveToast.visible && (
                 <div className="fixed top-5 right-5 z-[70] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-emerald-300/35 bg-[#11161f]/95 backdrop-blur-xl shadow-[0_12px_40px_rgba(16,185,129,0.25)] animate-in fade-in slide-in-from-top-3 duration-200">
                     <div className="px-4 py-3 border-b border-emerald-300/20 flex items-center justify-between">
@@ -7510,6 +7561,20 @@ export const App = () => {
                                                                     </button>
                                                                 )}
                                                             </div>
+
+                                                            {(isJulianApprovalRequired || hasFraudDuplicate) && requestMode === 'solo' && (() => {
+                                                                const warnings: string[] = [];
+                                                                if (hasFraudDuplicate) warnings.push('🚨 FRAUD DUPLICATE DETECTED');
+                                                                if (isOver300ApprovalRequired) warnings.push('⚠️ AMOUNT ≥ $300 — NEEDS JULIAN APPROVAL');
+                                                                if (isOver30DaysApprovalRequired) warnings.push('⚠️ RECEIPT OLDER THAN 60 DAYS — NEEDS JULIAN APPROVAL');
+                                                                return (
+                                                                    <div className="mb-4 rounded-xl border-2 border-red-500 overflow-hidden" style={{animation: 'rulingBlink 0.7s ease-in-out infinite'}}>
+                                                                        <div className="bg-red-600/90 px-4 py-3 flex items-center gap-3">
+                                                                            <span className="text-white text-xs font-black uppercase tracking-widest leading-relaxed">{warnings.join(' · ')}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })()}
 
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                 {/* Payee Name with Searchable Dropdown */}
