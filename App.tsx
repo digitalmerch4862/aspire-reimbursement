@@ -9129,7 +9129,13 @@ export const App = () => {
                                         Found <span className="text-red-400 font-bold">{fraudDuplicates.length}</span> fraud match(es) with <span className="text-red-400 font-bold">{fraudReceiptRows.length}</span> flagged receipt rows
                                     </p>
                                     
-                                    {fraudDuplicates.slice(0, 3).map((dup, idx) => (
+                                    {fraudDuplicates.slice(0, 3).map((dup, idx) => {
+                                        const dupNabCodes = fraudReceiptRows
+                                            .filter(r => dup.rows.includes(r.rowNum))
+                                            .map(r => r.nabCode)
+                                            .filter(n => n && n !== '-');
+                                        const nabDisplay = dupNabCodes.length > 0 ? dupNabCodes.join(', ') : null;
+                                        return (
                                         <div key={idx} className={`rounded-xl border p-4 ${(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? 'border-red-500/30 bg-red-500/10' : 'border-orange-500/30 bg-orange-500/10'}`}>
                                             {(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? (
                                                 <p className="text-white font-semibold">
@@ -9148,11 +9154,25 @@ export const App = () => {
                                             <p className="text-slate-300 text-sm mt-2">
                                                 Rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
                                             </p>
-                                            <p className="text-xs mt-1 px-2 py-0.5 rounded-full inline-block bg-slate-600 text-white">
+                                            {nabDisplay && (
+                                                <div className="mt-2 flex items-center gap-2 bg-black/30 rounded-lg px-3 py-2 border border-white/10">
+                                                    <span className="text-[10px] uppercase text-slate-400 font-bold shrink-0">NAB Code:</span>
+                                                    <span className="text-emerald-300 font-mono font-bold text-sm flex-1">{nabDisplay}</span>
+                                                    <button
+                                                        onClick={() => handleCopyField(nabDisplay, `fraud-nab-${idx}`)}
+                                                        className="text-slate-400 hover:text-white transition-colors shrink-0"
+                                                        title="Copy NAB Code"
+                                                    >
+                                                        {copiedField === `fraud-nab-${idx}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <p className="text-xs mt-2 px-2 py-0.5 rounded-full inline-block bg-slate-600 text-white">
                                                 {dup.matchType}
                                             </p>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
 
                                     {fraudDuplicates.length > 3 && (
                                         <p className="text-slate-400 text-sm text-center">
