@@ -1611,7 +1611,8 @@ export const App = () => {
         return groupPendingThisWeek.filter(item =>
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
-            item.location?.toLowerCase().includes(query)
+            item.location?.toLowerCase().includes(query) ||
+            String(item.totalAmount?.toFixed(2) ?? '').includes(query)
         );
     }, [groupPendingThisWeek, pendingSearchQuery]);
 
@@ -1621,7 +1622,8 @@ export const App = () => {
         return groupPendingPreviousWeeks.filter(item =>
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
-            item.location?.toLowerCase().includes(query)
+            item.location?.toLowerCase().includes(query) ||
+            String(item.totalAmount?.toFixed(2) ?? '').includes(query)
         );
     }, [groupPendingPreviousWeeks, pendingSearchQuery]);
 
@@ -6566,9 +6568,10 @@ export const App = () => {
 
     const filteredPendingGroups = useMemo(() => {
         const query = pendingGroupSearchQuery.toLowerCase().trim();
-        if (!query) return [];
+        if (!query) return pendingApprovalStaffGroups;
         return pendingApprovalStaffGroups.filter(group =>
-            group.staffName?.toLowerCase().includes(query)
+            group.staffName?.toLowerCase().includes(query) ||
+            String(group.totalAmount?.toFixed(2) ?? '').includes(query)
         );
     }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
 
@@ -7349,7 +7352,7 @@ export const App = () => {
                                                 type="text"
                                                 value={pendingSearchQuery}
                                                 onChange={(e) => setPendingSearchQuery(e.target.value)}
-                                                placeholder="Search staff, YP name, or location..."
+                                                placeholder="Search staff, YP, location, or amount (e.g. 89.95)..."
                                                 className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
                                                 autoFocus
                                             />
@@ -7787,19 +7790,18 @@ export const App = () => {
                                         </button>
                                     </div>
 
-                                    {pendingGroupSearchQuery && (
-                                        <div className="px-6 py-3 border-b border-white/10 bg-amber-500/5">
-                                            <input
-                                                type="text"
-                                                value={pendingGroupSearchQuery}
-                                                onChange={(e) => setPendingGroupSearchQuery(e.target.value)}
-                                                placeholder="Search staff name..."
-                                                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
-                                                autoFocus
-                                            />
+                                    <div className="px-6 py-3 border-b border-white/10 bg-amber-500/5">
+                                        <input
+                                            type="text"
+                                            value={pendingGroupSearchQuery}
+                                            onChange={(e) => setPendingGroupSearchQuery(e.target.value)}
+                                            placeholder="Filter by name or amount (e.g. 89.95)..."
+                                            className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
+                                        />
+                                        {pendingGroupSearchQuery && (
                                             <p className="text-[10px] text-amber-300 mt-1">Found: {filteredPendingGroups.length} staff</p>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
 
                                     <div className="px-6 py-3 border-b border-white/10 bg-black/20 text-xs text-slate-300 flex flex-wrap items-center gap-3">
                                         <span className="px-2 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-200">0-2d: {pendingAgingSummary.fresh}</span>
@@ -7808,7 +7810,7 @@ export const App = () => {
                                     </div>
 
                                     <div className="p-6 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
-                                        {(pendingGroupSearchQuery ? filteredPendingGroups : pendingApprovalStaffGroups).length > 0 ? (pendingGroupSearchQuery ? filteredPendingGroups : pendingApprovalStaffGroups).map((group) => (
+                                        {filteredPendingGroups.length > 0 ? filteredPendingGroups.map((group) => (
                                             <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                                 <div className="space-y-1">
                                                     <div className="flex items-center gap-2">
