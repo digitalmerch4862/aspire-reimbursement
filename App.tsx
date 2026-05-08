@@ -6699,13 +6699,40 @@ export const App = () => {
     const requestNabEmailContent = useMemo(() => {
         const formText = reimbursementFormText.trim();
         const staffName = parsedTransactions[0]?.staffName || extractFieldValue(formText, [/Staff\s*member\s*to\s*reimburse:\s*(.+)/i, /Staff\s*Member:\s*(.+)/i]) || '-';
-        const clientName = extractFieldValue(formText, [/Client(?:'|')?s?\s*Full\s*Name:\s*(.+)/i, /Client(?:'|')?s?\s*full\s*name:\s*(.+)/i]) || '-';
+        const clientName = extractFieldValue(formText, [
+            /Client[''’]?s?\s*Full\s*Name:\s*(.+)/i,
+            /Full\s*Name:\s*(.+)/i,
+        ]) || '-';
         const address = extractFieldValue(formText, [/Address:\s*(.+)/i]) || '-';
         const approvedBy = extractFieldValue(formText, [/Approved\s*[Bb]y:\s*(.+)/i]) || '-';
-        const amount = parsedTransactions[0]?.amount || '0.00';
-        const formTotal = formVsReceiptTotals.formTotal != null ? `$${formVsReceiptTotals.formTotal.toFixed(2)}` : `$${amount}`;
-        const receiptTotal = formVsReceiptTotals.receiptTotal != null ? `$${formVsReceiptTotals.receiptTotal.toFixed(2)}` : `$${amount}`;
-        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent);
+        const rawAmount = String(parsedTransactions[0]?.amount || '0.00').replace(/^\$/, '');
+        const formTotal = formVsReceiptTotals.formTotal != null ? formVsReceiptTotals.formTotal.toFixed(2) : rawAmount;
+        const receiptTotal = formVsReceiptTotals.receiptTotal != null ? formVsReceiptTotals.receiptTotal.toFixed(2) : rawAmount;
+
+        // Build clean plain-text table from markdown pipe table
+        const markdownSection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
+        const mdLines = markdownSection.split('\n').filter(l => l.trim().startsWith('|'));
+        let tableText = '';
+        if (mdLines.length >= 2) {
+            const parseRow = (line: string) => line.split('|').slice(1, -1).map(c => c.trim());
+            const rows = mdLines.filter(l => !/^\s*\|[\s\-:]+\|/.test(l)).map(parseRow);
+            if (rows.length > 0) {
+                const colCount = Math.max(...rows.map(r => r.length));
+                const colWidths = Array.from({ length: colCount }, (_, ci) =>
+                    Math.max(...rows.map(r => (r[ci] || '').length), 4)
+                );
+                const pad = (s: string, w: number) => s.padEnd(w);
+                const divider = colWidths.map(w => '-'.repeat(w + 2)).join('+');
+                const formatRow = (r: string[]) => colWidths.map((w, i) => ` ${pad(r[i] || '', w)} `).join('|');
+                const [header, ...body] = rows;
+                tableText = [
+                    formatRow(header),
+                    divider,
+                    ...body.map(formatRow),
+                ].join('\n');
+            }
+        }
+
         return [
             'Hi,',
             '',
@@ -6714,11 +6741,13 @@ export const App = () => {
             `Client's Full Name: ${clientName}`,
             `Address: ${address}`,
             `Approved By: ${approvedBy}`,
-            `Amount: $${amount}`,
-            `Reimbursement Form Total: ${formTotal}`,
-            `Receipt Total: ${receiptTotal}`,
+            `Amount: $${rawAmount}`,
+            `Reimbursement Form Total: $${formTotal}`,
+            `Receipt Total: $${receiptTotal}`,
             'NAB Code:',
-            ...(summarySection ? ['', summarySection] : []),
+            '',
+            'Summary of Expenses:',
+            ...(tableText ? ['', tableText] : []),
         ].join('\n');
     }, [reimbursementFormText, parsedTransactions, formVsReceiptTotals, claimantBaseEmailContent]);
 
