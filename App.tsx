@@ -6696,6 +6696,32 @@ export const App = () => {
         return stripUniqueIdColumnFromSummary(displayEmailContent);
     }, [displayEmailContent]);
 
+    const requestNabEmailContent = useMemo(() => {
+        const formText = reimbursementFormText.trim();
+        const staffName = parsedTransactions[0]?.staffName || extractFieldValue(formText, [/Staff\s*member\s*to\s*reimburse:\s*(.+)/i, /Staff\s*Member:\s*(.+)/i]) || '-';
+        const clientName = extractFieldValue(formText, [/Client(?:'|')?s?\s*Full\s*Name:\s*(.+)/i, /Client(?:'|')?s?\s*full\s*name:\s*(.+)/i]) || '-';
+        const address = extractFieldValue(formText, [/Address:\s*(.+)/i]) || '-';
+        const approvedBy = extractFieldValue(formText, [/Approved\s*[Bb]y:\s*(.+)/i]) || '-';
+        const amount = parsedTransactions[0]?.amount || '0.00';
+        const formTotal = formVsReceiptTotals.formTotal != null ? `$${formVsReceiptTotals.formTotal.toFixed(2)}` : `$${amount}`;
+        const receiptTotal = formVsReceiptTotals.receiptTotal != null ? `$${formVsReceiptTotals.receiptTotal.toFixed(2)}` : `$${amount}`;
+        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent);
+        return [
+            'Hi,',
+            '',
+            'Kindly provide NAB Details of',
+            `Staff Member: ${staffName}`,
+            `Client's Full Name: ${clientName}`,
+            `Address: ${address}`,
+            `Approved By: ${approvedBy}`,
+            `Amount: $${amount}`,
+            `Reimbursement Form Total: ${formTotal}`,
+            `Receipt Total: ${receiptTotal}`,
+            'NAB Code:',
+            ...(summarySection ? ['', summarySection] : []),
+        ].join('\n');
+    }, [reimbursementFormText, parsedTransactions, formVsReceiptTotals, claimantBaseEmailContent]);
+
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
         const unique = new Map<string, DuplicateMatchEvidence>();
         duplicateCheckResult.redMatches.forEach((match) => {
@@ -7554,15 +7580,26 @@ export const App = () => {
                                                                     <div className={`w-2 h-2 rounded-full ${bankCardHeaderDotClass}`}></div>
                                                                     Banking Details ({idx + 1}/{parsedTransactions.length})
                                                                 </h4>
-                                                                {parsedTransactions.length > 1 && (
-                                                                    <button
-                                                                        onClick={() => handleRemoveBankingDetail(txKey)}
-                                                                        className="text-red-400 hover:text-red-300 transition-colors p-1"
-                                                                        title="Remove this box"
-                                                                    >
-                                                                        <Trash2 size={16} />
-                                                                    </button>
-                                                                )}
+                                                                <div className="flex items-center gap-2">
+                                                                    {!selectedEmployee?.bsb && !selectedEmployee?.account && requestNabEmailContent && (
+                                                                        <button
+                                                                            onClick={() => handleCopyField(requestNabEmailContent, `req-nab-${txKey}`)}
+                                                                            className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider transition-all ${copiedField === `req-nab-${txKey}` ? 'bg-emerald-500 text-white' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'}`}
+                                                                            title="Copy Request NAB Details email"
+                                                                        >
+                                                                            {copiedField === `req-nab-${txKey}` ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Request NAB</>}
+                                                                        </button>
+                                                                    )}
+                                                                    {parsedTransactions.length > 1 && (
+                                                                        <button
+                                                                            onClick={() => handleRemoveBankingDetail(txKey)}
+                                                                            className="text-red-400 hover:text-red-300 transition-colors p-1"
+                                                                            title="Remove this box"
+                                                                        >
+                                                                            <Trash2 size={16} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             </div>
 
                                                             {(isJulianApprovalRequired || hasFraudDuplicate) && requestMode === 'solo' && (() => {
