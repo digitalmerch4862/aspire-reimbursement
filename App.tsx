@@ -416,8 +416,10 @@ const isPendingNabCodeValue = (value: string | null | undefined): boolean => {
 const normalizeParsedNabValue = (value: string | null | undefined): string => {
     const normalized = String(value || '').trim();
     if (!normalized) return '';
-    if (isPendingNabCodeValue(normalized)) return '';
-    return normalized;
+    const stripped = normalized.replace(/<!--\s*UID_FALLBACKS:.*?-->\s*/gi, '').trim();
+    if (!stripped) return '';
+    if (isPendingNabCodeValue(stripped)) return '';
+    return stripped;
 };
 
 
