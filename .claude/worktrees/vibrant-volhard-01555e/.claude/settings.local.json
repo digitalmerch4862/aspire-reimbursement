@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"Banking\\\\|banking\\\\|bank\" --include=\"*.tsx\" -l)",
+      "Bash(grep -r \"Banking\\\\|banking\\\\|bank\" --include=\"*.ts\" -l)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

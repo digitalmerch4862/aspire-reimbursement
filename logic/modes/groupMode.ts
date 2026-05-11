@@ -95,7 +95,7 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
     }
 
     if (extracted.length === 0) {
-        const blocks = rawText.split(/Staff\s*Member\s*:/gi);
+        const blocks = rawText.split(/(?:Staff\s*Member|Staff\s*Name)\s*:/gi);
 
         for (let i = 1; i < blocks.length; i++) {
             const block = blocks[i];

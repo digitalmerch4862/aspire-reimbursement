@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:/Users/Admin/Desktop/App/Aspire Reimbursement\" log --oneline -5)",
+      "Bash(git -C \"C:/Users/Admin/Desktop/App/Aspire Reimbursement\" add docs/superpowers/plans/2026-04-20-solo-mode-two-source-truth-totals.md)",
+      "Bash(git -C \"C:/Users/Admin/Desktop/App/Aspire Reimbursement\" commit -m \"docs: add solo mode two-source truth totals implementation plan\")",
+      "Read(//c/Users/Admin/Desktop/App/Aspire Reimbursement/**)",
+      "Bash(npx tsc *)",
+      "Bash(gh pr create --title 'feat: solo mode two-source truth totals with discrepancy line' --body ' *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__read_console_messages",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "mcp__Claude_in_Chrome__read_network_requests",
+      "Bash(gh run *)",
+      "Bash(vercel ls *)",
+      "Bash(vercel inspect *)",
+      "Bash(vercel promote *)",
+      "Bash(vercel --prod --yes)",
+      "Bash(vercel deploy *)"
+    ]
+  }
+}
