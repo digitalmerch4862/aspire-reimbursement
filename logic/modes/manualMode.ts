@@ -21,7 +21,7 @@ Hi,
 
 I hope this message finds you well.
 
-I am writing to confirm that this VIP / special instruction request has been recorded for processing and monitoring.
+I am writing to confirm that your reimbursement request has been processed today.
 
 **Requested By:** ${requestedBy}
 **Staff Member:** ${staffMember}
