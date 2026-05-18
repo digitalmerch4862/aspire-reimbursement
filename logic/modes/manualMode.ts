@@ -35,9 +35,9 @@ I am writing to confirm that your reimbursement request has been processed today
 
 **Summary of Expenses**
 
-| Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | MANUAL-ENTRY | VIP Manual | - | Special Instruction | VIP Manual | $${amountValue} | $${amountValue} | ${reason} |
+| Receipt # | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | VIP Manual | - | Special Instruction | VIP Manual | $${amountValue} | $${amountValue} | ${reason} |
 
 **TOTAL AMOUNT: $${amountValue}**
 `;

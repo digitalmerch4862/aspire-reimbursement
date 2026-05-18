@@ -6709,8 +6709,9 @@ export const App = () => {
         const formTotal = formVsReceiptTotals.formTotal != null ? formVsReceiptTotals.formTotal.toFixed(2) : rawAmount;
         const receiptTotal = formVsReceiptTotals.receiptTotal != null ? formVsReceiptTotals.receiptTotal.toFixed(2) : rawAmount;
 
-        // Build clean plain-text table from markdown pipe table
-        const markdownSection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
+        // Build clean plain-text table from markdown pipe table (strip UID column first)
+        const rawMarkdownSection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
+        const markdownSection = stripUniqueIdColumnFromSummary(rawMarkdownSection);
         const mdLines = markdownSection.split('\n').filter(l => l.trim().startsWith('|'));
         let tableText = '';
         if (mdLines.length >= 2) {
@@ -6722,13 +6723,15 @@ export const App = () => {
                     Math.max(...rows.map(r => (r[ci] || '').length), 4)
                 );
                 const pad = (s: string, w: number) => s.padEnd(w);
-                const divider = colWidths.map(w => '-'.repeat(w + 2)).join('+');
-                const formatRow = (r: string[]) => colWidths.map((w, i) => ` ${pad(r[i] || '', w)} `).join('|');
+                const borderRow = '+' + colWidths.map(w => '-'.repeat(w + 2)).join('+') + '+';
+                const formatRow = (r: string[]) => '|' + colWidths.map((w, i) => ` ${pad(r[i] || '', w)} `).join('|') + '|';
                 const [header, ...body] = rows;
                 tableText = [
+                    borderRow,
                     formatRow(header),
-                    divider,
+                    borderRow,
                     ...body.map(formatRow),
+                    borderRow,
                 ].join('\n');
             }
         }
