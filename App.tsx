@@ -6654,8 +6654,28 @@ export const App = () => {
         const source = isEditing ? editableContent : (results?.phase4 || '');
         if (!source) return '';
         const withoutUidMeta = stripUidFallbackMeta(source);
-        return stripInternalAuditMeta(stripClaimantRevisionSection(stripJulianApprovalSection(withoutUidMeta)));
-    }, [isEditing, editableContent, results?.phase4]);
+        let content = stripInternalAuditMeta(stripClaimantRevisionSection(stripJulianApprovalSection(withoutUidMeta)));
+
+        // Replace each Staff Member line with banking payee name
+        let txIdx = 0;
+        const boldReplaced = content.replace(/(\*\*Staff Member:\*\*\s*)([^\n]*)/g, (_match, prefix, original) => {
+            const payee = employeeSearchQuery.get(parsedTransactions[txIdx]?.index ?? txIdx) || parsedTransactions[txIdx]?.formattedName || original.trim();
+            txIdx++;
+            return prefix + payee;
+        });
+        if (txIdx > 0) {
+            content = boldReplaced;
+        } else {
+            txIdx = 0;
+            content = content.replace(/(Staff Member:\s*)([^\n]*)/g, (_match, prefix, original) => {
+                const payee = employeeSearchQuery.get(parsedTransactions[txIdx]?.index ?? txIdx) || parsedTransactions[txIdx]?.formattedName || original.trim();
+                txIdx++;
+                return prefix + payee;
+            });
+        }
+
+        return content;
+    }, [isEditing, editableContent, results?.phase4, parsedTransactions, employeeSearchQuery]);
 
     const claimantEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
@@ -6698,7 +6718,7 @@ export const App = () => {
 
     const requestNabEmailContent = useMemo(() => {
         const formText = reimbursementFormText.trim();
-        const staffName = parsedTransactions[0]?.staffName || extractFieldValue(formText, [/Staff\s*member\s*to\s*reimburse:\s*(.+)/i, /Staff\s*Member:\s*(.+)/i]) || '-';
+        const staffName = employeeSearchQuery.get(parsedTransactions[0]?.index ?? 0) || parsedTransactions[0]?.staffName || extractFieldValue(formText, [/Staff\s*member\s*to\s*reimburse:\s*(.+)/i, /Staff\s*Member:\s*(.+)/i]) || '-';
         const clientName = extractFieldValue(formText, [
             /Client[''’]?s?\s*Full\s*Name:\s*(.+)/i,
             /Full\s*Name:\s*(.+)/i,
