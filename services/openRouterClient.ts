@@ -14,6 +14,8 @@ const REFERER = typeof window !== 'undefined' ? window.location.origin : 'https:
 
 let keyIndex = 0;
 
+export function _resetKeyIndex(): void { keyIndex = 0; }
+
 export function _getKeysFromEnv(): string[] {
     const keys: string[] = [];
     let n = 1;

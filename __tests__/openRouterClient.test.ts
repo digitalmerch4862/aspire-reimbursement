@@ -4,7 +4,7 @@ jest.mock('../services/env', () => ({
     getViteEnv: jest.fn(() => undefined),
 }));
 
-import { getNextKey, buildOpenRouterPayload, _getKeysFromEnv } from '../services/openRouterClient';
+import { getNextKey, buildOpenRouterPayload, _getKeysFromEnv, _resetKeyIndex } from '../services/openRouterClient';
 import { getViteEnv } from '../services/env';
 
 const mockGetViteEnv = getViteEnv as jest.MockedFunction<typeof getViteEnv>;
@@ -54,6 +54,8 @@ describe('getNextKey', () => {
 });
 
 describe('getNextKey rotation', () => {
+    beforeEach(() => { _resetKeyIndex(); });
+
     afterEach(() => {
         mockGetViteEnv.mockReset();
     });
