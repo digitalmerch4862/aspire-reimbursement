@@ -7249,7 +7249,7 @@ export const App = () => {
                         <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
                             {/* ... */}
                             <div className="w-full space-y-6 min-w-0">
-                                {requestMode === 'solo' && (
+                                {(requestMode === 'solo' || requestMode === 'group') && (
                                     <InputMethodToggle
                                         current={inputMethod}
                                         onChange={(method) => {
@@ -7265,12 +7265,12 @@ export const App = () => {
                                         if (mode !== requestMode) {
                                             resetAll();
                                             setRequestMode(mode);
-                                            if (mode !== 'solo') setInputMethod('manual');
+                                            if (mode !== 'solo' && mode !== 'group') setInputMethod('manual');
                                         }
                                     }}
                                 />
 
-                                {requestMode === 'solo' && inputMethod === 'ai' && (
+                                {(requestMode === 'solo' || requestMode === 'group') && inputMethod === 'ai' && (
                                     <AIInputPanel
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}

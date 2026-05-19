@@ -33,6 +33,7 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
     const [aiError, setAIError] = useState<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
     const [lastFile, setLastFile] = useState<File | null>(null);
+    const [isClipboardLoading, setIsClipboardLoading] = useState(false);
     const dragDepth = useRef(0);
 
     const processFile = useCallback(async (file: File) => {
@@ -67,6 +68,40 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
     const handleRetry = () => {
         if (lastFile) processFile(lastFile);
     };
+
+    const handlePasteFromClipboard = useCallback(async () => {
+        if (!navigator.clipboard?.read) {
+            setAIError('Clipboard paste button is not supported in this browser. Use Ctrl+V instead.');
+            setAIState('error');
+            return;
+        }
+
+        setIsClipboardLoading(true);
+        setAIError(null);
+
+        try {
+            const clipboardItems = await navigator.clipboard.read();
+            for (const clipboardItem of clipboardItems) {
+                const imageType = clipboardItem.types.find((type) => type.startsWith('image/'));
+                if (!imageType) continue;
+
+                const blob = await clipboardItem.getType(imageType);
+                const extension = imageType.split('/')[1] || 'png';
+                const file = new File([blob], `clipboard-image.${extension}`, { type: imageType });
+                await processFile(file);
+                return;
+            }
+
+            setAIError('No image found in clipboard. Copy a screenshot first, then press Paste.');
+            setAIState('error');
+        } catch (err: any) {
+            const message = err?.message || 'Clipboard access failed.';
+            setAIError(`${message} Try Ctrl+V if the browser blocks clipboard access.`);
+            setAIState('error');
+        } finally {
+            setIsClipboardLoading(false);
+        }
+    }, [processFile]);
 
     const handleReset = () => {
         dragDepth.current = 0;
@@ -130,9 +165,28 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
                                 <div className="text-center">
                                     <p className="text-sm font-medium text-slate-300">Drop file here or click to browse</p>
                                     <p className="text-xs text-slate-500 mt-1">PDF · JPG · PNG · DOCX · XLSX — max 10 MB</p>
-                                    <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-slate-600">
-                                        <ClipboardPaste size={12} />
-                                        <span>or paste screenshot (Ctrl+V)</span>
+                                    <div className="flex flex-col items-center gap-3 mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                void handlePasteFromClipboard();
+                                            }}
+                                            disabled={isClipboardLoading}
+                                            className="pointer-events-auto inline-flex items-center gap-2 rounded-xl border border-purple-400/25 bg-purple-500/10 px-4 py-2 text-xs font-semibold text-purple-200 transition-colors hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {isClipboardLoading ? (
+                                                <Loader2 size={14} className="animate-spin" />
+                                            ) : (
+                                                <ClipboardPaste size={14} />
+                                            )}
+                                            <span>{isClipboardLoading ? 'Reading Clipboard…' : 'Paste Screenshot'}</span>
+                                        </button>
+                                        <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600">
+                                            <ClipboardPaste size={12} />
+                                            <span>or paste screenshot with Ctrl+V</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
