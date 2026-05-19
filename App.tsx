@@ -15,6 +15,8 @@ import ManualMode from './components/Dashboard/ManualMode';
 import ReceiptMode from './components/Dashboard/ReceiptMode';
 import LiquidationTracker from './components/Dashboard/LiquidationTracker';
 import ModeTabs, { DashboardMode } from './components/Dashboard/ModeTabs';
+import InputMethodToggle, { InputMethod } from './components/Dashboard/InputMethodToggle';
+import AIInputPanel from './components/Dashboard/AIInputPanel';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 import * as ModeLogic from './logic/modes';
 
@@ -1543,6 +1545,7 @@ export const App = () => {
     const [reimbursementFormText, setReimbursementFormText] = useState('');
     const [receiptDetailsText, setReceiptDetailsText] = useState('');
     const [requestMode, setRequestMode] = useState<RequestMode>('solo');
+    const [inputMethod, setInputMethod] = useState<InputMethod>('manual');
     const reimbursementFormRef = useRef<HTMLTextAreaElement | null>(null);
 
 
@@ -7246,17 +7249,42 @@ export const App = () => {
                         <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
                             {/* ... */}
                             <div className="w-full space-y-6 min-w-0">
+                                {requestMode === 'solo' && (
+                                    <InputMethodToggle
+                                        current={inputMethod}
+                                        onChange={(method) => {
+                                            setInputMethod(method);
+                                            resetAll();
+                                        }}
+                                    />
+                                )}
+
                                 <ModeTabs
                                     currentMode={requestMode}
                                     onModeChange={(mode) => {
                                         if (mode !== requestMode) {
                                             resetAll();
                                             setRequestMode(mode);
+                                            if (mode !== 'solo') setInputMethod('manual');
                                         }
                                     }}
                                 />
 
-                                {requestMode === 'solo' && (
+                                {requestMode === 'solo' && inputMethod === 'ai' && (
+                                    <AIInputPanel
+                                        reimbursementFormText={reimbursementFormText}
+                                        setReimbursementFormText={setReimbursementFormText}
+                                        receiptDetailsText={receiptDetailsText}
+                                        setReceiptDetailsText={setReceiptDetailsText}
+                                        handleProcess={handleProcess}
+                                        processingState={processingState}
+                                        errorMessage={errorMessage}
+                                        results={results}
+                                        resetAll={resetAll}
+                                    />
+                                )}
+
+                                {requestMode === 'solo' && inputMethod === 'manual' && (
                                     <SoloMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
