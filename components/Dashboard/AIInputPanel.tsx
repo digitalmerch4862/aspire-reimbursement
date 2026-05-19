@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Upload, Loader2, AlertCircle, RefreshCw, FileText, CheckCircle } from 'lucide-react';
 import { fileToPayload } from '../../utils/fileExtractors';
 import { extractFromFile, ExtractionResult } from '../../services/openRouterClient';
@@ -33,6 +33,7 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
     const [aiError, setAIError] = useState<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
     const [lastFile, setLastFile] = useState<File | null>(null);
+    const dragDepth = useRef(0);
 
     const processFile = useCallback(async (file: File) => {
         setLastFile(file);
@@ -59,6 +60,7 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
 
     const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
+        e.target.value = '';
         if (file) processFile(file);
     };
 
@@ -67,6 +69,7 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
     };
 
     const handleReset = () => {
+        dragDepth.current = 0;
         setAIState('idle');
         setAIError(null);
         setLastFile(null);
@@ -91,8 +94,9 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
                 {(aiState === 'idle' || aiState === 'error') && (
                     <>
                         <label
-                            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                            onDragLeave={() => setIsDragOver(false)}
+                            onDragEnter={() => { dragDepth.current += 1; setIsDragOver(true); }}
+                            onDragOver={(e) => { e.preventDefault(); }}
+                            onDragLeave={() => { dragDepth.current -= 1; if (dragDepth.current === 0) setIsDragOver(false); }}
                             onDrop={onDrop}
                             className={`flex flex-col items-center justify-center gap-4 w-full min-h-[200px] rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer
                                 ${isDragOver
@@ -147,8 +151,9 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <label className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Reimbursement Form</label>
+                                <label htmlFor="ai-reimb-form" className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Reimbursement Form</label>
                                 <textarea
+                                    id="ai-reimb-form"
                                     value={reimbursementFormText}
                                     onChange={(e) => setReimbursementFormText(e.target.value)}
                                     className="w-full h-48 bg-black/20 border border-white/10 rounded-2xl p-4 text-sm text-slate-200 font-mono resize-none focus:outline-none focus:border-purple-400/40 transition-colors"
@@ -156,8 +161,9 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Receipt Details</label>
+                                <label htmlFor="ai-receipt-details" className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Receipt Details</label>
                                 <textarea
+                                    id="ai-receipt-details"
                                     value={receiptDetailsText}
                                     onChange={(e) => setReceiptDetailsText(e.target.value)}
                                     className="w-full h-48 bg-black/20 border border-white/10 rounded-2xl p-4 text-sm text-slate-200 font-mono resize-none focus:outline-none focus:border-purple-400/40 transition-colors"
