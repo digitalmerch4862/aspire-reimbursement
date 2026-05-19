@@ -7,8 +7,7 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
 
     const extracted: any[] = [];
 
-    const locationMatch = rawText.match(/(?:Client\s*\/\s*Location|Location)\s*[:|]\s*(.+)/i)
-        || rawText.match(/\|\s*(?:Client\s*\/\s*)?Location\s*\|\s*([^|]+)\|/i);
+    const locationMatch = rawText.match(/(?:Client\s*\/\s*Location|Location)\s*:\s*(.+)/i);
     const commonLocation = locationMatch ? locationMatch[1].trim() : '';
 
     const normalizeStaffName = (value: string): string => {
@@ -26,14 +25,12 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
         return Number.isFinite(parsed) ? parsed : 0;
     };
 
-    const stripBold = (s: string) => s.replace(/\*\*/g, '').trim();
-
     const allLines = rawText.split(/\r?\n/).map((line) => line.trim());
     const headerIndex = allLines.findIndex((line) => {
         if (!line.includes('|')) return false;
         const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
-        const cols = normalized.split('|').map((c) => stripBold(c));
-        if (cols.length < 3) return false;
+        const cols = normalized.split('|').map((c) => c.trim());
+        if (cols.length !== 3) return false;
         return /^staff\s*name$/i.test(cols[0])
             && /^(?:yp|yb)\s*name$/i.test(cols[1])
             && /^amount$/i.test(cols[2]);
@@ -54,7 +51,7 @@ export const processGroupMode = (options: ModeOptions): ProcessingResult & { err
             const normalized = line.replace(/^\|/, '').replace(/\|$/, '').trim();
             if (!normalized || /^:?-{3,}/.test(normalized.replace(/\|/g, '').trim())) continue;
 
-            const cols = normalized.split('|').map((c) => stripBold(c));
+            const cols = normalized.split('|').map((c) => c.trim());
             if (cols.length < 3) continue;
 
             const staffName = normalizeStaffName(cols[0]);
