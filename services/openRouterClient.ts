@@ -1,3 +1,5 @@
+import { getViteEnv } from './env';
+
 const EXTRACTION_PROMPT = `You are a reimbursement data extractor. Given the file content, extract and return JSON only:
 {
   "reimbursementForm": "<text with format: Client's full name: X\\nAddress: X\\nStaff member to reimburse: X\\nApproved by: X\\n\\nParticular | Date Purchased | Amount | On Charge Y/N\\n...rows...\\n\\nTotal Amount: $X>",
@@ -8,17 +10,24 @@ If a section is absent, return empty string for that key. Return JSON only — n
 const PRIMARY_MODEL = 'google/gemini-2.0-flash-exp:free';
 const FALLBACK_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
 
+const REFERER = typeof window !== 'undefined' ? window.location.origin : 'https://app.local';
+
 let keyIndex = 0;
 
-export function getNextKey(): string {
+export function _getKeysFromEnv(): string[] {
     const keys: string[] = [];
     let n = 1;
     while (true) {
-        const key = (process.env as any)[`VITE_OPENROUTER_KEY_${n}`];
+        const key = getViteEnv(`VITE_OPENROUTER_KEY_${n}`);
         if (!key) break;
         keys.push(key);
         n++;
     }
+    return keys;
+}
+
+export function getNextKey(): string {
+    const keys = _getKeysFromEnv();
     if (keys.length === 0) throw new Error('No OpenRouter API keys configured. Add VITE_OPENROUTER_KEY_1 to .env');
     const key = keys[keyIndex % keys.length];
     keyIndex = (keyIndex + 1) % keys.length;
@@ -61,7 +70,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
         headers: {
             'Authorization': `Bearer ${key}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': window.location.origin,
+            'HTTP-Referer': REFERER,
         },
         body: JSON.stringify(payload),
     });
@@ -74,7 +83,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
                 headers: {
                     'Authorization': `Bearer ${key}`,
                     'Content-Type': 'application/json',
-                    'HTTP-Referer': window.location.origin,
+                    'HTTP-Referer': REFERER,
                 },
                 body: JSON.stringify(payload),
             });
