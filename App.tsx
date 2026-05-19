@@ -262,6 +262,13 @@ const stripInternalAuditMeta = (text: string): string => {
         .trim();
 };
 
+const stripManualSummarySection = (text: string): string => {
+    return String(text || '')
+        .replace(/\n*---\n*\*\*Summary of Expenses\*\*[\s\S]*?(\*\*TOTAL AMOUNT:.*?\*\*)\s*/i, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
 const LOCAL_AUDIT_LOGS_KEY = 'aspire_local_audit_logs';
 const SPECIAL_INSTRUCTION_LOGS_KEY = 'aspire_special_instruction_logs';
 const SPECIAL_INSTRUCTION_SYNC_KEY = 'aspire_special_instruction_synced_to_audit_logs_v1';
@@ -6679,10 +6686,11 @@ export const App = () => {
 
     const claimantEmailContent = useMemo(() => {
         if (!claimantBaseEmailContent) return '';
-        return formVsReceiptTotals.isFormHigherMismatch
+        const base = formVsReceiptTotals.isFormHigherMismatch
             ? stripInternalAuditMeta(upsertClaimantRevisionSection(claimantBaseEmailContent))
             : stripInternalAuditMeta(stripClaimantRevisionSection(claimantBaseEmailContent));
-    }, [claimantBaseEmailContent, formVsReceiptTotals.isFormHigherMismatch]);
+        return requestMode === 'manual' ? stripManualSummarySection(base) : base;
+    }, [claimantBaseEmailContent, formVsReceiptTotals.isFormHigherMismatch, requestMode]);
 
     const julianApprovalContext = useMemo(() => ({
         approvalReason: isOver30DaysApprovalRequired
