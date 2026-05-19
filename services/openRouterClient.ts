@@ -7,8 +7,13 @@ const EXTRACTION_PROMPT = `You are a reimbursement data extractor. Given the fil
 }
 If a section is absent, return empty string for that key. Return JSON only — no markdown, no explanation.`;
 
-const PRIMARY_MODEL = 'google/gemini-2.0-flash-exp:free';
-const FALLBACK_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
+// Vision model (supports image_url) — for PDF/image payloads
+const PRIMARY_VISION_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
+// Text models — for DOCX/XLSX extracted text payloads
+const PRIMARY_TEXT_MODEL = 'openai/gpt-oss-20b:free';
+const FALLBACK_TEXT_MODEL = 'google/gemma-4-31b-it:free';
+// Legacy constant kept for buildOpenRouterPayload default param
+const PRIMARY_MODEL = PRIMARY_TEXT_MODEL;
 
 const REFERER = typeof window !== 'undefined' ? window.location.origin : 'https://app.local';
 
@@ -65,7 +70,8 @@ export interface ExtractionResult {
 
 export async function extractFromFile(file: FilePayload): Promise<ExtractionResult> {
     const key = getNextKey();
-    let payload = buildOpenRouterPayload(file, PRIMARY_MODEL);
+    const model = file.type === 'image' ? PRIMARY_VISION_MODEL : PRIMARY_TEXT_MODEL;
+    let payload = buildOpenRouterPayload(file, model);
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -99,7 +105,8 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
 
         // Try fallback model with same key before giving up
         if (response.status === 404 || response.status === 400) {
-            payload = buildOpenRouterPayload(file, FALLBACK_MODEL);
+            const fallbackModel = file.type === 'image' ? PRIMARY_TEXT_MODEL : FALLBACK_TEXT_MODEL;
+            payload = buildOpenRouterPayload(file, fallbackModel);
             const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {

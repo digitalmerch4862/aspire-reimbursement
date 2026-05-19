@@ -98,7 +98,7 @@ describe('buildOpenRouterPayload', () => {
 
     it('uses correct default model', () => {
         const payload = buildOpenRouterPayload({ type: 'image', base64: 'x', mimeType: 'image/png' });
-        expect(payload.model).toBe('google/gemini-2.0-flash-exp:free');
+        expect(payload.model).toBe('openai/gpt-oss-20b:free');
     });
 
     it('builds text payload for extracted text type', () => {
