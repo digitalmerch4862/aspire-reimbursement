@@ -9,9 +9,14 @@ If a section is absent, return empty string for that key. Return JSON only — n
 
 // Vision model (supports image_url) — for PDF/image payloads
 const PRIMARY_VISION_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
-// Text models — for DOCX/XLSX extracted text payloads
-const PRIMARY_TEXT_MODEL = 'openai/gpt-oss-20b:free';
-const FALLBACK_TEXT_MODEL = 'google/gemma-4-31b-it:free';
+// Text models — for DOCX/XLSX extracted text payloads (tried in order on 429/404/400)
+const TEXT_MODELS = [
+    'openai/gpt-oss-20b:free',
+    'deepseek/deepseek-v4-flash:free',
+    'google/gemma-4-31b-it:free',
+];
+const PRIMARY_TEXT_MODEL = TEXT_MODELS[0];
+const FALLBACK_TEXT_MODEL = TEXT_MODELS[1];
 // Legacy constant kept for buildOpenRouterPayload default param
 const PRIMARY_MODEL = PRIMARY_TEXT_MODEL;
 
