@@ -7249,15 +7249,13 @@ export const App = () => {
                         <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
                             {/* ... */}
                             <div className="w-full space-y-6 min-w-0">
-                                {requestMode === 'solo' && (
-                                    <InputMethodToggle
-                                        current={inputMethod}
-                                        onChange={(method) => {
-                                            setInputMethod(method);
-                                            resetAll();
-                                        }}
-                                    />
-                                )}
+                                <InputMethodToggle
+                                    current={inputMethod}
+                                    onChange={(method) => {
+                                        setInputMethod(method);
+                                        resetAll();
+                                    }}
+                                />
 
                                 <ModeTabs
                                     currentMode={requestMode}
@@ -7265,12 +7263,11 @@ export const App = () => {
                                         if (mode !== requestMode) {
                                             resetAll();
                                             setRequestMode(mode);
-                                            if (mode !== 'solo') setInputMethod('manual');
                                         }
                                     }}
                                 />
 
-                                {requestMode === 'solo' && inputMethod === 'ai' && (
+                                {inputMethod === 'ai' && (
                                     <AIInputPanel
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
@@ -7284,7 +7281,7 @@ export const App = () => {
                                     />
                                 )}
 
-                                {requestMode === 'solo' && inputMethod === 'manual' && (
+                                {inputMethod === 'manual' && requestMode === 'solo' && (
                                     <SoloMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
@@ -7300,7 +7297,7 @@ export const App = () => {
                                     />
                                 )}
 
-                                {requestMode === 'group' && (
+                                {inputMethod === 'manual' && requestMode === 'group' && (
                                     <GroupMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
@@ -7313,7 +7310,7 @@ export const App = () => {
                                     />
                                 )}
 
-                                {requestMode === 'manual' && (
+                                {inputMethod === 'manual' && requestMode === 'manual' && (
                                     <ManualMode
                                         reimbursementFormText={reimbursementFormText}
                                         setReimbursementFormText={setReimbursementFormText}
@@ -7325,7 +7322,7 @@ export const App = () => {
                                     />
                                 )}
 
-                                {requestMode === 'receipt' && (
+                                {inputMethod === 'manual' && requestMode === 'receipt' && (
                                     <ReceiptMode
                                         receiptDetailsText={receiptDetailsText}
                                         setReceiptDetailsText={setReceiptDetailsText}
