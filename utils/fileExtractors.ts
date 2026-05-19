@@ -17,8 +17,11 @@ const SUPPORTED_TYPES = new Set([
 
 function toBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
+    const CHUNK = 8192;
     let binary = '';
-    bytes.forEach((b) => (binary += String.fromCharCode(b)));
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
     return btoa(binary);
 }
 
@@ -42,7 +45,7 @@ export async function fileToPayload(file: File): Promise<FilePayload> {
     // XLSX / XLS
     if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel') {
         const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'array' });
+        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
         const lines: string[] = [];
         workbook.SheetNames.forEach((name) => {
             const sheet = workbook.Sheets[name];
