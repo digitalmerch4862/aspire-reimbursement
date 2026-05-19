@@ -29,16 +29,20 @@ Extract every receipt line item you can find, even when some fields need fallbac
 If no receipt evidence exists, return an empty string for receiptDetails.
 Return JSON only — no markdown, no explanation.`;
 
-// Vision model (supports image_url) — for PDF/image payloads
-const PRIMARY_VISION_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
-// Text models — for DOCX/XLSX extracted text payloads (tried in order on 429/404/400)
+// Vision models (support image_url) — for PDF/image payloads
+const VISION_MODELS = [
+    'nvidia/nemotron-nano-12b-v2-vl:free',
+    'meta-llama/llama-3.2-11b-vision-instruct:free',
+    'qwen/qwen2.5-vl-72b-instruct:free',
+];
+const PRIMARY_VISION_MODEL = VISION_MODELS[0];
+// Text models — for DOCX/XLSX extracted text payloads
 const TEXT_MODELS = [
     'openai/gpt-oss-20b:free',
     'deepseek/deepseek-v4-flash:free',
     'google/gemma-4-31b-it:free',
 ];
 const PRIMARY_TEXT_MODEL = TEXT_MODELS[0];
-const FALLBACK_TEXT_MODEL = TEXT_MODELS[1];
 // Legacy constant kept for buildOpenRouterPayload default param
 const PRIMARY_MODEL = PRIMARY_TEXT_MODEL;
 
@@ -97,14 +101,15 @@ export interface ExtractionResult {
 
 export async function extractFromFile(file: FilePayload): Promise<ExtractionResult> {
     const key = getNextKey();
-    const model = file.type === 'image' ? PRIMARY_VISION_MODEL : PRIMARY_TEXT_MODEL;
+    const models = getCandidateModels(file);
+    const model = models[0];
     let payload = buildOpenRouterPayload(file, model);
 
-    let result = await requestExtraction(payload, file, key);
+    let result = await requestExtraction(payload, file, key, models);
 
     if (!result.reimbursementForm.trim()) {
         const reimbursementRetryPayload = buildOpenRouterPayload(file, model, REIMBURSEMENT_ONLY_PROMPT);
-        const reimbursementRetry = await requestExtraction(reimbursementRetryPayload, file, key);
+        const reimbursementRetry = await requestExtraction(reimbursementRetryPayload, file, key, models);
         result = {
             reimbursementForm: reimbursementRetry.reimbursementForm.trim() || result.reimbursementForm,
             receiptDetails: result.receiptDetails,
@@ -113,7 +118,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
 
     if (!result.receiptDetails.trim()) {
         const receiptsRetryPayload = buildOpenRouterPayload(file, model, RECEIPTS_ONLY_PROMPT);
-        const receiptsRetry = await requestExtraction(receiptsRetryPayload, file, key);
+        const receiptsRetry = await requestExtraction(receiptsRetryPayload, file, key, models);
         result = {
             reimbursementForm: result.reimbursementForm,
             receiptDetails: receiptsRetry.receiptDetails.trim() || result.receiptDetails,
@@ -123,61 +128,54 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
     return result;
 }
 
-async function requestExtraction(payload: ReturnType<typeof buildOpenRouterPayload>, file: FilePayload, key: string): Promise<ExtractionResult> {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${key}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': REFERER,
-        },
-        body: JSON.stringify(payload),
-    });
+function getCandidateModels(file: FilePayload): string[] {
+    return file.type === 'image' ? VISION_MODELS : TEXT_MODELS;
+}
 
-    if (!response.ok) {
-        // On rate limit, rotate to next key and retry once
-        if (response.status === 429) {
-            const retryKey = getNextKey();
-            const retryResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${retryKey}`,
-                    'Content-Type': 'application/json',
-                    'HTTP-Referer': REFERER,
-                },
-                body: JSON.stringify(payload),
-            });
-            if (!retryResponse.ok) {
-                const errText = await retryResponse.text();
-                throw new Error(`OpenRouter error ${retryResponse.status}: ${errText}`);
-            }
-            return parseExtractionResponse(await retryResponse.json());
+async function requestExtraction(
+    payload: ReturnType<typeof buildOpenRouterPayload>,
+    file: FilePayload,
+    initialKey: string,
+    models: string[],
+): Promise<ExtractionResult> {
+    let lastErrorMessage = 'OpenRouter request failed.';
+    let currentKey = initialKey;
+    const prompt = payload.messages[0].content[0].text;
+    const startingModelIndex = Math.max(0, models.indexOf(payload.model));
+
+    for (let index = startingModelIndex; index < models.length; index += 1) {
+        const model = models[index];
+        const attemptPayload = buildOpenRouterPayload(file, model, prompt);
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${currentKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': REFERER,
+            },
+            body: JSON.stringify(attemptPayload),
+        });
+
+        if (response.ok) {
+            return parseExtractionResponse(await response.json());
         }
 
-        // Try fallback model with same key before giving up
-        if (response.status === 404 || response.status === 400) {
-            const fallbackModel = file.type === 'image' ? PRIMARY_TEXT_MODEL : FALLBACK_TEXT_MODEL;
-            const fallbackPayload = buildOpenRouterPayload(file, fallbackModel, payload.messages[0].content[0].text);
-            const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${key}`,
-                    'Content-Type': 'application/json',
-                    'HTTP-Referer': REFERER,
-                },
-                body: JSON.stringify(fallbackPayload),
-            });
-            if (!fallbackResponse.ok) {
-                const errText = await fallbackResponse.text();
-                throw new Error(`OpenRouter error ${fallbackResponse.status}: ${errText}`);
-            }
-            return parseExtractionResponse(await fallbackResponse.json());
-        }
         const errText = await response.text();
-        throw new Error(`OpenRouter error ${response.status}: ${errText}`);
+        lastErrorMessage = `OpenRouter error ${response.status}: ${errText}`;
+
+        if (response.status === 429) {
+            currentKey = getNextKey();
+            continue;
+        }
+
+        if (response.status === 400 || response.status === 404) {
+            continue;
+        }
+
+        throw new Error(lastErrorMessage);
     }
 
-    return parseExtractionResponse(await response.json());
+    throw new Error(lastErrorMessage);
 }
 
 function parseExtractionResponse(data: any): ExtractionResult {
