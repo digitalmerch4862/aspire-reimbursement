@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { Upload, Loader2, AlertCircle, RefreshCw, FileText, CheckCircle } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Upload, Loader2, AlertCircle, RefreshCw, FileText, CheckCircle, ClipboardPaste } from 'lucide-react';
 import { fileToPayload } from '../../utils/fileExtractors';
 import { extractFromFile, ExtractionResult } from '../../services/openRouterClient';
 import { ProcessingState } from '../../types';
@@ -76,6 +76,24 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
         resetAll();
     };
 
+    // Global paste handler — captures Ctrl+V screenshot anywhere on the page
+    useEffect(() => {
+        if (aiState !== 'idle' && aiState !== 'error') return;
+        const onPaste = (e: ClipboardEvent) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const item of Array.from(items)) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) processFile(file);
+                    break;
+                }
+            }
+        };
+        document.addEventListener('paste', onPaste);
+        return () => document.removeEventListener('paste', onPaste);
+    }, [aiState, processFile]);
+
     return (
         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden relative">
             <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-purple-400/30 to-transparent" />
@@ -112,6 +130,10 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
                                 <div className="text-center">
                                     <p className="text-sm font-medium text-slate-300">Drop file here or click to browse</p>
                                     <p className="text-xs text-slate-500 mt-1">PDF · JPG · PNG · DOCX · XLSX — max 10 MB</p>
+                                    <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-slate-600">
+                                        <ClipboardPaste size={12} />
+                                        <span>or paste screenshot (Ctrl+V)</span>
+                                    </div>
                                 </div>
                             </div>
                         </label>
