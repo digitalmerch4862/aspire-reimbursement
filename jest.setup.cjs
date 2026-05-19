@@ -10,3 +10,26 @@
 if (typeof globalThis.__importMeta__ === 'undefined') {
     globalThis.__importMeta__ = { env: process.env };
 }
+
+// Polyfill File.prototype.arrayBuffer for jsdom (not implemented in all versions)
+if (typeof File !== 'undefined' && !File.prototype.arrayBuffer) {
+    File.prototype.arrayBuffer = function () {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsArrayBuffer(this);
+        });
+    };
+}
+
+if (typeof Blob !== 'undefined' && !Blob.prototype.arrayBuffer) {
+    Blob.prototype.arrayBuffer = function () {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsArrayBuffer(this);
+        });
+    };
+}
