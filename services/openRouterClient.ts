@@ -78,6 +78,26 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
     });
 
     if (!response.ok) {
+        // On rate limit, rotate to next key and retry once
+        if (response.status === 429) {
+            const retryKey = getNextKey();
+            const retryResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${retryKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': REFERER,
+                },
+                body: JSON.stringify(payload),
+            });
+            if (!retryResponse.ok) {
+                const errText = await retryResponse.text();
+                throw new Error(`OpenRouter error ${retryResponse.status}: ${errText}`);
+            }
+            return parseExtractionResponse(await retryResponse.json());
+        }
+
+        // Try fallback model with same key before giving up
         if (response.status === 404 || response.status === 400) {
             payload = buildOpenRouterPayload(file, FALLBACK_MODEL);
             const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
