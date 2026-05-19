@@ -2,7 +2,14 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
   transform: {
-    '^.+\\.(ts|tsx)$': 'ts-jest'
+    '^.+\\.(ts|tsx)$': ['ts-jest', {
+      tsconfig: {
+        module: 'commonjs',
+        moduleResolution: 'node',
+        allowImportingTsExtensions: false,
+      },
+      diagnostics: false,
+    }]
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testMatch: ['**/__tests__/**/*.test.(ts|tsx)'],
@@ -11,4 +18,6 @@ module.exports = {
     '<rootDir>/temp_skills/',
     '<rootDir>/dist/'
   ],
+  roots: ['<rootDir>'],
+  setupFiles: ['<rootDir>/jest.setup.cjs'],
 };
