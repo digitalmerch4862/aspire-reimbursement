@@ -5,7 +5,29 @@ const EXTRACTION_PROMPT = `You are a reimbursement data extractor. Given the fil
   "reimbursementForm": "<text with format: Client's full name: X\\nAddress: X\\nStaff member to reimburse: X\\nApproved by: X\\n\\nParticular | Date Purchased | Amount | On Charge Y/N\\n...rows...\\n\\nTotal Amount: $X>",
   "receiptDetails": "<text with format: Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\\n...rows...\\n\\nGRAND TOTAL: $X>"
 }
-If a section is absent, return empty string for that key. Return JSON only — no markdown, no explanation.`;
+Rules:
+- Extract BOTH sections whenever the upload contains both a reimbursement form and one or more receipts.
+- Do not stop after finding the reimbursement form. Keep scanning the rest of the upload for receipt or invoice evidence.
+- Put every receipt line item you can find into receiptDetails, even if some columns need a reasonable fallback like "Unknown" or "Not visible".
+- Only return an empty string for a section when that section is truly absent from the upload.
+Return JSON only — no markdown, no explanation.`;
+
+const REIMBURSEMENT_ONLY_PROMPT = `You are a reimbursement form extractor. Read the upload and return JSON only:
+{
+  "reimbursementForm": "<text with format: Client's full name: X\\nAddress: X\\nStaff member to reimburse: X\\nApproved by: X\\n\\nParticular | Date Purchased | Amount | On Charge Y/N\\n...rows...\\n\\nTotal Amount: $X>",
+  "receiptDetails": ""
+}
+Focus only on the reimbursement form section. If the reimbursement form is absent, return an empty string for reimbursementForm. Return JSON only — no markdown, no explanation.`;
+
+const RECEIPTS_ONLY_PROMPT = `You are a receipt details extractor. Read the upload and return JSON only:
+{
+  "reimbursementForm": "",
+  "receiptDetails": "<text with format: Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\\n...rows...\\n\\nGRAND TOTAL: $X>"
+}
+Focus only on receipts, dockets, tax invoices, or proof-of-purchase sections.
+Extract every receipt line item you can find, even when some fields need fallback values like "Unknown" or "Not visible".
+If no receipt evidence exists, return an empty string for receiptDetails.
+Return JSON only — no markdown, no explanation.`;
 
 // Vision model (supports image_url) — for PDF/image payloads
 const PRIMARY_VISION_MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
@@ -50,8 +72,8 @@ export type FilePayload =
     | { type: 'image'; base64: string; mimeType: string }
     | { type: 'text'; text: string };
 
-export function buildOpenRouterPayload(file: FilePayload, model = PRIMARY_MODEL) {
-    const content: any[] = [{ type: 'text', text: EXTRACTION_PROMPT }];
+export function buildOpenRouterPayload(file: FilePayload, model = PRIMARY_MODEL, prompt = EXTRACTION_PROMPT) {
+    const content: any[] = [{ type: 'text', text: prompt }];
 
     if (file.type === 'image') {
         content.push({
@@ -78,6 +100,30 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
     const model = file.type === 'image' ? PRIMARY_VISION_MODEL : PRIMARY_TEXT_MODEL;
     let payload = buildOpenRouterPayload(file, model);
 
+    let result = await requestExtraction(payload, file, key);
+
+    if (!result.reimbursementForm.trim()) {
+        const reimbursementRetryPayload = buildOpenRouterPayload(file, model, REIMBURSEMENT_ONLY_PROMPT);
+        const reimbursementRetry = await requestExtraction(reimbursementRetryPayload, file, key);
+        result = {
+            reimbursementForm: reimbursementRetry.reimbursementForm.trim() || result.reimbursementForm,
+            receiptDetails: result.receiptDetails,
+        };
+    }
+
+    if (!result.receiptDetails.trim()) {
+        const receiptsRetryPayload = buildOpenRouterPayload(file, model, RECEIPTS_ONLY_PROMPT);
+        const receiptsRetry = await requestExtraction(receiptsRetryPayload, file, key);
+        result = {
+            reimbursementForm: result.reimbursementForm,
+            receiptDetails: receiptsRetry.receiptDetails.trim() || result.receiptDetails,
+        };
+    }
+
+    return result;
+}
+
+async function requestExtraction(payload: ReturnType<typeof buildOpenRouterPayload>, file: FilePayload, key: string): Promise<ExtractionResult> {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -111,7 +157,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
         // Try fallback model with same key before giving up
         if (response.status === 404 || response.status === 400) {
             const fallbackModel = file.type === 'image' ? PRIMARY_TEXT_MODEL : FALLBACK_TEXT_MODEL;
-            payload = buildOpenRouterPayload(file, fallbackModel);
+            const fallbackPayload = buildOpenRouterPayload(file, fallbackModel, payload.messages[0].content[0].text);
             const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -119,7 +165,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
                     'Content-Type': 'application/json',
                     'HTTP-Referer': REFERER,
                 },
-                body: JSON.stringify(payload),
+                body: JSON.stringify(fallbackPayload),
             });
             if (!fallbackResponse.ok) {
                 const errText = await fallbackResponse.text();
