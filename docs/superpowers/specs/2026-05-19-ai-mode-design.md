@@ -1,74 +1,73 @@
 # AI Mode — Design Spec
-Date: 2026-05-19
+Date: 2026-05-19  
+Updated: Layout A confirmed
 
 ## Overview
 
-Add a 5th tab "AI Mode" to the existing Solo/Group/Manual/Receipt tab bar. Users drag-drop a file (PDF, image, DOCX, XLSX); AI extracts content and populates reimbursement form + receipt details fields (same format as Solo Mode). User reviews editable fields then clicks "Confirm & Audit" to run the existing audit pipeline.
+Add an input-method toggle **above** the existing 4 tabs (Solo/Group/Manual/Receipt).  
+Toggle: **[AI MODE] [MANUAL]**  
+- **MANUAL** = current Solo Mode behavior (copy-paste text into two panels)  
+- **AI MODE** = drag-drop file → OpenRouter extracts → auto-populates same two panels → Start Audit
+
+Existing 4 tabs remain **unchanged** below.
+
+## Layout
+
+```
+┌─────────────────────────────────────┐
+│  [AI MODE]        [MANUAL]          │  ← top toggle (new)
+├─────────────────────────────────────┤
+│  AI: Drop zone                      │
+│  OR                                 │
+│  MANUAL: Form textarea | Receipt    │
+│          textarea                   │
+│  [Start Audit]                      │
+├─────────────────────────────────────┤
+│  SOLO | GROUP | MANUAL | RECEIPT    │  ← existing 4 tabs, unchanged
+└─────────────────────────────────────┘
+```
+
+The top toggle replaces the old Solo Mode input area. Solo Mode tab below becomes read-only results view or is hidden — TBD during implementation (simplest: keep as-is, top section feeds Solo Mode pipeline).
 
 ## Supported File Types
 
 | Type | Handling |
 |------|----------|
-| PDF | Base64 encode → OpenRouter vision API |
-| JPG/PNG | Base64 encode → OpenRouter vision API |
+| PDF | Base64 → OpenRouter vision API |
+| JPG / PNG | Base64 → OpenRouter vision API |
 | DOCX | mammoth.js client-side text extraction → text prompt |
-| XLSX | SheetJS (xlsx) client-side extraction → text prompt |
+| XLSX | SheetJS client-side extraction → text prompt |
 
 ## Architecture
 
 ### New Files
-- `components/Dashboard/AIMode.tsx` — tab UI component
-- `services/openRouterClient.ts` — API client with round-robin key rotation
-- `utils/fileExtractors.ts` — DOCX/XLSX text extraction helpers
+- `services/openRouterClient.ts` — API client, round-robin key rotation
+- `utils/fileExtractors.ts` — DOCX/XLSX text extraction (mammoth + SheetJS)
 
 ### Modified Files
-- `components/Dashboard/ModeTabs.tsx` — add `ai` to `DashboardMode` union, add AI Mode tab
-- `App.tsx` — wire AI Mode tab, pass props
+- `App.tsx` — add input-method toggle state (`ai` | `manual`), render top section
+- `components/Dashboard/SoloMode.tsx` — accept optional `inputMode` prop; when `ai`, show drop zone instead of textareas; when `manual`, existing behavior
 
 ### Key Rotation
-- 10 keys stored as `VITE_OPENROUTER_KEY_1` … `VITE_OPENROUTER_KEY_10` in `.env`
-- Module-level counter in `openRouterClient.ts`, increments mod 10 each request (round-robin)
-- On error (any HTTP error or network fail): throw, let caller show error with retry
+- Keys: `VITE_OPENROUTER_KEY_1` … `VITE_OPENROUTER_KEY_N` (supports any count, reads until missing)
+- Module counter increments mod N each request (round-robin)
+- On error: throw with message, caller shows retry banner
 
 ### Primary Model
-`google/gemini-2.0-flash-exp:free` (free tier vision model). Fallback model if primary returns model-not-found: `meta-llama/llama-3.2-11b-vision-instruct:free`.
+`google/gemini-2.0-flash-exp:free`  
+Fallback: `meta-llama/llama-3.2-11b-vision-instruct:free`
 
-## UI Layout
-
-```
-┌─────────────────────────────────────────────────┐
-│  AI Mode                                         │
-├─────────────────────────────────────────────────┤
-│  [Drop zone — dashed border, centered icon]      │
-│   "Drop PDF, image, or Word/Excel file here"     │
-│   "or click to browse"                           │
-│  [Supported: PDF · JPG · PNG · DOCX · XLSX]      │
-├─────────────────────────────────────────────────┤
-│  (after extraction)                              │
-│  ┌──────────────────┐  ┌──────────────────────┐  │
-│  │ Reimbursement    │  │ Receipt Details      │  │
-│  │ Form (editable)  │  │ (editable)           │  │
-│  └──────────────────┘  └──────────────────────┘  │
-│  [Confirm & Audit ▶]                             │
-└─────────────────────────────────────────────────┘
-```
-
-States:
-1. **idle** — drop zone visible, panels hidden
-2. **extracting** — spinner overlay on drop zone, "Extracting with AI…"
-3. **ready** — drop zone collapses, two-panel layout appears, Confirm button active
-4. **error** — error banner with retry button, drop zone re-shown
+**Volume:** Free tier ~200 req/key/day. 10 keys ≈ 2000/day. For 5000/day target: ~25 keys needed, or mix with paid keys. Architecture supports any number of keys.
 
 ## AI Prompt
 
 ```
 You are a reimbursement data extractor. Given the file content, extract and return JSON only:
 {
-  "reimbursementForm": "<exact text matching format: Client's full name, Address, Staff member to reimburse, Approved by, then Particular|Date Purchased|Amount|On Charge Y/N rows, then Total Amount>",
-  "receiptDetails": "<exact text matching format: Receipt #|Unique ID / Fallback|Store Name|Date & Time|Product (Per Item)|Category|Item Amount|Receipt Total|Notes rows, then GRAND TOTAL>"
+  "reimbursementForm": "<text with format: Client's full name, Address, Staff member to reimburse, Approved by, then Particular|Date Purchased|Amount|On Charge Y/N rows, then Total Amount>",
+  "receiptDetails": "<text with format: Receipt #|Unique ID / Fallback|Store Name|Date & Time|Product (Per Item)|Category|Item Amount|Receipt Total|Notes rows, then GRAND TOTAL>"
 }
-If a section is not present in the file, return an empty string for that key.
-Return JSON only. No markdown, no explanation.
+If a section is absent, return empty string for that key. Return JSON only — no markdown, no explanation.
 ```
 
 ## API Call Shape
@@ -78,46 +77,44 @@ POST https://openrouter.ai/api/v1/chat/completions
 Authorization: Bearer <current_key>
 {
   model: "google/gemini-2.0-flash-exp:free",
-  messages: [
-    {
-      role: "user",
-      content: [
-        { type: "text", text: PROMPT },
-        // for vision files:
-        { type: "image_url", image_url: { url: "data:<mime>;base64,<data>" } }
-        // for text files (DOCX/XLSX):
-        { type: "text", text: "<extracted text>" }
-      ]
-    }
-  ]
+  messages: [{
+    role: "user",
+    content: [
+      { type: "text", text: PROMPT },
+      // vision files:
+      { type: "image_url", image_url: { url: "data:<mime>;base64,<data>" } }
+      // text files (DOCX/XLSX):
+      { type: "text", text: "<extracted text>" }
+    ]
+  }]
 }
 ```
 
 ## Data Flow
 
-1. User drops file → `AIMode.tsx` reads file
-2. If DOCX/XLSX → `fileExtractors.ts` extracts text → build text-only prompt
-3. If PDF/image → base64 encode → build vision prompt
-4. Call `openRouterClient.ts` with payload → round-robin key selection
-5. Parse JSON response → set `reimbursementFormText` + `receiptDetailsText` state
-6. Show two-panel editable UI
-7. "Confirm & Audit" → call existing `handleProcess()` (same as Solo Mode)
+1. User drops file → detect type
+2. DOCX/XLSX → `fileExtractors.ts` → plain text
+3. PDF/image → base64 encode
+4. `openRouterClient.ts` → round-robin key → POST to OpenRouter
+5. Parse JSON response → set `reimbursementFormText` + `receiptDetailsText`
+6. Two panels appear (editable textareas, pre-filled)
+7. User reviews/edits → clicks Start Audit → existing pipeline runs
 
-## Error Handling
+## Error States
 
-- Invalid file type → inline validation error, no API call
-- File too large (>10MB) → warn user, reject
-- API error → show error banner with retry (re-sends same file with next key in rotation)
-- JSON parse fail → show raw AI response in textarea so user can manually correct
+| Error | Behavior |
+|-------|----------|
+| Wrong file type | Inline validation, no API call |
+| File > 10MB | Warn + reject |
+| API error / rate limit | Error banner + Retry button (next key in rotation) |
+| JSON parse fail | Show raw AI text in textarea, user corrects manually |
 
 ## Dependencies to Add
 
 ```
-mammoth        # DOCX extraction
-xlsx           # Excel extraction
+mammoth   # DOCX → text
+xlsx      # Excel → text
 ```
-
-Both are client-side, no server needed.
 
 ## Environment Variables
 
@@ -125,12 +122,12 @@ Both are client-side, no server needed.
 VITE_OPENROUTER_KEY_1=...
 VITE_OPENROUTER_KEY_2=...
 ...
-VITE_OPENROUTER_KEY_10=...
+VITE_OPENROUTER_KEY_N=...
 ```
 
 ## Out of Scope
 
-- Server-side file processing
+- Server-side processing
 - Storing uploaded files
-- AI mode for Group/Manual/Receipt modes
-- OCR post-processing or confidence scores
+- AI input for Group/Manual/Receipt modes
+- OCR confidence scores
