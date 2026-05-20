@@ -19,14 +19,44 @@ const REIMBURSEMENT_ONLY_PROMPT = `You are a reimbursement form extractor. Read 
 }
 Focus only on the reimbursement form section. If the reimbursement form is absent, return an empty string for reimbursementForm. Return JSON only — no markdown, no explanation.`;
 
-const RECEIPTS_ONLY_PROMPT = `You are a receipt details extractor. Read the upload and return JSON only:
+const RECEIPTS_ONLY_PROMPT = `You are a receipt extraction assistant.
+
+Your only job here is image-to-text extraction for receipts, dockets, tax invoices, or proof-of-purchase files. Do not do email drafting, decision prompts, workflow advice, or any post-processing outside extraction.
+
+Return JSON only:
 {
   "reimbursementForm": "",
   "receiptDetails": "<text with format: Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\\n...rows...\\n\\nGRAND TOTAL: $X>"
 }
-Focus only on receipts, dockets, tax invoices, or proof-of-purchase sections.
-Extract every receipt line item you can find, even when some fields need fallback values like "Unknown" or "Not visible".
-If no receipt evidence exists, return an empty string for receiptDetails.
+
+Rules:
+1. Extract only what is visible in the receipt file.
+2. If a field is unclear, use "unclear".
+3. If a field is not present, use "not found".
+4. Preserve original spelling, capitalization, numbers, and punctuation as much as possible.
+5. Focus on exact merchant, receipt, transaction, and item text from the receipt.
+6. Prioritize fraud-review identifiers such as RRN, ARN, STAN, approval code, transaction ID, terminal ID, merchant ID, invoice number, receipt number, card type, masked card number, date/time, and total amount.
+7. If multiple possible unique codes appear, choose the most transaction-specific one for "Unique ID / Fallback".
+8. Extract every visible line item you can find.
+9. Do not stop after reading the header; continue scanning the whole receipt.
+10. If the receipt contains enough text to identify merchant, amount, or transaction details, do not return an empty receiptDetails block.
+
+For the table output inside receiptDetails, use exactly this format:
+Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes
+
+Strict extraction mapping:
+- Receipt # = use 1 unless there are clearly multiple receipts in the same upload.
+- Unique ID / Fallback = choose the best visible transaction-specific identifier in this priority order: RRN, ARN, approval code + terminal ID, transaction/reference number, receipt/invoice number. If none exist, use "not found".
+- Store Name = merchant/store name exactly as shown.
+- Date & Time = use visible receipt date/time exactly as shown when possible. If there is no visible time, keep the date and use "not found" for missing time information inside the same cell only when needed.
+- Product (Per Item) = each visible item name or service line.
+- Category = best-fit reimbursement category based on the visible item text. Use one of: Activities/incentive, Groceries, Other Expenses-Activity, Other Expenses-Appliances, Other Expenses-Clothing, Other Expenses-Family Contact, Other Expenses-Food, Other Expenses-Haircut, Other Expenses-Home Improvement, Other Expenses-Medication, Other Expenses-Mobile, Other Expenses-Parking, Other Expenses-Phone, Other Expenses-School Supplies, Other Expenses-Shopping, Other Expenses-Sports, Other Expenses-Toy, Other Expenses-Transportation, Pocket Money, Takeaway, Other Expenses-Office Supplies, Other Expenses-School Holiday, Other Expenses-Approved by DCJ, Other Expenses-Petty Cash, Other Expenses-School Activity.
+- Item Amount = line item price when visible, otherwise "unclear".
+- Receipt Total = the full receipt total on the first row for that receipt, then $0.00 for remaining rows of the same receipt.
+- Notes = briefly note unclear text, missing identifiers, or grouped item assumptions; otherwise use "-".
+- GRAND TOTAL = the combined total of all receipts found in the upload.
+
+If the file is truly not a receipt or contains no usable receipt evidence, return an empty string for receiptDetails.
 Return JSON only — no markdown, no explanation.`;
 
 // Vision models (support image_url) — for PDF/image payloads
