@@ -1272,7 +1272,19 @@ const normalizeReceiptRow = (
 
     let normalized: NormalizedReceiptRow;
 
-    if (parts.length >= 9) {
+    if (parts.length >= 10) {
+        normalized = {
+            receiptNum: parts[0] || '',
+            uniqueId: parts[1] || '',
+            storeName: parts[2] || '',
+            dateTime: parts[3] || '',
+            product: parts[4] || '',
+            category: parts[5] || 'Uncategorized',
+            itemAmount: parts[6] || 'Included in total',
+            receiptTotal: parts[7] || fallbackTotal,
+            notes: parts[9] || ''
+        };
+    } else if (parts.length >= 9) {
         normalized = {
             receiptNum: parts[0] || '',
             uniqueId: parts[1] || '',
