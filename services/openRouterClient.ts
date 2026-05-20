@@ -70,6 +70,11 @@ Rules:
 8. Extract every visible line item you can find.
 9. Do not stop after reading the header; continue scanning the whole receipt.
 10. If the receipt contains enough text to identify merchant, amount, or transaction details, do not return an empty receiptDetails block.
+11. Prefer a complete itemized table over a short summary. If the receipt shows 4 purchased items, return 4 item rows.
+12. Include quantity markers, size, flavor, or variant text inside Product (Per Item) when visible, for example "2 x Cool Ridge Bottled Water 600mL".
+13. Do not collapse distinct purchased items into one combined row unless the receipt itself shows only a grouped bundle line.
+14. Ignore subtotal, tax, EFTPOS lines, card lines, change, loyalty points, and approval lines as product rows unless they are the only visible content.
+15. If the receipt has both a merchant section and an item section, prioritize the item section for Product (Per Item) rows and keep merchant/payment metadata in the other columns.
 
 For the table output inside receiptDetails, use exactly this format:
 Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes
@@ -79,21 +84,28 @@ Strict extraction mapping:
 - Unique ID / Fallback = choose the best visible transaction-specific identifier in this priority order: RRN, ARN, approval code + terminal ID, transaction/reference number, receipt/invoice number. If none exist, use "not found".
 - Store Name = merchant/store name exactly as shown.
 - Date & Time = use visible receipt date/time exactly as shown when possible. If there is no visible time, keep the date and use "not found" for missing time information inside the same cell only when needed.
-- Product (Per Item) = each visible item name or service line.
+- Product (Per Item) = each visible purchased item or service line, not merchant text and not payment metadata.
 - Category = best-fit reimbursement category based on the visible item text. Use one of: Activities/incentive, Groceries, Other Expenses-Activity, Other Expenses-Appliances, Other Expenses-Clothing, Other Expenses-Family Contact, Other Expenses-Food, Other Expenses-Haircut, Other Expenses-Home Improvement, Other Expenses-Medication, Other Expenses-Mobile, Other Expenses-Parking, Other Expenses-Phone, Other Expenses-School Supplies, Other Expenses-Shopping, Other Expenses-Sports, Other Expenses-Toy, Other Expenses-Transportation, Pocket Money, Takeaway, Other Expenses-Office Supplies, Other Expenses-School Holiday, Other Expenses-Approved by DCJ, Other Expenses-Petty Cash, Other Expenses-School Activity.
 - Item Amount = line item price when visible, otherwise "unclear".
 - Receipt Total = the full receipt total on the first row for that receipt, then $0.00 for remaining rows of the same receipt.
 - Notes = briefly note unclear text, missing identifiers, or grouped item assumptions; otherwise use "-".
 - GRAND TOTAL = the combined total of all receipts found in the upload.
 
+Quality checks before you answer:
+- Make sure every row has exactly 9 columns in the order shown above.
+- Make sure Store Name stays the merchant name on every row, not the product name.
+- Make sure Product (Per Item) stays the purchased item on every row, not the merchant name or transaction code.
+- Make sure Receipt Total appears only on the first item row for that receipt, then $0.00 on the remaining rows.
+- If a visible item section exists, do not return only one generic summary row.
+
 If the file is truly not a receipt or contains no usable receipt evidence, return an empty string for receiptDetails.
 Return JSON only — no markdown, no explanation.`;
 
 // Vision models (support image_url) — for PDF/image payloads
 const VISION_MODELS = [
-    'nvidia/nemotron-nano-12b-v2-vl:free',
-    'meta-llama/llama-3.2-11b-vision-instruct:free',
     'qwen/qwen2.5-vl-72b-instruct:free',
+    'meta-llama/llama-3.2-11b-vision-instruct:free',
+    'nvidia/nemotron-nano-12b-v2-vl:free',
 ];
 const PRIMARY_VISION_MODEL = VISION_MODELS[0];
 // Text models — for DOCX/XLSX extracted text payloads
