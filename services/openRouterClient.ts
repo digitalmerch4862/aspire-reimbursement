@@ -99,6 +99,8 @@ export interface ExtractionResult {
     receiptDetails: string;
 }
 
+export type ExtractionTarget = 'reimbursementForm' | 'receiptDetails';
+
 export async function extractFromFile(file: FilePayload): Promise<ExtractionResult> {
     const key = getNextKey();
     const models = getCandidateModels(file);
@@ -126,6 +128,19 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
     }
 
     return result;
+}
+
+export async function extractTargetFromFile(file: FilePayload, target: ExtractionTarget): Promise<string> {
+    const key = getNextKey();
+    const models = getCandidateModels(file);
+    const prompt = target === 'reimbursementForm' ? REIMBURSEMENT_ONLY_PROMPT : RECEIPTS_ONLY_PROMPT;
+    const result = await requestExtraction(
+        buildOpenRouterPayload(file, models[0], prompt),
+        file,
+        key,
+        models,
+    );
+    return target === 'reimbursementForm' ? result.reimbursementForm : result.receiptDetails;
 }
 
 function getCandidateModels(file: FilePayload): string[] {
