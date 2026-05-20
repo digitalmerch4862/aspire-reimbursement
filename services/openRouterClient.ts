@@ -1,5 +1,30 @@
 import { getViteEnv } from './env';
 
+const REIMBURSEMENT_FORMAT_RULES = `For reimbursementForm, normalize the output to exactly this plain-text structure:
+Client's full name: <value>
+Address: <value>
+Staff member to reimburse: <value>
+Approved by: <value>
+
+Particular | Date Purchased | Amount | On Charge Y/N
+<particular> | <date> | <amount> | <Y/N>
+<particular> | <date> | <amount> | <Y/N>
+
+Total Amount: <value>
+
+Formatting rules for reimbursementForm:
+- Return plain text only inside the JSON string, not markdown.
+- Keep the header labels exactly as written above.
+- Keep exactly one blank line before the table header and one blank line before Total Amount.
+- Convert messy OCR, email sentences, spreadsheet cells, or wrapped text into this clean structure.
+- Ignore greeting text, email prose, notes, signatures, and receipt-only content.
+- If a header field is missing, still keep the label and use "not found".
+- For table rows, include only reimbursement line items. Do not copy the column header as a data row.
+- Normalize each line item into 4 columns only: Particular, Date Purchased, Amount, On Charge Y/N.
+- If Date Purchased or On Charge Y/N is missing for a row, use "not found".
+- Keep money exactly as visible when possible. If a currency symbol is visible, preserve it.
+- If no reimbursement form is present, return an empty string for reimbursementForm.`;
+
 const EXTRACTION_PROMPT = `You are a reimbursement data extractor. Given the file content, extract and return JSON only:
 {
   "reimbursementForm": "<text with format: Client's full name: X\\nAddress: X\\nStaff member to reimburse: X\\nApproved by: X\\n\\nParticular | Date Purchased | Amount | On Charge Y/N\\n...rows...\\n\\nTotal Amount: $X>",
@@ -10,6 +35,7 @@ Rules:
 - Do not stop after finding the reimbursement form. Keep scanning the rest of the upload for receipt or invoice evidence.
 - Put every receipt line item you can find into receiptDetails, even if some columns need a reasonable fallback like "Unknown" or "Not visible".
 - Only return an empty string for a section when that section is truly absent from the upload.
+- ${REIMBURSEMENT_FORMAT_RULES}
 Return JSON only — no markdown, no explanation.`;
 
 const REIMBURSEMENT_ONLY_PROMPT = `You are a reimbursement form extractor. Read the upload and return JSON only:
@@ -17,7 +43,11 @@ const REIMBURSEMENT_ONLY_PROMPT = `You are a reimbursement form extractor. Read 
   "reimbursementForm": "<text with format: Client's full name: X\\nAddress: X\\nStaff member to reimburse: X\\nApproved by: X\\n\\nParticular | Date Purchased | Amount | On Charge Y/N\\n...rows...\\n\\nTotal Amount: $X>",
   "receiptDetails": ""
 }
-Focus only on the reimbursement form section. If the reimbursement form is absent, return an empty string for reimbursementForm. Return JSON only — no markdown, no explanation.`;
+Rules:
+- Focus only on the reimbursement form section.
+- Do not copy email body text, greeting lines, receipt tables, bank codes, discrepancy notes, or receipt identifiers into reimbursementForm.
+- ${REIMBURSEMENT_FORMAT_RULES}
+Return JSON only — no markdown, no explanation.`;
 
 const RECEIPTS_ONLY_PROMPT = `You are a receipt extraction assistant.
 
