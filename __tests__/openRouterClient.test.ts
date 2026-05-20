@@ -4,7 +4,7 @@ jest.mock('../services/env', () => ({
     getViteEnv: jest.fn(() => undefined),
 }));
 
-import { getNextKey, buildOpenRouterPayload, _getKeysFromEnv, _resetKeyIndex } from '../services/openRouterClient';
+import { getNextKey, buildOpenRouterPayload, _getKeysFromEnv, _resetKeyIndex, extractTargetFromFile } from '../services/openRouterClient';
 import { getViteEnv } from '../services/env';
 
 const mockGetViteEnv = getViteEnv as jest.MockedFunction<typeof getViteEnv>;
@@ -114,5 +114,59 @@ describe('buildOpenRouterPayload', () => {
             'meta-llama/llama-3.2-11b-vision-instruct:free'
         );
         expect(payload.model).toBe('meta-llama/llama-3.2-11b-vision-instruct:free');
+    });
+});
+
+describe('extractTargetFromFile parsing fallback', () => {
+    const originalFetch = global.fetch;
+
+    beforeEach(() => {
+        _resetKeyIndex();
+        mockGetViteEnv.mockImplementation((k) =>
+            k === 'VITE_OPENROUTER_KEY_1' ? 'sk-test-key' : undefined
+        );
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        mockGetViteEnv.mockReset();
+    });
+
+    it('keeps raw receipt text when receipts-only response is not valid json', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                choices: [{ message: { content: 'Receipt # | Store | Amount\n1 | Woolworths | $40.65' } }],
+            }),
+        } as any);
+
+        const result = await extractTargetFromFile(
+            { type: 'text', text: 'receipt content' },
+            'receiptDetails',
+        );
+
+        expect(result).toContain('Woolworths');
+        expect(result).toContain('$40.65');
+    });
+
+    it('extracts json object even when wrapped in extra text', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                choices: [{
+                    message: {
+                        content: 'Here is the result:\n{"reimbursementForm":"","receiptDetails":"Receipt # | Store | Amount\\n1 | Priceline | $12.00"}\nThanks',
+                    },
+                }],
+            }),
+        } as any);
+
+        const result = await extractTargetFromFile(
+            { type: 'text', text: 'receipt content' },
+            'receiptDetails',
+        );
+
+        expect(result).toContain('Priceline');
+        expect(result).toContain('$12.00');
     });
 });

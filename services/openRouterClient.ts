@@ -100,6 +100,7 @@ export interface ExtractionResult {
 }
 
 export type ExtractionTarget = 'reimbursementForm' | 'receiptDetails';
+type ParseMode = 'combined' | ExtractionTarget;
 
 export async function extractFromFile(file: FilePayload): Promise<ExtractionResult> {
     const key = getNextKey();
@@ -107,11 +108,11 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
     const model = models[0];
     let payload = buildOpenRouterPayload(file, model);
 
-    let result = await requestExtraction(payload, file, key, models);
+    let result = await requestExtraction(payload, file, key, models, 'combined');
 
     if (!result.reimbursementForm.trim()) {
         const reimbursementRetryPayload = buildOpenRouterPayload(file, model, REIMBURSEMENT_ONLY_PROMPT);
-        const reimbursementRetry = await requestExtraction(reimbursementRetryPayload, file, key, models);
+        const reimbursementRetry = await requestExtraction(reimbursementRetryPayload, file, key, models, 'reimbursementForm');
         result = {
             reimbursementForm: reimbursementRetry.reimbursementForm.trim() || result.reimbursementForm,
             receiptDetails: result.receiptDetails,
@@ -120,7 +121,7 @@ export async function extractFromFile(file: FilePayload): Promise<ExtractionResu
 
     if (!result.receiptDetails.trim()) {
         const receiptsRetryPayload = buildOpenRouterPayload(file, model, RECEIPTS_ONLY_PROMPT);
-        const receiptsRetry = await requestExtraction(receiptsRetryPayload, file, key, models);
+        const receiptsRetry = await requestExtraction(receiptsRetryPayload, file, key, models, 'receiptDetails');
         result = {
             reimbursementForm: result.reimbursementForm,
             receiptDetails: receiptsRetry.receiptDetails.trim() || result.receiptDetails,
@@ -139,6 +140,7 @@ export async function extractTargetFromFile(file: FilePayload, target: Extractio
         file,
         key,
         models,
+        target,
     );
     return target === 'reimbursementForm' ? result.reimbursementForm : result.receiptDetails;
 }
@@ -152,6 +154,7 @@ async function requestExtraction(
     file: FilePayload,
     initialKey: string,
     models: string[],
+    parseMode: ParseMode,
 ): Promise<ExtractionResult> {
     let lastErrorMessage = 'OpenRouter request failed.';
     let currentKey = initialKey;
@@ -172,7 +175,7 @@ async function requestExtraction(
         });
 
         if (response.ok) {
-            return parseExtractionResponse(await response.json());
+            return parseExtractionResponse(await response.json(), parseMode);
         }
 
         const errText = await response.text();
@@ -193,16 +196,31 @@ async function requestExtraction(
     throw new Error(lastErrorMessage);
 }
 
-function parseExtractionResponse(data: any): ExtractionResult {
+function parseExtractionResponse(data: any, parseMode: ParseMode = 'combined'): ExtractionResult {
     const raw: string = data?.choices?.[0]?.message?.content ?? '';
     const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+    const jsonCandidate = extractJsonObject(cleaned);
     try {
-        const parsed = JSON.parse(cleaned);
+        const parsed = JSON.parse(jsonCandidate || cleaned);
         return {
             reimbursementForm: String(parsed.reimbursementForm ?? ''),
             receiptDetails: String(parsed.receiptDetails ?? ''),
         };
     } catch {
-        return { reimbursementForm: raw, receiptDetails: '' };
+        const fallbackText = cleaned.trim();
+        if (parseMode === 'reimbursementForm') {
+            return { reimbursementForm: fallbackText, receiptDetails: '' };
+        }
+        if (parseMode === 'receiptDetails') {
+            return { reimbursementForm: '', receiptDetails: fallbackText };
+        }
+        return { reimbursementForm: fallbackText, receiptDetails: '' };
     }
+}
+
+function extractJsonObject(value: string): string | null {
+    const start = value.indexOf('{');
+    const end = value.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) return null;
+    return value.slice(start, end + 1);
 }
