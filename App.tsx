@@ -2765,6 +2765,44 @@ export const App = () => {
         const parsedNumber = Number(numericAmount);
         if (Number.isNaN(parsedNumber)) return content;
         const formattedAmount = `$${parsedNumber.toFixed(2)}`;
+        const syncSingleTransactionSummaryAmounts = (rawContent: string): string => {
+            let nextContent = rawContent;
+
+            nextContent = nextContent.replace(
+                /((?:^|\n)Amount(?: Transferred)?:\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)Reimbursement Form Total:\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)Receipt Total:\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)\*\*Amount(?: Transferred)?:\*\*\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)\*\*Reimbursement Form Total:\*\*\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)\*\*Receipt Total:\*\*\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i,
+                `$1${formattedAmount}$2`
+            );
+            nextContent = nextContent.replace(
+                /((?:^|\n)TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?/i,
+                `$1${formattedAmount}`
+            );
+
+            return nextContent;
+        };
 
         if (content.includes('<!-- GROUP_TABLE_FORMAT -->')) {
             const lines = content.split('\n');
@@ -2835,6 +2873,10 @@ export const App = () => {
                 `$1${formattedAmount}$2${formattedAmount}$3`
             );
             updatedContent = updatedContent.replace(/(\*\*TOTAL\s+AMOUNT:\s*)\$?[\d,]+(?:\.\d{1,2})?(\*\*)/i, `$1${formattedAmount}$2`);
+        }
+
+        if (parts.length === 2) {
+            updatedContent = syncSingleTransactionSummaryAmounts(updatedContent);
         }
 
         return updatedContent;
