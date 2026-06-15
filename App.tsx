@@ -6822,9 +6822,10 @@ export const App = () => {
         }
 
         return [
-            'Hi,',
+            'Hi Bindi,',
             '',
             'Kindly provide NAB Details of',
+            '',
             `Staff Member: ${staffName}`,
             `Client's Full Name: ${clientName}`,
             `Address: ${address}`,
@@ -6832,8 +6833,6 @@ export const App = () => {
             `Amount: $${rawAmount}`,
             `Reimbursement Form Total: $${formTotal}`,
             `Receipt Total: $${receiptTotal}`,
-            'NAB Code:',
-            '',
             'Summary of Expenses:',
             ...(tableText ? ['', tableText] : []),
         ].join('\n');
