@@ -6794,47 +6794,23 @@ export const App = () => {
         const formTotal = formVsReceiptTotals.formTotal != null ? formVsReceiptTotals.formTotal.toFixed(2) : rawAmount;
         const receiptTotal = formVsReceiptTotals.receiptTotal != null ? formVsReceiptTotals.receiptTotal.toFixed(2) : rawAmount;
 
-        // Build clean plain-text table from markdown pipe table (strip UID column first)
-        const rawMarkdownSection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
-        const markdownSection = stripUniqueIdColumnFromSummary(rawMarkdownSection);
-        const mdLines = markdownSection.split('\n').filter(l => l.trim().startsWith('|'));
-        let tableText = '';
-        if (mdLines.length >= 2) {
-            const parseRow = (line: string) => line.split('|').slice(1, -1).map(c => c.trim());
-            const rows = mdLines.filter(l => !/^\s*\|[\s\-:]+\|/.test(l)).map(parseRow);
-            if (rows.length > 0) {
-                const colCount = Math.max(...rows.map(r => r.length));
-                const colWidths = Array.from({ length: colCount }, (_, ci) =>
-                    Math.max(...rows.map(r => (r[ci] || '').length), 4)
-                );
-                const pad = (s: string, w: number) => s.padEnd(w);
-                const borderRow = '+' + colWidths.map(w => '-'.repeat(w + 2)).join('+') + '+';
-                const formatRow = (r: string[]) => '|' + colWidths.map((w, i) => ` ${pad(r[i] || '', w)} `).join('|') + '|';
-                const [header, ...body] = rows;
-                tableText = [
-                    borderRow,
-                    formatRow(header),
-                    borderRow,
-                    ...body.map(formatRow),
-                    borderRow,
-                ].join('\n');
-            }
-        }
+        // Reuse the same Summary of Expenses section as the claimant email
+        // (keeps the Unique ID / Fallback column and the trailing TOTAL AMOUNT line)
+        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
 
         return [
             'Hi Bindi,',
             '',
             'Kindly provide NAB Details of',
-            '',
             `Staff Member: ${staffName}`,
             `Client's Full Name: ${clientName}`,
             `Address: ${address}`,
             `Approved By: ${approvedBy}`,
             `Amount: $${rawAmount}`,
             `Reimbursement Form Total: $${formTotal}`,
-            `Receipt Total: $${receiptTotal}`,
-            'Summary of Expenses:',
-            ...(tableText ? ['', tableText] : []),
+            `Receipt Total:            $${receiptTotal}`,
+            'NAB Code:',
+            summarySection || 'Summary of Expenses:',
         ].join('\n');
     }, [reimbursementFormText, parsedTransactions, formVsReceiptTotals, claimantBaseEmailContent]);
 
