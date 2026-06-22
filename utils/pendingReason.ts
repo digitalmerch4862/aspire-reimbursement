@@ -8,6 +8,7 @@ export const extractPendingReason = (content: string): string => {
 };
 
 export const upsertPendingReason = (content: string, reason: string): string => {
+  if (!reason?.trim()) return String(content || '');
   const body = stripPendingReasonTag(content);
   const tag = `<!-- PENDING_REASON: ${reason} -->`;
   return `${tag}\n${body.trim()}`;

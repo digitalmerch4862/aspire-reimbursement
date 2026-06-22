@@ -21,8 +21,7 @@ describe('pendingReason tag helpers', () => {
 
   it('strip removes the tag and leaves the body', () => {
     const out = upsertPendingReason('Body text', 'NAB details C/o Bindi');
-    expect(stripPendingReasonTag(out).includes('PENDING_REASON')).toBe(false);
-    expect(stripPendingReasonTag(out)).toContain('Body text');
+    expect(stripPendingReasonTag(out)).toBe('Body text');
   });
 
   it('helpers tolerate null/undefined input', () => {
@@ -30,5 +29,10 @@ describe('pendingReason tag helpers', () => {
     expect(extractPendingReason(undefined)).toBe('');
     // @ts-expect-error testing runtime guard
     expect(stripPendingReasonTag(null)).toBe('');
+  });
+
+  it('upsert with empty reason returns content unchanged', () => {
+    expect(upsertPendingReason('Body', '')).toBe('Body');
+    expect(upsertPendingReason('Body', '   ')).toBe('Body');
   });
 });
