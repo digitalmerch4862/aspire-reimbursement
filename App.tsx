@@ -30,6 +30,7 @@ John	Smith	Smith, John	000000	00000000
 Jane	Doe	Doe, Jane	000000	00000000`;
 
 const EOD_SPECIAL_ROW_ID = 'idle-row';
+const EOD_PENDING_HEADER_ROW_ID = 'pending-carryover-header';
 const EOD_SPECIAL_ACTIVITY_LABEL = `Data Validation & Reconciliation
 Records Review
 Internal Audit / Quality Check`;
@@ -6558,11 +6559,15 @@ export const App = () => {
         });
     };
 
-    const generateEODSchedule = (records: any[]) => {
+    const generateEODSchedule = (records: any[], openPendingRecords: any[] = []) => {
         let currentTime = new Date();
         currentTime.setHours(6, 59, 0, 0);
 
-        const scheduled = records.map(record => {
+        const isPendingActivity = (record: any) => {
+            if (record.isReceiptLiquidation || record.isVipManual) return false;
+            return !isValidNabReference(record.nabRef);
+        };
+        const scheduled = records.filter(record => !isPendingActivity(record)).map(record => {
             const hasValidNabCode = isValidNabReference(record.nabRef);
             const activity = record.isReceiptLiquidation
                 ? 'Audit'
@@ -6639,7 +6644,34 @@ export const App = () => {
             eodStatus: ''
         };
 
-        return [...scheduled, idleRow];
+        const pendingHeaderRow = {
+            id: EOD_PENDING_HEADER_ROW_ID,
+            eodTimeStart: '',
+            eodTimeEnd: '',
+            eodActivity: 'PENDING (CARRIED OVER)',
+            clientName: '',
+            staff_name: '',
+            amount: '',
+            date: '',
+            eodStatus: ''
+        };
+
+        const pendingRows = openPendingRecords.map((record: any) => {
+            const reason = extractPendingReason(record.full_email_content || '');
+            return {
+                ...record,
+                isPendingCarryover: true,
+                eodTimeStart: '',
+                eodTimeEnd: '',
+                eodActivity: 'Pending',
+                eodStatus: reason || 'For Approval'
+            };
+        });
+
+        if (pendingRows.length === 0) {
+            return [...scheduled, idleRow];
+        }
+        return [...scheduled, idleRow, pendingHeaderRow, ...pendingRows];
     };
 
     const allProcessedRecords = useMemo<any[]>(() => processRecords(historyData), [historyData]);
@@ -6731,7 +6763,7 @@ export const App = () => {
         );
     }, [pendingApprovalRecords]);
 
-    const eodData = generateEODSchedule(todaysProcessedRecords);
+    const eodData = generateEODSchedule(todaysProcessedRecords, pendingApprovalRecords);
     const accomplishedNabCount = useMemo(() => {
         const uniqueNabCodes = new Set<string>();
         todaysProcessedRecords.forEach((record: any) => {
@@ -8258,14 +8290,14 @@ export const App = () => {
                                                 <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeStart}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeEnd}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: row.id === EOD_SPECIAL_ROW_ID ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: (row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID) ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staff_name}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>
-                                                        {row.id === EOD_SPECIAL_ROW_ID ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
+                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
                                                     <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
-                                                        {row.id === EOD_SPECIAL_ROW_ID ? (
+                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || row.isPendingCarryover) ? (
                                                             <span style={{ color: '#64748b', fontSize: '11px' }}>-</span>
                                                         ) : (
                                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
@@ -8288,7 +8320,7 @@ export const App = () => {
                                                     </td>
                                                 </tr>
                                             ))}
-                                            {todaysProcessedRecords.length === 0 && (
+                                            {todaysProcessedRecords.length === 0 && pendingApprovalRecords.length === 0 && (
                                                 <tr><td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No activity recorded in the current cycle.</td></tr>
                                             )}
                                         </tbody>
