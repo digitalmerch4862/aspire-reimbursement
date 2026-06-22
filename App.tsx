@@ -5612,6 +5612,14 @@ export const App = () => {
         }
     };
 
+    const handleDeletePendingGroup = (group: PendingStaffGroup) => {
+        if (!window.confirm(`Remove all ${group.count} pending entr${group.count === 1 ? 'y' : 'ies'} for ${group.staffName} from the Pending list? The records stay in the Daily Activity Tracker.`)) return;
+        const idsToDismiss = group.records.map((r: any) => r.id).filter((id: any) => id != null);
+        const newIds = [...dismissedIds, ...idsToDismiss];
+        setDismissedIds(newIds);
+        localStorage.setItem('aspire_dismissed_discrepancies', JSON.stringify(newIds));
+    };
+
     const handleMarkPendingGroupFollowedUp = async (group: PendingStaffGroup) => {
         if (!group || group.records.length === 0) return;
         setFollowUpingGroupKey(group.key);
@@ -8065,15 +8073,24 @@ export const App = () => {
                                                     <button
                                                         onClick={() => handleMarkPendingGroupFollowedUp(group)}
                                                         disabled={followUpingGroupKey === group.key}
-                                                        className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        title="Follow up (reset aging)"
+                                                        className="p-2 rounded-lg bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
-                                                        {followUpingGroupKey === group.key ? 'Updating...' : 'Followed Up'}
+                                                        <RefreshCw size={16} className={followUpingGroupKey === group.key ? 'animate-spin' : ''} />
                                                     </button>
                                                     <button
                                                         onClick={() => openPendingApprovalModal(group)}
-                                                        className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors"
+                                                        title="Approve"
+                                                        className="p-2 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors"
                                                     >
-                                                        Approve
+                                                        <Check size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeletePendingGroup(group)}
+                                                        title="Delete (hide from pending)"
+                                                        className="p-2 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors"
+                                                    >
+                                                        <Trash2 size={16} />
                                                     </button>
                                                 </div>
                                             </div>
