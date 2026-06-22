@@ -38,3 +38,6 @@ dist-ssr
 nul
 
 .vercel
+
+# Git worktrees
+.claude/worktrees/
