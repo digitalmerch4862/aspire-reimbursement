@@ -8293,7 +8293,7 @@ export const App = () => {
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: (row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID) ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staff_name}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>
-                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
+                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || row.isPendingCarryover || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
                                                     <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
