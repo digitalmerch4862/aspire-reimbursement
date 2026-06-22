@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
-import { upsertPendingReason, extractPendingReason } from './utils/pendingReason';
+import { upsertPendingReason, extractPendingReason, formatPendingEodStatus } from './utils/pendingReason';
 import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
@@ -6625,13 +6625,19 @@ export const App = () => {
 
         const pendingRows = openPendingRecords.map((record: any) => {
             const reason = extractPendingReason(record.full_email_content || '');
+            const followedUpAt = extractPendingFollowedUpAt(record.full_email_content || '');
+            const baseline = followedUpAt || record.created_at;
+            const sinceDate = baseline ? new Date(baseline) : null;
+            const ageDays = typeof record.pendingAgeDays === 'number'
+                ? record.pendingAgeDays
+                : getPendingAgeDays(record);
             return {
                 ...record,
                 isPendingCarryover: true,
                 eodTimeStart: '',
                 eodTimeEnd: '',
                 eodActivity: 'Pending',
-                eodStatus: reason || 'For Approval'
+                eodStatus: formatPendingEodStatus(reason, sinceDate, ageDays)
             };
         });
 
