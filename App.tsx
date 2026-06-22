@@ -8080,21 +8080,60 @@ export const App = () => {
                                     <div className="p-6 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
                                         {filteredPendingGroups.length > 0 ? filteredPendingGroups.map((group) => (
                                             <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
-                                                        <span className="text-sm font-bold text-emerald-400">(${group.totalAmount.toFixed(2)})</span>
+                                                <div className="flex-1 space-y-2">
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
+                                                            <span className="text-sm font-bold text-emerald-400">(${group.totalAmount.toFixed(2)})</span>
+                                                        </div>
+                                                        <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
+                                                        <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
+                                                        <span className={`inline-flex text-[11px] px-2 py-1 rounded-full border ${group.oldestAgeDays >= 8
+                                                            ? 'bg-red-500/15 text-red-200 border-red-400/25'
+                                                            : group.oldestAgeDays >= 3
+                                                                ? 'bg-amber-500/15 text-amber-200 border-amber-400/25'
+                                                                : 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25'
+                                                            }`}>
+                                                            Oldest pending: {group.oldestAgeDays} day{group.oldestAgeDays === 1 ? '' : 's'}
+                                                        </span>
                                                     </div>
-                                                    <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
-                                                    <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
-                                                    <span className={`inline-flex text-[11px] px-2 py-1 rounded-full border ${group.oldestAgeDays >= 8
-                                                        ? 'bg-red-500/15 text-red-200 border-red-400/25'
-                                                        : group.oldestAgeDays >= 3
-                                                            ? 'bg-amber-500/15 text-amber-200 border-amber-400/25'
-                                                            : 'bg-emerald-500/15 text-emerald-200 border-emerald-400/25'
-                                                        }`}>
-                                                        Oldest pending: {group.oldestAgeDays} day{group.oldestAgeDays === 1 ? '' : 's'}
-                                                    </span>
+                                                    <div className="space-y-1.5 pt-1 border-t border-white/5">
+                                                        {group.records.map((record: any) => {
+                                                            const activeReason = extractPendingReason(record.full_email_content || '');
+                                                            const isBindi = activeReason === 'NAB details C/o Bindi';
+                                                            const isJulian = activeReason === 'For Julian\'s Approval';
+                                                            const busy = taggingRecordId === record.id;
+                                                            return (
+                                                                <div key={record.id} className="flex items-center justify-between gap-2">
+                                                                    <span className="text-xs text-slate-300 truncate">
+                                                                        {String(record.clientFullName || record.client_name || record.date || record.id)}
+                                                                    </span>
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        <button
+                                                                            onClick={() => void handleTagPendingReason(record, 'NAB details C/o Bindi')}
+                                                                            disabled={busy}
+                                                                            title="Mark: NAB details C/o Bindi"
+                                                                            className={`px-2 py-1 rounded-md text-[11px] border transition-colors disabled:opacity-50 ${isBindi
+                                                                                ? 'bg-emerald-500/25 text-emerald-200 border-emerald-400/40'
+                                                                                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'}`}
+                                                                        >
+                                                                            C/o Bindi
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => void handleTagPendingReason(record, 'For Julian\'s Approval')}
+                                                                            disabled={busy}
+                                                                            title="Mark: For Julian's Approval"
+                                                                            className={`px-2 py-1 rounded-md text-[11px] border transition-colors disabled:opacity-50 ${isJulian
+                                                                                ? 'bg-indigo-500/25 text-indigo-200 border-indigo-400/40'
+                                                                                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'}`}
+                                                                        >
+                                                                            Julian
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
                                                     <button
