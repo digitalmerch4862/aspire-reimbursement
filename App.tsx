@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
-import { upsertPendingReason, extractPendingReason, stripPendingReasonTag } from './utils/pendingReason'; // extractPendingReason used in generateEODSchedule (Task 4)
+import { upsertPendingReason, extractPendingReason } from './utils/pendingReason';
 import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
@@ -5371,39 +5371,6 @@ export const App = () => {
     };
 
 
-    const handleSaveAsPaid = () => {
-        const hasTransactions = parsedTransactions.length > 0;
-        const missingNabIndexes = parsedTransactions
-            .filter(tx => !isValidNabReference(tx.currentNabRef))
-            .map(tx => tx.index);
-
-        if (hasTransactions && missingNabIndexes.length > 0) {
-            const normalizedManualNab = manualNabCodeInput.trim().toUpperCase();
-            if (!isValidNabReference(normalizedManualNab)) {
-                setManualNabCodeError('NAB code must be exactly 11 characters (1 letter + 10 digits).');
-                setSaveModalDecision({ mode: 'nab', detail: 'NAB code is required before saving as PAID. Enter bank-provided NAB code manually.' });
-                setShowSaveModal(true);
-                return;
-            }
-
-            const currentContent = isEditing ? editableContent : (results?.phase4 || '');
-            let updatedContent = currentContent;
-            missingNabIndexes.forEach((index) => {
-                updatedContent = setTransactionNabInContent(updatedContent, index, normalizedManualNab);
-            });
-
-            if (isEditing) {
-                setEditableContent(updatedContent);
-            } else {
-                setResults(prev => (prev ? { ...prev, phase4: updatedContent } : prev));
-            }
-
-            confirmSaveWithContent('PAID', updatedContent, { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' });
-            return;
-        }
-
-        confirmSave('PAID', { duplicateSignal: 'green', detail: 'No duplicate patterns detected at save approval.' });
-    };
 
     const openPendingApprovalModal = (staffGroup: PendingStaffGroup) => {
         setPendingApprovalStaffGroup(staffGroup);
