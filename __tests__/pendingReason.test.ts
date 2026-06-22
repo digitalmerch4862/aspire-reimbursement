@@ -25,10 +25,8 @@ describe('pendingReason tag helpers', () => {
   });
 
   it('helpers tolerate null/undefined input', () => {
-    // @ts-expect-error testing runtime guard
-    expect(extractPendingReason(undefined)).toBe('');
-    // @ts-expect-error testing runtime guard
-    expect(stripPendingReasonTag(null)).toBe('');
+    expect(extractPendingReason(undefined as unknown as string)).toBe('');
+    expect(stripPendingReasonTag(null as unknown as string)).toBe('');
   });
 
   it('upsert with empty reason returns content unchanged', () => {

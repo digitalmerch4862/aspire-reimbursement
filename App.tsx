@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
+import { upsertPendingReason, extractPendingReason, stripPendingReasonTag } from './utils/pendingReason'; // extractPendingReason used in generateEODSchedule (Task 4)
 import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
@@ -258,6 +259,7 @@ const stripInternalAuditMeta = (text: string): string => {
         .replace(/<!--\s*STATUS:\s*(?:PENDING|PAID)\s*-->\s*/gi, '')
         .replace(/<!--\s*DUPLICATE_AUDIT:.*?-->\s*/gi, '')
         .replace(/<!--\s*PENDING_FOLLOWED_UP_AT:\s*.*?-->\s*/gi, '')
+        .replace(/<!--\s*PENDING_REASON:[\s\S]*?-->\s*/gi, '')
         .replace(/<!--\s*JULIAN_APPROVAL_BLOCK_(?:START|END)\s*-->\s*/gi, '')
         .replace(/<!--\s*CLAIMANT_REVISION_BLOCK_(?:START|END)\s*-->\s*/gi, '')
         .replace(/\n{3,}/g, '\n\n')
@@ -5322,10 +5324,13 @@ export const App = () => {
     const confirmSaveWithContent = (
         status: 'PENDING' | 'PAID' | 'PENDING_LIQUIDATION',
         baseContent: string,
-        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
+        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string; pendingReason?: string }
     ) => {
         const effectiveLookbackDays = requestMode === 'solo' ? 0 : DUPLICATE_LOOKBACK_DAYS;
         let withStatus = upsertStatusTag(baseContent, status);
+        if (status === 'PENDING' && options?.pendingReason) {
+            withStatus = upsertPendingReason(withStatus, options.pendingReason);
+        }
         withStatus = (status === 'PENDING' && isFormHigherMismatchDetail(options?.detail))
             ? upsertClaimantRevisionSection(withStatus)
             : stripClaimantRevisionSection(withStatus);
@@ -5358,7 +5363,7 @@ export const App = () => {
 
     const confirmSave = (
         status: 'PENDING' | 'PAID' | 'PENDING_LIQUIDATION',
-        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string }
+        options?: { duplicateSignal?: DuplicateTrafficLight; reviewerReason?: string; detail?: string; pendingReason?: string }
     ) => {
         const baseContent = isEditing ? editableContent : results?.phase4 || '';
         confirmSaveWithContent(status, baseContent, options);
@@ -9111,16 +9116,24 @@ export const App = () => {
                                     ) : (
                                         <>
                                             <button
-                                                onClick={() => confirmSave('PENDING', { duplicateSignal: 'green', detail: 'Saved as pending due to incomplete NAB reference.' })}
+                                                onClick={() => confirmSave('PENDING', {
+                                                    duplicateSignal: 'green',
+                                                    detail: 'Pending — NAB details C/o Bindi.',
+                                                    pendingReason: 'NAB details C/o Bindi',
+                                                })}
                                                 className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
                                             >
-                                                Save as PENDING
+                                                Pending: NAB details C/o Bindi
                                             </button>
                                             <button
-                                                onClick={handleSaveAsPaid}
-                                                className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 transition-colors"
+                                                onClick={() => confirmSave('PENDING', {
+                                                    duplicateSignal: 'green',
+                                                    detail: 'Pending — For Julian\'s Approval.',
+                                                    pendingReason: 'For Julian\'s Approval',
+                                                })}
+                                                className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-400 transition-colors"
                                             >
-                                                Save as PAID
+                                                Pending: For Julian's Approval
                                             </button>
                                         </>
                                     )}
