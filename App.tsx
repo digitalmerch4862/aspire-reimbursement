@@ -955,6 +955,55 @@ const extractSummaryExpensesSection = (content: string): string => {
     return text.slice(start, end).trim();
 };
 
+// Convert a "Summary of Expenses" section (markdown table) into Outlook-friendly
+// HTML so the table renders as a real bordered table when pasted, instead of raw
+// pipe characters. Returns inline-styled HTML matching the desired Outlook look.
+const escapeHtml = (s: string): string =>
+    String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const summarySectionToHtml = (section: string): string => {
+    const lines = String(section || '').split('\n');
+    const tableRows: string[][] = [];
+    const preLines: string[] = [];
+    const postLines: string[] = [];
+    let seenTable = false;
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        const isTableRow = line.startsWith('|') && line.endsWith('|');
+        const isSeparator = isTableRow && /^\|[\s:|-]+\|$/.test(line);
+        if (isTableRow && !isSeparator) {
+            seenTable = true;
+            const cells = line.slice(1, -1).split('|').map(c => c.trim());
+            tableRows.push(cells);
+        } else if (isSeparator) {
+            seenTable = true; // skip the |:---| divider row
+        } else if (!seenTable) {
+            if (line) preLines.push(line);
+        } else {
+            if (line) postLines.push(line);
+        }
+    }
+
+    const pre = preLines.map(l => `<div style="margin:0 0 4px 0;">${escapeHtml(l)}</div>`).join('');
+    const post = postLines.map(l => `<div style="margin:8px 0 0 0;font-weight:bold;">${escapeHtml(l)}</div>`).join('');
+
+    let tableHtml = '';
+    if (tableRows.length > 0) {
+        const [header, ...body] = tableRows;
+        const th = header.map(c =>
+            `<th style="border:1px solid #cccccc;padding:6px 10px;background:#f2f2f2;text-align:left;font-weight:bold;">${escapeHtml(c)}</th>`
+        ).join('');
+        const trs = body.map(row =>
+            `<tr>${row.map(c => `<td style="border:1px solid #cccccc;padding:6px 10px;">${escapeHtml(c)}</td>`).join('')}</tr>`
+        ).join('');
+        tableHtml = `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;margin:8px 0;">` +
+            `<thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`;
+    }
+
+    return `${pre}${tableHtml}${post}`;
+};
+
 const isOver300Detail = (detail?: string): boolean => {
     const text = String(detail || '').toLowerCase();
     return text.includes('above $300')
@@ -4977,6 +5026,23 @@ export const App = () => {
         setTimeout(() => setCopiedField(null), 2000);
     };
 
+    // Copy rich HTML (real table) + plain-text fallback, so the Summary of
+    // Expenses renders as a proper bordered table when pasted into Outlook.
+    const handleCopyRichField = async (payload: { text: string; html: string }, fieldName: string) => {
+        try {
+            const data = [new ClipboardItem({
+                'text/html': new Blob([payload.html], { type: 'text/html' }),
+                'text/plain': new Blob([payload.text], { type: 'text/plain' }),
+            })];
+            await navigator.clipboard.write(data);
+        } catch (e) {
+            console.warn('ClipboardItem API failed, falling back to plain text', e);
+            navigator.clipboard.writeText(payload.text);
+        }
+        setCopiedField(fieldName);
+        setTimeout(() => setCopiedField(null), 2000);
+    };
+
     const handlePasteNabCode = async (index: number) => {
         if (!navigator.clipboard?.readText) {
             showWarningToast('Clipboard paste is not supported on this browser.');
@@ -6796,22 +6862,30 @@ export const App = () => {
 
         // Reuse the same Summary of Expenses section as the claimant email
         // (keeps the Unique ID / Fallback column and the trailing TOTAL AMOUNT line)
-        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent) || '';
+        const summarySection = extractSummaryExpensesSection(claimantBaseEmailContent) || 'Summary of Expenses:';
 
-        return [
+        const headerLines = [
             'Hi Bindi,',
             '',
-            'Kindly provide NAB Details of',
+            'Kindly provide NAB Details of:',
+            '',
             `Staff Member: ${staffName}`,
             `Client's Full Name: ${clientName}`,
             `Address: ${address}`,
             `Approved By: ${approvedBy}`,
             `Amount: $${rawAmount}`,
             `Reimbursement Form Total: $${formTotal}`,
-            `Receipt Total:            $${receiptTotal}`,
-            'NAB Code:',
-            summarySection || 'Summary of Expenses:',
-        ].join('\n');
+            `Receipt Total: $${receiptTotal}`,
+        ];
+
+        const text = [...headerLines, summarySection].join('\n');
+
+        const headerHtml = headerLines
+            .map(l => l === '' ? '<div style="margin:0;">&nbsp;</div>' : `<div style="margin:0;">${escapeHtml(l)}</div>`)
+            .join('');
+        const html = `<div style="font-family:Arial,sans-serif;font-size:13px;color:#000000;">${headerHtml}${summarySectionToHtml(summarySection)}</div>`;
+
+        return { text, html };
     }, [reimbursementFormText, parsedTransactions, formVsReceiptTotals, claimantBaseEmailContent]);
 
     const fraudExactMatchesForRulesCard = useMemo<DuplicateMatchEvidence[]>(() => {
@@ -7700,7 +7774,7 @@ export const App = () => {
                                                                 <div className="flex items-center gap-2">
                                                                     {!selectedEmployee?.bsb && !selectedEmployee?.account && requestNabEmailContent && (
                                                                         <button
-                                                                            onClick={() => handleCopyField(requestNabEmailContent, `req-nab-${txKey}`)}
+                                                                            onClick={() => handleCopyRichField(requestNabEmailContent, `req-nab-${txKey}`)}
                                                                             className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider transition-all ${copiedField === `req-nab-${txKey}` ? 'bg-emerald-500 text-white' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'}`}
                                                                             title="Copy Request NAB Details email"
                                                                         >
