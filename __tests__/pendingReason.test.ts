@@ -1,4 +1,4 @@
-import { upsertPendingReason, extractPendingReason, stripPendingReasonTag } from '../utils/pendingReason';
+import { upsertPendingReason, extractPendingReason, stripPendingReasonTag, formatPendingEodStatus } from '../utils/pendingReason';
 
 describe('pendingReason tag helpers', () => {
   it('extract returns empty string when no tag present', () => {
@@ -32,5 +32,31 @@ describe('pendingReason tag helpers', () => {
   it('upsert with empty reason returns content unchanged', () => {
     expect(upsertPendingReason('Body', '')).toBe('Body');
     expect(upsertPendingReason('Body', '   ')).toBe('Body');
+  });
+});
+
+describe('formatPendingEodStatus', () => {
+  test('packs reason, pending-since date, and aging on one line', () => {
+    const since = new Date('2026-06-18T09:00:00.000Z');
+    expect(formatPendingEodStatus('For Julian\'s Approval', since, 4))
+      .toBe("For Julian's Approval · Pending since 18 Jun · 4d aging");
+  });
+
+  test('falls back to "For Approval" when reason empty', () => {
+    const since = new Date('2026-06-18T09:00:00.000Z');
+    expect(formatPendingEodStatus('', since, 0))
+      .toBe('For Approval · Pending since 18 Jun · 0d aging');
+  });
+
+  test('omits the date segment when sinceDate is null or invalid', () => {
+    expect(formatPendingEodStatus('NAB details C/o Bindi', null, 2))
+      .toBe('NAB details C/o Bindi · 2d aging');
+    expect(formatPendingEodStatus('NAB details C/o Bindi', new Date('not-a-date'), 2))
+      .toBe('NAB details C/o Bindi · 2d aging');
+  });
+
+  test('clamps negative aging to 0', () => {
+    expect(formatPendingEodStatus('For Approval', null, -3))
+      .toBe('For Approval · 0d aging');
   });
 });

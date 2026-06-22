@@ -17,3 +17,20 @@ export const upsertPendingReason = (content: string, reason: string): string => 
 export const stripPendingReasonTag = (content: string): string => {
   return String(content || '').replace(/\n*<!--\s*PENDING_REASON:[\s\S]*?-->\s*/gi, '\n').trim();
 };
+
+// Builds the EOD "PENDING (CARRIED OVER)" Status cell: why + when + how long,
+// packed on one line with " · " separators so the Outlook table copy is unaffected.
+export const formatPendingEodStatus = (
+  reason: string,
+  sinceDate: Date | null,
+  ageDays: number,
+): string => {
+  const reasonText = reason?.trim() || 'For Approval';
+  const parts = [reasonText];
+  if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
+    const dateText = sinceDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    parts.push(`Pending since ${dateText}`);
+  }
+  parts.push(`${Math.max(0, ageDays)}d aging`);
+  return parts.join(' · ');
+};
