@@ -1589,6 +1589,7 @@ export const App = () => {
     const [approvedClaimantEmailContent, setApprovedClaimantEmailContent] = useState('');
     const [approvedClaimantCopied, setApprovedClaimantCopied] = useState(false);
     const [followUpingGroupKey, setFollowUpingGroupKey] = useState<string | null>(null);
+    const [taggingRecordId, setTaggingRecordId] = useState<any>(null);
     const [manualAuditIssues, setManualAuditIssues] = useState<ManualAuditIssue[]>([]);
     const [showManualAuditModal, setShowManualAuditModal] = useState(false);
     const bypassManualAuditRef = useRef(false);
@@ -5625,6 +5626,27 @@ export const App = () => {
             showWarningToast('Failed to update follow-up timestamp. Please try again.');
         } finally {
             setFollowUpingGroupKey(null);
+        }
+    };
+
+    const handleTagPendingReason = async (record: any, reason: string) => {
+        if (!record?.id) return;
+        setTaggingRecordId(record.id);
+        try {
+            const nextContent = upsertPendingReason(String(record.full_email_content || ''), reason);
+            const { error } = await supabase
+                .from('audit_logs')
+                .update({ full_email_content: nextContent })
+                .eq('id', record.id);
+            if (error) throw error;
+            setHistoryData(prev => prev.map(item =>
+                item.id === record.id ? { ...item, full_email_content: nextContent } : item
+            ));
+        } catch (error) {
+            console.error('Failed to tag pending reason:', error);
+            showWarningToast('Failed to set pending reason. Please try again.');
+        } finally {
+            setTaggingRecordId(null);
         }
     };
 
