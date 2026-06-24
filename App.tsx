@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
-import { upsertPendingReason, extractPendingReason, formatPendingEodStatus } from './utils/pendingReason';
+import { upsertPendingReason, extractPendingReason } from './utils/pendingReason';
 import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
@@ -30,7 +30,6 @@ John	Smith	Smith, John	000000	00000000
 Jane	Doe	Doe, Jane	000000	00000000`;
 
 const EOD_SPECIAL_ROW_ID = 'idle-row';
-const EOD_PENDING_HEADER_ROW_ID = 'pending-carryover-header';
 const EOD_SPECIAL_ACTIVITY_LABEL = `Data Validation & Reconciliation
 Records Review
 Internal Audit / Quality Check`;
@@ -1147,6 +1146,13 @@ const getPendingAgeDays = (record: any): number => {
     const followedUpAt = extractPendingFollowedUpAt(record?.full_email_content || '');
     const baseline = followedUpAt || String(record?.created_at || '');
     const baselineMs = new Date(baseline).getTime();
+    if (Number.isNaN(baselineMs)) return 0;
+    const age = Math.floor((Date.now() - baselineMs) / (24 * 60 * 60 * 1000));
+    return Math.max(0, age);
+};
+
+const getOriginalPendingAgeDays = (record: any): number => {
+    const baselineMs = new Date(String(record?.created_at || '')).getTime();
     if (Number.isNaN(baselineMs)) return 0;
     const age = Math.floor((Date.now() - baselineMs) / (24 * 60 * 60 * 1000));
     return Math.max(0, age);
@@ -6548,7 +6554,7 @@ export const App = () => {
         });
     };
 
-    const generateEODSchedule = (records: any[], openPendingRecords: any[] = []) => {
+    const generateEODSchedule = (records: any[]) => {
         let currentTime = new Date();
         currentTime.setHours(6, 59, 0, 0);
 
@@ -6633,40 +6639,7 @@ export const App = () => {
             eodStatus: ''
         };
 
-        const pendingHeaderRow = {
-            id: EOD_PENDING_HEADER_ROW_ID,
-            eodTimeStart: '',
-            eodTimeEnd: '',
-            eodActivity: 'PENDING (CARRIED OVER)',
-            clientName: '',
-            staff_name: '',
-            amount: '',
-            date: '',
-            eodStatus: ''
-        };
-
-        const pendingRows = openPendingRecords.map((record: any) => {
-            const reason = extractPendingReason(record.full_email_content || '');
-            const followedUpAt = extractPendingFollowedUpAt(record.full_email_content || '');
-            const baseline = followedUpAt || record.created_at;
-            const sinceDate = baseline ? new Date(baseline) : null;
-            const ageDays = typeof record.pendingAgeDays === 'number'
-                ? record.pendingAgeDays
-                : getPendingAgeDays(record);
-            return {
-                ...record,
-                isPendingCarryover: true,
-                eodTimeStart: '',
-                eodTimeEnd: '',
-                eodActivity: 'Pending',
-                eodStatus: formatPendingEodStatus(reason, sinceDate, ageDays)
-            };
-        });
-
-        if (pendingRows.length === 0) {
-            return [...scheduled, idleRow];
-        }
-        return [...scheduled, idleRow, pendingHeaderRow, ...pendingRows];
+        return [...scheduled, idleRow];
     };
 
     const allProcessedRecords = useMemo<any[]>(() => processRecords(historyData), [historyData]);
@@ -6758,7 +6731,37 @@ export const App = () => {
         );
     }, [pendingApprovalRecords]);
 
-    const eodData = generateEODSchedule(todaysProcessedRecords, pendingApprovalRecords);
+    const eodData = generateEODSchedule(todaysProcessedRecords);
+    const eodPendingRows = useMemo(() => {
+        return pendingApprovalRecords.map((record: any) => {
+            const taggedAt = record.created_at ? new Date(record.created_at) : null;
+            const taggedDate = taggedAt && !Number.isNaN(taggedAt.getTime())
+                ? taggedAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '-';
+            const agingDays = getOriginalPendingAgeDays(record);
+            const status = extractPendingReason(record.full_email_content || '') || 'For Julian\'s Approval';
+            const amount = normalizeMoneyValue(String(record.amount ?? record.totalAmount ?? '0.00'), '0.00');
+
+            return {
+                id: record.id,
+                taggedDate,
+                agingDays,
+                staffName: String(record.staff_name || 'Unknown').trim() || 'Unknown',
+                amount,
+                status
+            };
+        });
+    }, [pendingApprovalRecords]);
+    const eodPendingStatusSummary = useMemo(() => {
+        return eodPendingRows.reduce(
+            (acc, row: any) => {
+                if (row.status === 'NAB details C/o Bindi') acc.bindi += 1;
+                if (row.status === 'For Julian\'s Approval') acc.julian += 1;
+                return acc;
+            },
+            { bindi: 0, julian: 0 }
+        );
+    }, [eodPendingRows]);
     const accomplishedNabCount = useMemo(() => {
         const uniqueNabCodes = new Set<string>();
         todaysProcessedRecords.forEach((record: any) => {
@@ -6768,7 +6771,6 @@ export const App = () => {
         });
         return uniqueNabCodes.size;
     }, [todaysProcessedRecords]);
-    const pendingCountToday = todaysProcessedRecords.filter(r => !r.isReceiptLiquidation && !isValidNabReference(r.nabRef)).length;
     const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && !r.isVipManual && !r.isReceiptLiquidation && r.nabRef !== 'PENDING' && r.nabRef !== '');
     const totalAmount = nabReportData.reduce((sum, r) => sum + parseFloat(String(r.amount).replace(/[^0-9.-]+/g, "")), 0);
 
@@ -8291,13 +8293,13 @@ export const App = () => {
                                             <span className="text-emerald-400 font-mono font-bold">{accomplishedNabCount}</span>
                                         </div>
                                         <div className="flex flex-col items-end">
-                                            <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Pending</span>
-                                            <span className="text-red-400 font-mono font-bold">{pendingCountToday}</span>
+                                            <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Dashboard Pending</span>
+                                            <span className="text-red-400 font-mono font-bold">{eodPendingRows.length}</span>
                                         </div>
                                     </div>
-                                    <button onClick={() => handleCopyTable('eod-table', 'eod')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'eod' ? 'bg-indigo-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                                    <button onClick={() => handleCopyTable('eod-report', 'eod')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'eod' ? 'bg-indigo-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                                         {reportCopied === 'eod' ? <Check size={16} /> : <Copy size={16} />}
-                                        {reportCopied === 'eod' ? 'Copied Schedule!' : 'Copy for Outlook'}
+                                        {reportCopied === 'eod' ? 'Copied Report!' : 'Copy for Outlook'}
                                     </button>
                                     <button onClick={handleRefreshCycleView} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors text-slate-400 hover:text-white" title="Refresh current cycle">
                                         <RefreshCw size={18} className={loadingHistory ? 'animate-spin' : ''} />
@@ -8306,8 +8308,9 @@ export const App = () => {
                             </div>
 
                             <div className="p-8 overflow-x-auto">
+                                <div id="eod-report" style={{ fontFamily: 'Arial, sans-serif', color: '#ffffff' }}>
                                 <div className="bg-transparent rounded-lg overflow-hidden">
-                                    <table id="eod-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
+                                    <table id="eod-schedule-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
                                         <thead>
                                             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                                                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '100px' }}>Start</th>
@@ -8324,14 +8327,14 @@ export const App = () => {
                                                 <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeStart}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeEnd}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: (row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID) ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: row.id === EOD_SPECIAL_ROW_ID ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staff_name}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>
-                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || row.isPendingCarryover || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
+                                                        {(row.id === EOD_SPECIAL_ROW_ID || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
                                                     <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
-                                                        {(row.id === EOD_SPECIAL_ROW_ID || row.id === EOD_PENDING_HEADER_ROW_ID || row.isPendingCarryover) ? (
+                                                        {row.id === EOD_SPECIAL_ROW_ID ? (
                                                             <span style={{ color: '#64748b', fontSize: '11px' }}>-</span>
                                                         ) : (
                                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
@@ -8359,6 +8362,60 @@ export const App = () => {
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+
+                                <div style={{ marginTop: '28px' }}>
+                                    <div style={{ marginBottom: '12px' }}>
+                                        <h3 style={{ margin: 0, color: '#ffffff', fontSize: '16px', fontWeight: 700 }}>Pending Reimbursements</h3>
+                                        <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: '11px' }}>Carried-over pending records synced from Dashboard Pending.</p>
+                                    </div>
+                                    <div style={{ marginBottom: '18px' }}>
+                                        <h4 style={{ margin: '0 0 8px', color: '#ffffff', fontSize: '14px', fontWeight: 700 }}>Pending Status Summary</h4>
+                                        <table id="eod-pending-summary-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff' }}>Status</th>
+                                                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '140px' }}>Count</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                    <td style={{ padding: '10px 16px', color: '#ffffff' }}>NAB details C/o Bindi</td>
+                                                    <td style={{ padding: '10px 16px', color: '#ffffff', fontWeight: 700 }}>{eodPendingStatusSummary.bindi}</td>
+                                                </tr>
+                                                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                    <td style={{ padding: '10px 16px', color: '#ffffff' }}>For Julian's Approval</td>
+                                                    <td style={{ padding: '10px 16px', color: '#ffffff', fontWeight: 700 }}>{eodPendingStatusSummary.julian}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <table id="eod-pending-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '170px' }}>Date</th>
+                                                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '110px' }}>Aging</th>
+                                                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '230px' }}>Staff Name</th>
+                                                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '120px' }}>Amount</th>
+                                                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff' }}>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {eodPendingRows.map((row: any) => (
+                                                <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.taggedDate}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.agingDays} day{row.agingDays === 1 ? '' : 's'}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staffName}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>${row.amount}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.status}</td>
+                                                </tr>
+                                            ))}
+                                            {eodPendingRows.length === 0 && (
+                                                <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No carried-over pending records.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
                                 </div>
                             </div>
                         </div>
