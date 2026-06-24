@@ -515,6 +515,7 @@ interface RulePendingAction {
 }
 
 type DuplicateTrafficLight = 'red' | 'orange' | 'yellow' | 'amber' | 'green';
+type FraudDuplicateMatchType = 'exact' | 'near' | 'UNIQUE ID DUPLICATE' | 'DATE + AMOUNT';
 
 interface DuplicateMatchEvidence {
     txStaffName: string;
@@ -1603,7 +1604,7 @@ export const App = () => {
 
     // Fraud Detection State
     const [showFraudPopup, setShowFraudPopup] = useState(false);
-    const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[], matchType: 'exact' | 'near', storeName?: string}>>([]);
+    const [fraudDuplicates, setFraudDuplicates] = useState<Array<{amount: string, date: string, rows: number[], matchType: FraudDuplicateMatchType, storeName?: string}>>([]);
     const [fraudReceiptRows, setFraudReceiptRows] = useState<Array<{rowNum: number, amount: string, date: string, storeName: string, nabCode: string, uniqueId: string, matchType: string}>>([]);
     const [showFraudReceiptsModal, setShowFraudReceiptsModal] = useState(false);
     const [pendingProcessResult, setPendingProcessResult] = useState<any>(null);
@@ -1693,7 +1694,7 @@ export const App = () => {
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
             item.location?.toLowerCase().includes(query) ||
-            String(item.totalAmount?.toFixed(2) ?? '').includes(query)
+            String(item.amount ?? '').includes(query)
         );
     }, [groupPendingThisWeek, pendingSearchQuery]);
 
@@ -1704,7 +1705,7 @@ export const App = () => {
             item.staffName?.toLowerCase().includes(query) ||
             item.ypName?.toLowerCase().includes(query) ||
             item.location?.toLowerCase().includes(query) ||
-            String(item.totalAmount?.toFixed(2) ?? '').includes(query)
+            String(item.amount ?? '').includes(query)
         );
     }, [groupPendingPreviousWeeks, pendingSearchQuery]);
 
@@ -3815,7 +3816,7 @@ export const App = () => {
         if (requestMode !== 'solo') {
             return {
                 signalKey: 'none',
-                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: 'exact' | 'near'; storeName?: string }>,
+                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: FraudDuplicateMatchType; storeName?: string }>,
                 rows: [] as Array<{ rowNum: number; amount: string; date: string; storeName: string; nabCode: string; uniqueId: string; matchType: string }>
             };
         }
@@ -3824,7 +3825,7 @@ export const App = () => {
         if (!['red', 'orange', 'yellow', 'amber'].includes(signal)) {
             return {
                 signalKey: 'none',
-                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: 'exact' | 'near'; storeName?: string }>,
+                duplicates: [] as Array<{ amount: string; date: string; rows: number[]; matchType: FraudDuplicateMatchType; storeName?: string }>,
                 rows: [] as Array<{ rowNum: number; amount: string; date: string; storeName: string; nabCode: string; uniqueId: string; matchType: string }>
             };
         }
@@ -6558,11 +6559,7 @@ export const App = () => {
         let currentTime = new Date();
         currentTime.setHours(6, 59, 0, 0);
 
-        const isPendingActivity = (record: any) => {
-            if (record.isReceiptLiquidation || record.isVipManual) return false;
-            return !isValidNabReference(record.nabRef);
-        };
-        const scheduled = records.filter(record => !isPendingActivity(record)).map(record => {
+        const scheduled = records.map(record => {
             const hasValidNabCode = isValidNabReference(record.nabRef);
             const activity = record.isReceiptLiquidation
                 ? 'Audit'
@@ -6595,14 +6592,21 @@ export const App = () => {
                     ? `Special Instruction - Paid to Nab [${record.nabRef}]`
                     : 'Special Instruction';
             } else if (activity === 'Pending') {
-                const reason = String(record.discrepancyReason || '').trim();
-                if (/for revision mismatch reimbursement form total is higher than receipt total/i.test(reason)) {
-                    status = 'For revision mismatch reimbursement form total is higher than receipt total';
-                } else if (reason && reason !== 'Discrepancy / Pending') {
-                    status = `Rematch (${reason.replace('Mismatch: ', '')})`;
+                const taggedReason = extractPendingReason(record.full_email_content || '').trim();
+                let reasonText: string;
+                if (taggedReason) {
+                    reasonText = taggedReason;
                 } else {
-                    status = 'For Approval';
+                    const dReason = String(record.discrepancyReason || '').trim();
+                    if (/for revision mismatch reimbursement form total is higher than receipt total/i.test(dReason)) {
+                        reasonText = 'For revision mismatch reimbursement form total is higher than receipt total';
+                    } else if (dReason && dReason !== 'Discrepancy / Pending') {
+                        reasonText = `Rematch (${dReason.replace('Mismatch: ', '')})`;
+                    } else {
+                        reasonText = 'For Approval';
+                    }
                 }
+                status = `Pending — ${reasonText}`;
             } else {
                 status = `Paid to Nab [${record.nabRef}]`;
             }
@@ -6733,7 +6737,10 @@ export const App = () => {
 
     const eodData = generateEODSchedule(todaysProcessedRecords);
     const eodPendingRows = useMemo(() => {
-        return pendingApprovalRecords.map((record: any) => {
+        const now = new Date(nowTick);
+        return pendingApprovalRecords
+            .filter((record: any) => !isWithinWeekdayResetWindow(record.created_at, now))
+            .map((record: any) => {
             const taggedAt = record.created_at ? new Date(record.created_at) : null;
             const taggedDate = taggedAt && !Number.isNaN(taggedAt.getTime())
                 ? taggedAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -6751,7 +6758,7 @@ export const App = () => {
                 status
             };
         });
-    }, [pendingApprovalRecords]);
+    }, [pendingApprovalRecords, nowTick]);
     const eodPendingStatusSummary = useMemo(() => {
         return eodPendingRows.reduce(
             (acc, row: any) => {
@@ -8411,7 +8418,7 @@ export const App = () => {
                                                 </tr>
                                             ))}
                                             {eodPendingRows.length === 0 && (
-                                                <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No carried-over pending records.</td></tr>
+                                                <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No prior-day pending records. Today's pending appears in the timeline above.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
@@ -9234,7 +9241,7 @@ export const App = () => {
                                     {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') ? (
                                         <button
                                             onClick={() => confirmSave('PENDING', {
-                                                duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode,
+                                                duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode as DuplicateTrafficLight,
                                                 reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
                                                     ? (isOver30DaysDetail(saveModalDecision?.detail)
                                                         ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
