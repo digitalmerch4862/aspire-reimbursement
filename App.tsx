@@ -7391,7 +7391,8 @@ export const App = () => {
                         <div className={`grid grid-cols-1 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 items-start ${showSupportColumn ? 'xl:grid-cols-[400px_360px_minmax(0,1fr)]' : 'xl:grid-cols-[400px_minmax(0,1fr)]'}`}>
                             {/* ... */}
                             <div className="w-full space-y-6 min-w-0">
-                                {(requestMode === 'solo' || requestMode === 'group') && (
+                                {/* AI Mode hidden (not deleted): toggle suppressed so inputMethod stays 'manual'. Re-enable by removing `false &&`. */}
+                                {false && (requestMode === 'solo' || requestMode === 'group') && (
                                     <InputMethodToggle
                                         current={inputMethod}
                                         onChange={(method) => {
@@ -7695,15 +7696,15 @@ export const App = () => {
                                 </div>
                             )}
 
-                            <div className={`space-y-6 min-h-[600px] min-w-0 ${showSupportColumn ? 'xl:col-start-3' : 'xl:col-start-2'}`}>
+                            <div className={`space-y-6 min-w-0 ${(results || processingState === ProcessingState.PROCESSING) ? 'min-h-[600px]' : ''} ${showSupportColumn ? 'xl:col-start-3' : 'xl:col-start-2'}`}>
 
                                 {!results && processingState === ProcessingState.IDLE && (
-                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] p-12 text-center backdrop-blur-sm">
-                                        <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                                            <LayoutDashboard size={40} className="text-slate-600" />
+                                    <div className="flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] px-6 py-8 text-center backdrop-blur-sm">
+                                        <div className="w-14 h-14 bg-white/5 rounded-full flex items-center justify-center mb-4">
+                                            <LayoutDashboard size={26} className="text-slate-600" />
                                         </div>
-                                        <h2 className="text-2xl font-bold text-white mb-2">Audit Dashboard</h2>
-                                        <p className="max-w-sm mx-auto text-slate-400">Upload documents on the left panel to begin the auditing process.</p>
+                                        <h2 className="text-lg font-bold text-white mb-1">Audit Dashboard</h2>
+                                        <p className="max-w-sm mx-auto text-sm text-slate-400">Enter form &amp; receipt details on the left panel, then Start Audit.</p>
                                     </div>
                                 )}
                                 {!results && processingState === ProcessingState.PROCESSING && (
