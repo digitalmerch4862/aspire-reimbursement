@@ -7735,9 +7735,6 @@ export const App = () => {
 
                                 {!results && processingState === ProcessingState.IDLE && (
                                     <div className="flex flex-col items-center justify-center text-slate-500 bg-[#1c1e24]/30 border border-dashed border-white/5 rounded-[32px] px-6 py-8 text-center backdrop-blur-sm">
-                                        <div className="w-14 h-14 bg-white/5 rounded-full flex items-center justify-center mb-4">
-                                            <LayoutDashboard size={26} className="text-slate-600" />
-                                        </div>
                                         <h2 className="text-lg font-bold text-white mb-1">Audit Dashboard</h2>
                                         <p className="max-w-sm mx-auto text-sm text-slate-400">Enter form &amp; receipt details on the left panel, then Start Audit.</p>
                                     </div>
