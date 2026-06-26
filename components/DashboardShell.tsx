@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Mail, Bot, Landmark, ClipboardList, LucideIcon } from 'lucide-react';
 import { DASHBOARD_NAV_ITEMS, DashboardNavItem } from './dashboardNav';
 
@@ -18,6 +18,7 @@ const DashboardShell: React.FC<DashboardShellProps> = ({ children }) => {
     DASHBOARD_NAV_ITEMS.find((i) => i.kind === 'internal' && i.isDefault) ??
     DASHBOARD_NAV_ITEMS[DASHBOARD_NAV_ITEMS.length - 1];
   const [activeId, setActiveId] = useState<DashboardNavItem['id']>(defaultItem.id);
+  const windowRefs = useRef<Record<string, Window | null>>({});
 
   const renderNavButton = (item: DashboardNavItem, layout: 'side' | 'bottom') => {
     const Icon = ICONS[item.icon];
@@ -46,7 +47,12 @@ const DashboardShell: React.FC<DashboardShellProps> = ({ children }) => {
           className={className}
           onClick={(e) => {
             e.preventDefault();
-            window.open(item.url, item.id);
+            const existing = windowRefs.current[item.id];
+            if (existing && !existing.closed) {
+              existing.focus();
+            } else {
+              windowRefs.current[item.id] = window.open(item.url, item.id);
+            }
             setActiveId(item.id);
           }}
         >
