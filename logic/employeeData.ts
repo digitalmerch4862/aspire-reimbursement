@@ -89,3 +89,75 @@ export const serializeEmployeeData = (employees: Employee[]): string => {
         `${e.firstName}\t${e.surname}\t${e.surname}, ${e.firstName}\t${e.bsb}\t${e.account}`);
     return [header, ...rows].join('\n');
 };
+
+export const mergeEmployeesByAccount = (
+    current: Employee[],
+    incoming: Employee[],
+): { merged: Employee[]; pendingDeactivation: Employee[] } => {
+    const currentByAccount = new Map(current.map((e) => [e.account.trim(), e]));
+    const incomingAccounts = new Set(incoming.map((e) => e.account.trim()));
+
+    const merged: Employee[] = current.map((e) => e);
+
+    incoming.forEach((row) => {
+        const key = row.account.trim();
+        const existing = currentByAccount.get(key);
+        if (existing) {
+            const idx = merged.findIndex((e) => e.id === existing.id);
+            merged[idx] = {
+                ...existing,
+                firstName: row.firstName,
+                surname: row.surname,
+                bsb: row.bsb,
+                fullName: `${row.firstName} ${row.surname}`,
+            };
+        } else {
+            merged.push({
+                ...row,
+                fullName: `${row.firstName} ${row.surname}`,
+                id: makeEmployeeId(row.firstName, row.surname, key, `add_${key}`),
+            });
+        }
+    });
+
+    const pendingDeactivation = current.filter((e) => !incomingAccounts.has(e.account.trim()));
+    return { merged, pendingDeactivation };
+};
+
+export const upsertEmployeeById = (list: Employee[], rec: Employee): Employee[] => {
+    const idx = list.findIndex((e) => e.id === rec.id);
+    if (idx === -1) return [...list, rec];
+    const next = list.slice();
+    next[idx] = rec;
+    return next;
+};
+
+export const removeEmployeeById = (list: Employee[], id: string): Employee[] =>
+    list.filter((e) => e.id !== id);
+
+type Cell = string | number | boolean | Date | null | undefined;
+
+export const xlsxRowsToRawText = (rows: Cell[][]): string => {
+    const cleaned = rows
+        .filter((r) => Array.isArray(r) && r.some((c) => String(c ?? '').trim() !== ''))
+        .map((r) => r.map((c) => String(c ?? '').trim()));
+    if (cleaned.length === 0) return 'First Names\tSurname\tConcatenate\tBSB\tAccount';
+
+    const header = cleaned[0].map((c) => normalizeEmployeeName(c));
+    const firstNameIndex = header.findIndex((c) => c === 'first names' || c === 'first name' || c === 'firstname');
+    const surnameIndex = header.findIndex((c) => c === 'surname' || c === 'last name' || c === 'lastname');
+    const bsbIndex = header.findIndex((c) => c === 'bsb');
+    const accountIndex = header.findIndex((c) => c === 'account' || c === 'account number' || c === 'account #');
+    const recognized = firstNameIndex >= 0 && surnameIndex >= 0 && bsbIndex >= 0 && accountIndex >= 0;
+
+    const out: string[] = ['First Names\tSurname\tConcatenate\tBSB\tAccount'];
+    cleaned.slice(1).forEach((cols) => {
+        const firstName = recognized ? (cols[firstNameIndex] || '') : (cols[0] || '');
+        const surname = recognized ? (cols[surnameIndex] || '') : (cols[1] || '');
+        const bsb = recognized ? (cols[bsbIndex] || '') : (cols[3] || '');
+        const account = recognized ? (cols[accountIndex] || '') : (cols[4] || '');
+        if (!firstName || !surname || !bsb || !account) return;
+        out.push(`${firstName}\t${surname}\t${surname}, ${firstName}\t${bsb}\t${account}`);
+    });
+    return out.join('\n');
+};
