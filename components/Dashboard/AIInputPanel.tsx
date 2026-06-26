@@ -335,7 +335,7 @@ const AIInputPanel: React.FC<AIInputPanelProps> = ({
                                 type="file"
                                 className="hidden"
                                 multiple
-                                accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc,.xlsx,.xls"
+                                accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc,.xlsx"
                                 onChange={onFileInput}
                             />
                             <Plus size={18} />

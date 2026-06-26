@@ -1,0 +1,64 @@
+ASPIRE REIMBURSEMENT TUTORIAL - PREMIERE CUE SHEET
+====================================================
+Sequence settings: 1260 x 992, 30 fps, audio 48 kHz.
+(Match the screen.mp4 — right-click it in Premiere > "New Sequence from Clip".)
+
+Timeline is 226s total = 12s intro + 214s screen recording.
+All timecodes below are HH:MM:SS:FF at 30 fps.
+
+SOURCE GOOGLE SHEET:
+https://docs.google.com/spreadsheets/d/1bdsiC61Ke9lUoaUXPWyDuha9MJkrMhkJ_jS7NwoYId4/edit?gid=0#gid=0
+
+TRACK LAYOUT (bottom to top):
+  V1 = screen.mp4 (+ intro_card.png before it)
+  V2 = caption overlays (transparent PNGs)
+  A1 = voiceover
+
+------------------------------------------------------------
+VIDEO
+------------------------------------------------------------
+CLIP                IN            OUT           TRACK
+intro_card.png      00:00:00:00   00:00:12:00   V1
+screen.mp4          00:00:12:00   00:03:46:00   V1
+
+------------------------------------------------------------
+AUDIO — Option A (easiest): drop ONE file at 00:00:00:00
+------------------------------------------------------------
+master_voiceover_timeline.wav   00:00:00:00   00:03:46:00   A1
+  (all 8 lines already placed at the correct offsets)
+
+------------------------------------------------------------
+AUDIO — Option B: place the 8 segments yourself
+------------------------------------------------------------
+FILE         IN            LINE
+vo_1.mp3     00:00:01:00   Step 1 - Welcome      (plays over intro card)
+vo_2.mp3     00:00:13:00   Step 2 - Make a copy
+vo_3.mp3     00:00:36:00   Step 3 - Click button / allow script
+vo_4.mp3     00:01:02:00   Step 4 - Open panel / Group
+vo_5.mp3     00:01:24:00   Step 5 - Date, location, details
+vo_6.mp3     00:01:42:00   Step 6 - Add members / rows
+vo_7.mp3     00:02:52:00   Step 7 - Review and save
+vo_8.mp3     00:03:20:00   Step 8 - Export JPEG
+
+------------------------------------------------------------
+CAPTIONS (transparent PNG, full-frame 1260x992 - no positioning needed)
+Place on V2. Each PNG already sits at the bottom-left of the frame.
+------------------------------------------------------------
+FILE              IN            OUT
+caption_1.png     00:00:01:00   00:00:12:00
+caption_2.png     00:00:13:00   00:00:28:00
+caption_3.png     00:00:36:00   00:01:02:00
+caption_4.png     00:01:02:00   00:01:20:00
+caption_5.png     00:01:20:00   00:01:42:00
+caption_6.png     00:01:42:00   00:02:52:00
+caption_7.png     00:02:52:00   00:03:20:00
+caption_8.png     00:03:20:00   00:03:46:00
+
+NOTES
+- The caption IN points are ~0.5-1s before the VO line so the text appears just
+  before the narration. Nudge to taste.
+- Want the intro/captions to fade? Add a Cross Dissolve or keyframe Opacity.
+- Use Aspire-Reimbursement-Tutorial-FIXED.mp4 for quick review.
+- Use screen.mp4 + intro_card.png + captions + master_voiceover_timeline.wav for editable Premiere assembly.
+- screen.mp4 may contain captured browser audio; mute it if present. Use the master voiceover on A1.
+- Voice: ElevenLabs "Bella". Re-generate any line if you tweak the script.

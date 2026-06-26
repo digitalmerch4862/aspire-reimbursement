@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="4">
+  <project>
+    <name>Aspire Reimbursement Tutorial</name>
+    <children>
+      <sequence id="aspire-sequence-1">
+        <name>Aspire Reimbursement Tutorial - Edit Review</name>
+        <duration>6780</duration>
+        <rate>
+          <timebase>30</timebase>
+          <ntsc>FALSE</ntsc>
+        </rate>
+        <timecode>
+          <rate>
+            <timebase>30</timebase>
+            <ntsc>FALSE</ntsc>
+          </rate>
+          <string>00:00:00:00</string>
+          <frame>0</frame>
+          <displayformat>NDF</displayformat>
+        </timecode>
+        <media>
+          <video>
+            <format>
+              <samplecharacteristics>
+                <rate>
+                  <timebase>30</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <width>1260</width>
+                <height>992</height>
+                <anamorphic>FALSE</anamorphic>
+                <pixelaspectratio>square</pixelaspectratio>
+                <fielddominance>none</fielddominance>
+              </samplecharacteristics>
+            </format>
+            <track>
+              <clipitem id="intro-card">
+                <name>intro_card.png</name>
+                <duration>360</duration>
+                <rate>
+                  <timebase>30</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <start>0</start>
+                <end>360</end>
+                <in>0</in>
+                <out>360</out>
+                <file id="file-intro-card">
+                  <name>intro_card.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/intro_card.png</pathurl>
+                  <duration>360</duration>
+                  <rate>
+                    <timebase>30</timebase>
+                    <ntsc>FALSE</ntsc>
+                  </rate>
+                  <media>
+                    <video>
+                      <samplecharacteristics>
+                        <width>1260</width>
+                        <height>992</height>
+                        <pixelaspectratio>square</pixelaspectratio>
+                        <fielddominance>none</fielddominance>
+                      </samplecharacteristics>
+                    </video>
+                  </media>
+                </file>
+              </clipitem>
+              <clipitem id="screen-recording">
+                <name>screen.mp4</name>
+                <duration>6420</duration>
+                <rate>
+                  <timebase>30</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <start>360</start>
+                <end>6780</end>
+                <in>0</in>
+                <out>6420</out>
+                <file id="file-screen-recording">
+                  <name>screen.mp4</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/screen.mp4</pathurl>
+                  <duration>6420</duration>
+                  <rate>
+                    <timebase>30</timebase>
+                    <ntsc>FALSE</ntsc>
+                  </rate>
+                  <media>
+                    <video>
+                      <samplecharacteristics>
+                        <width>1260</width>
+                        <height>992</height>
+                        <pixelaspectratio>square</pixelaspectratio>
+                        <fielddominance>none</fielddominance>
+                      </samplecharacteristics>
+                    </video>
+                  </media>
+                </file>
+              </clipitem>
+              <enabled>TRUE</enabled>
+              <locked>FALSE</locked>
+            </track>
+            <track>
+              <clipitem id="caption-2">
+                <name>caption_2.png</name>
+                <duration>540</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>720</start><end>1260</end><in>0</in><out>540</out>
+                <file id="file-caption-2">
+                  <name>caption_2.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_2.png</pathurl>
+                  <duration>540</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-3">
+                <name>caption_3.png</name>
+                <duration>540</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>1260</start><end>1800</end><in>0</in><out>540</out>
+                <file id="file-caption-3">
+                  <name>caption_3.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_3.png</pathurl>
+                  <duration>540</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-4">
+                <name>caption_4.png</name>
+                <duration>720</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>1800</start><end>2520</end><in>0</in><out>720</out>
+                <file id="file-caption-4">
+                  <name>caption_4.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_4.png</pathurl>
+                  <duration>720</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-5">
+                <name>caption_5.png</name>
+                <duration>1080</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>2520</start><end>3600</end><in>0</in><out>1080</out>
+                <file id="file-caption-5">
+                  <name>caption_5.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_5.png</pathurl>
+                  <duration>1080</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-6">
+                <name>caption_6.png</name>
+                <duration>1440</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>3600</start><end>5040</end><in>0</in><out>1440</out>
+                <file id="file-caption-6">
+                  <name>caption_6.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_6.png</pathurl>
+                  <duration>1440</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-7">
+                <name>caption_7.png</name>
+                <duration>1080</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>5040</start><end>6120</end><in>0</in><out>1080</out>
+                <file id="file-caption-7">
+                  <name>caption_7.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_7.png</pathurl>
+                  <duration>1080</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <clipitem id="caption-8">
+                <name>caption_8.png</name>
+                <duration>660</duration>
+                <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                <start>6120</start><end>6780</end><in>0</in><out>660</out>
+                <file id="file-caption-8">
+                  <name>caption_8.png</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/captions/caption_8.png</pathurl>
+                  <duration>660</duration>
+                  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+                  <media><video><samplecharacteristics><width>1260</width><height>992</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></video></media>
+                </file>
+              </clipitem>
+              <enabled>TRUE</enabled>
+              <locked>FALSE</locked>
+            </track>
+          </video>
+          <audio>
+            <format>
+              <samplecharacteristics>
+                <depth>16</depth>
+                <samplerate>48000</samplerate>
+              </samplecharacteristics>
+            </format>
+            <track>
+              <clipitem id="master-voiceover">
+                <name>master_voiceover_timeline.wav</name>
+                <duration>6780</duration>
+                <rate>
+                  <timebase>30</timebase>
+                  <ntsc>FALSE</ntsc>
+                </rate>
+                <start>0</start>
+                <end>6780</end>
+                <in>0</in>
+                <out>6780</out>
+                <file id="file-master-voiceover">
+                  <name>master_voiceover_timeline.wav</name>
+                  <pathurl>file://localhost/C:/Users/Admin/Desktop/App/Aspire%20Reimbursement/aspire-tutorial/premiere-assets/voiceover/master_voiceover_timeline.wav</pathurl>
+                  <duration>6780</duration>
+                  <rate>
+                    <timebase>30</timebase>
+                    <ntsc>FALSE</ntsc>
+                  </rate>
+                  <media>
+                    <audio>
+                      <samplecharacteristics>
+                        <depth>16</depth>
+                        <samplerate>48000</samplerate>
+                      </samplecharacteristics>
+                      <channelcount>2</channelcount>
+                    </audio>
+                  </media>
+                </file>
+                <sourcetrack>
+                  <mediatype>audio</mediatype>
+                  <trackindex>1</trackindex>
+                </sourcetrack>
+              </clipitem>
+              <enabled>TRUE</enabled>
+              <locked>FALSE</locked>
+              <outputchannelindex>1</outputchannelindex>
+            </track>
+          </audio>
+        </media>
+      </sequence>
+    </children>
+  </project>
+</xmeml>

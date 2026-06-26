@@ -19,8 +19,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
   files,
   onFilesChange,
   multiple = false,
-  accept = "image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv",
-  description = "Support for JPG, PDF, Word, Excel",
+  accept = "image/*,application/pdf,.doc,.docx,.xlsx",
+  description = "Support for JPG, PDF, Word, XLSX",
   manualText,
   onManualTextChange
 }) => {
@@ -222,7 +222,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     if (file.type.startsWith('image/')) {
       return <img src={(file as FileWithPreview).preview} alt={file.name} className="h-full w-full object-cover" />;
     }
-    if (file.name.endsWith('.xls') || file.name.endsWith('.xlsx') || file.name.endsWith('.csv')) {
+    if (file.name.endsWith('.xlsx')) {
       return <FileSpreadsheet className="text-emerald-400" />;
     }
     if (file.name.endsWith('.doc') || file.name.endsWith('.docx')) {

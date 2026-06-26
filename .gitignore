@@ -17,6 +17,34 @@ dist-ssr
 .env.*
 !.env.example
 
+# Local secrets, mailbox exports, and generated audit data
+ms_token*.json
+outlook_*.json
+device_code*.json
+reimb_email_ids.json
+*_emails_raw.json
+*_emails.json
+Reimbursement_*.csv
+att_*_Reimbursement_form.docx
+playwright_profile/
+temp_attachments/
+*.bak
+*.tmp
+
+# Local mailbox/audit helper scripts
+audit_*.js
+audit_*.cjs
+debug_form.cjs
+export_emails.ps1
+poll_token.ps1
+test_api.cjs
+test_final.cjs
+test_save*.cjs
+parse_audit_csv.cjs
+check_csv.cjs
+list_pending.cjs
+list_profiles.ps1
+
 # Local overrides
 *.local
 

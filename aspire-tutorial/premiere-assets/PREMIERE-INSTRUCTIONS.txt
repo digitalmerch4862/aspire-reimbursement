@@ -1,0 +1,71 @@
+ASPIRE REIMBURSEMENT TUTORIAL - PREMIERE INSTRUCTIONS
+=====================================================
+
+GOAL
+Create a 3:46 tutorial video from the provided asset pack.
+
+SOURCE FOLDER
+C:\Users\Admin\Desktop\App\Aspire Reimbursement\aspire-tutorial\premiere-assets
+
+ASSETS
+- screen.mp4: main screen recording, 1260 x 992, 30 fps, 214 seconds
+- intro_card.png: opening title card
+- captions\caption_1.png to captions\caption_8.png: transparent caption overlays
+- voiceover\master_voiceover_timeline.wav: complete timed voiceover
+- voiceover\vo_1.mp3 to voiceover\vo_8.mp3: separate voiceover lines, backup/manual option
+- CUE-SHEET.txt: exact clip timecodes
+
+PREMIERE SETUP
+1. Open Adobe Premiere Pro.
+2. Create a new project.
+3. Import the full premiere-assets folder.
+4. Right-click screen.mp4, then choose New Sequence From Clip.
+5. Confirm sequence settings:
+   - Frame size: 1260 x 992
+   - Frame rate: 30 fps
+   - Audio: 48 kHz
+
+TIMELINE BUILD
+1. Move screen.mp4 so it starts at 00:00:12:00 on V1.
+2. Place intro_card.png on V1 from 00:00:00:00 to 00:00:12:00.
+3. Place voiceover\master_voiceover_timeline.wav on A1 starting at 00:00:00:00.
+4. Place caption overlays on V2 using CUE-SHEET.txt.
+5. Skip caption_1.png unless you want text visible over the intro card.
+
+TRACK LAYOUT
+- V1: intro_card.png, then screen.mp4
+- V2: caption PNG overlays
+- A1: master voiceover
+
+CAPTION TIMING
+- caption_2.png: 00:00:24:00 to 00:00:42:00
+- caption_3.png: 00:00:42:00 to 00:01:00:00
+- caption_4.png: 00:01:00:00 to 00:01:24:00
+- caption_5.png: 00:01:24:00 to 00:02:00:00
+- caption_6.png: 00:02:00:00 to 00:02:48:00
+- caption_7.png: 00:02:48:00 to 00:03:24:00
+- caption_8.png: 00:03:24:00 to 00:03:46:00
+
+OPTIONAL POLISH
+- Add a short Cross Dissolve from intro_card.png into screen.mp4.
+- Add 6-10 frame fade-ins and fade-outs on caption overlays.
+- Keep captions bottom-left. PNG files are already full-frame and positioned.
+- Set final audio peaks around -6 dB and integrated loudness near -16 LUFS if publishing online.
+
+EXPORT SETTINGS
+1. Export format: H.264
+2. Preset: Match Source - High Bitrate
+3. Output size: 1260 x 992
+4. Frame rate: 30 fps
+5. Bitrate: VBR 1-pass or 2-pass, target 10-16 Mbps
+6. Audio: AAC, 48 kHz, stereo, 320 kbps
+7. Suggested filename: Aspire-Reimbursement-Tutorial.mp4
+
+QUALITY CHECK
+- Intro appears for 12 seconds.
+- Screen recording starts at 00:00:12:00.
+- Voiceover starts at 00:00:01:00.
+- Captions appear slightly before matching narration.
+- Final video ends at 00:03:46:00.
+- No black frames at start or end.
+- Audio plays through full export.

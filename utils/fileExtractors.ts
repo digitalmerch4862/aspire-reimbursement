@@ -1,5 +1,5 @@
 import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
+import readXlsxFile from 'read-excel-file';
 import type { FilePayload } from '../services/openRouterClient';
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -12,7 +12,6 @@ const SUPPORTED_TYPES = new Set([
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
     'application/msword', // .doc
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-    'application/vnd.ms-excel', // .xls
 ]);
 
 function toBase64(buffer: ArrayBuffer): string {
@@ -42,16 +41,14 @@ export async function fileToPayload(file: File): Promise<FilePayload> {
         return { type: 'text', text: result.value };
     }
 
-    // XLSX / XLS
-    if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel') {
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
-        const lines: string[] = [];
-        workbook.SheetNames.forEach((name) => {
-            const sheet = workbook.Sheets[name];
-            lines.push(XLSX.utils.sheet_to_csv(sheet));
-        });
-        return { type: 'text', text: lines.join('\n\n') };
+    // XLSX only. Legacy .xls is intentionally unsupported because common parsers
+    // for it currently carry high-severity audit findings.
+    if (mime.includes('spreadsheetml')) {
+        const rows = await readXlsxFile(file);
+        const text = rows
+            .map((row) => row.map((cell) => String(cell ?? '')).join(','))
+            .join('\n');
+        return { type: 'text', text };
     }
 
     // PDF or image — send as base64 vision

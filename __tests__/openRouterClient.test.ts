@@ -1,5 +1,9 @@
 import { buildOpenRouterPayload, extractFromFile, extractTargetFromFile } from '../services/openRouterClient';
 
+jest.mock('../services/env', () => ({
+    getViteEnv: jest.fn(() => undefined),
+}));
+
 describe('buildOpenRouterPayload', () => {
     it('wraps image payload for api route', () => {
         const payload = buildOpenRouterPayload({ type: 'image', base64: 'abc123', mimeType: 'image/jpeg' });

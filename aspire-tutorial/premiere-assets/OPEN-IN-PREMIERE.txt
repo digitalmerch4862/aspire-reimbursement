@@ -1,0 +1,27 @@
+OPEN THIS IN PREMIERE
+=====================
+
+Use this file:
+Aspire-Reimbursement-Tutorial-Premiere.xml
+
+Steps:
+1. Open Adobe Premiere Pro.
+2. Go to File > Import.
+3. Select Aspire-Reimbursement-Tutorial-Premiere.xml.
+4. Open the imported sequence:
+   Aspire Reimbursement Tutorial - Edit Review
+
+What should already be placed:
+- intro_card.png on V1 from 00:00:00:00 to 00:00:12:00
+- screen.mp4 on V1 from 00:00:12:00 to 00:03:46:00
+- captions on V2
+- master_voiceover_timeline.wav on A1
+
+Check after import:
+- If Premiere asks to locate media, point it to this same folder.
+- If captions need adjustment, move clips on V2.
+- If audio needs adjustment, move or trim A1.
+- If video needs cropping/scale, adjust screen.mp4 on V1.
+
+Note:
+This is a Premiere-importable XML project layout. A native .prproj is proprietary and should be saved from Premiere after import.

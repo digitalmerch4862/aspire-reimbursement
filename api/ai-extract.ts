@@ -106,6 +106,11 @@ If the file is truly not a receipt or contains no usable receipt evidence, retur
 Return JSON only — no markdown, no explanation.`;
 
 const OPENAI_MODELS = ['gpt-4.1-mini', 'gpt-4o-mini'];
+const MAX_IMAGE_BASE64_CHARS = 14 * 1024 * 1024; // ~= 10 MB binary
+const MAX_TEXT_CHARS = 250_000;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 20;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']);
 
 type FilePayload =
     | { type: 'image'; base64: string; mimeType: string }
@@ -119,12 +124,62 @@ interface ExtractionResult {
     receiptDetails: string;
 }
 
+const rateLimitStore: Map<string, { count: number; resetAt: number }> =
+    (globalThis as any).__aiExtractRateLimitStore || ((globalThis as any).__aiExtractRateLimitStore = new Map());
+
 function getApiKey(): string {
     const key = process.env.OPENAI_API_KEY || process.env.VERCEL_ENV_OPENAI_API_KEY;
     if (!key) {
         throw new Error('Missing OPENAI_API_KEY server environment variable.');
     }
     return key;
+}
+
+function getRequiredApiKey(): string | null {
+    const key = process.env.AI_EXTRACT_API_KEY;
+    if (key) return key;
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        throw new Error('AI extraction access key is not configured.');
+    }
+    return null;
+}
+
+function getClientIp(req: any): string {
+    const forwarded = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+    return forwarded || String(req.socket?.remoteAddress || 'unknown');
+}
+
+function isRateLimited(req: any): boolean {
+    const key = getClientIp(req);
+    const now = Date.now();
+    const current = rateLimitStore.get(key);
+    if (!current || current.resetAt <= now) {
+        rateLimitStore.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return false;
+    }
+    current.count += 1;
+    return current.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+function authorize(req: any): boolean {
+    const requiredKey = getRequiredApiKey();
+    if (!requiredKey) return true;
+    const suppliedKey = String(req.headers?.['x-api-key'] || '');
+    return suppliedKey.length > 0 && suppliedKey === requiredKey;
+}
+
+function validateFilePayload(file: FilePayload): string | null {
+    if (file.type === 'image') {
+        if (!SUPPORTED_IMAGE_MIME_TYPES.has(file.mimeType)) return 'Unsupported file type.';
+        if (!file.base64 || file.base64.length > MAX_IMAGE_BASE64_CHARS) return 'File too large.';
+        if (!/^[A-Za-z0-9+/=]+$/.test(file.base64)) return 'Invalid image payload.';
+        return null;
+    }
+    if (file.type === 'text') {
+        if (typeof file.text !== 'string' || file.text.length > MAX_TEXT_CHARS) return 'Text payload too large.';
+        return null;
+    }
+    return 'Invalid extraction payload.';
 }
 
 function buildOpenAIPayload(file: FilePayload, model: string, prompt: string) {
@@ -227,6 +282,16 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
+        if (!authorize(req)) {
+            res.status(401).send('Unauthorized');
+            return;
+        }
+
+        if (isRateLimited(req)) {
+            res.status(429).send('Too Many Requests');
+            return;
+        }
+
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
         const file = body?.file as FilePayload | undefined;
         const target = body?.target as ExtractionTarget | undefined;
@@ -235,10 +300,24 @@ export default async function handler(req: any, res: any) {
             res.status(400).send('Invalid extraction payload.');
             return;
         }
+        if (target && target !== 'reimbursementForm' && target !== 'receiptDetails') {
+            res.status(400).send('Invalid extraction target.');
+            return;
+        }
+
+        const validationError = validateFilePayload(file);
+        if (validationError) {
+            res.status(400).send(validationError);
+            return;
+        }
 
         const result = await extract(file, target);
         res.status(200).json(result);
     } catch (error: any) {
-        res.status(500).send(error?.message || 'AI extraction failed.');
+        console.error('AI extraction failed:', error?.message || error);
+        const message = error?.message === 'AI extraction access key is not configured.'
+            ? error.message
+            : 'AI extraction failed.';
+        res.status(500).send(message);
     }
 }

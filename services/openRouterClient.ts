@@ -1,3 +1,5 @@
+import { getViteEnv } from './env';
+
 export type FilePayload =
     | { type: 'image'; base64: string; mimeType: string }
     | { type: 'text'; text: string };
@@ -14,6 +16,8 @@ interface ExtractionRequestBody {
     target?: ExtractionTarget;
 }
 
+const AI_EXTRACT_CLIENT_KEY = getViteEnv('VITE_AI_EXTRACT_CLIENT_KEY');
+
 export function buildOpenRouterPayload(file: FilePayload): ExtractionRequestBody {
     return { file };
 }
@@ -28,11 +32,16 @@ export async function extractTargetFromFile(file: FilePayload, target: Extractio
 }
 
 async function requestExtraction(body: ExtractionRequestBody): Promise<ExtractionResult> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+    if (AI_EXTRACT_CLIENT_KEY) {
+        headers['x-api-key'] = AI_EXTRACT_CLIENT_KEY;
+    }
+
     const response = await fetch('/api/ai-extract', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(body),
     });
 

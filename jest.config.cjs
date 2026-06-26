@@ -15,6 +15,8 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.(ts|tsx)'],
   modulePathIgnorePatterns: [
     '<rootDir>/.agent/',
+    '<rootDir>/.claude/',
+    '<rootDir>/playwright_profile/',
     '<rootDir>/temp_skills/',
     '<rootDir>/dist/'
   ],

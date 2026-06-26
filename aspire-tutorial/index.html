@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1260, height=992" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1260px;
+        height: 992px;
+        overflow: hidden;
+        background: #0b1220;
+      }
+      body {
+        font-family: "Inter", sans-serif;
+      }
+
+      /* ── Intro title card ── */
+      #intro {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        background: linear-gradient(160deg, #0b1220 0%, #162038 50%, #0b1220 100%);
+      }
+      #intro .accent-line {
+        width: 80px;
+        height: 4px;
+        background: #f5a623;
+        border-radius: 2px;
+      }
+      #intro .title {
+        font-size: 62px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.01em;
+        text-align: center;
+        line-height: 1.18;
+      }
+      #intro .title span {
+        color: #f5a623;
+      }
+      #intro .subtitle {
+        font-size: 26px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.65);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      #intro .logo-text {
+        font-size: 18px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.35);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        margin-top: 28px;
+      }
+
+      /* ── Screen recording ── */
+      #screen {
+        position: absolute;
+        inset: 0;
+        width: 1260px;
+        height: 992px;
+        object-fit: cover;
+        z-index: 0;
+      }
+
+      /* ── Lower-third caption (compact) ── */
+      .caption {
+        position: absolute;
+        left: 50%;
+        bottom: 32px;
+        transform: translateX(-50%);
+        width: 900px;
+        z-index: 10;
+        background: rgba(11, 18, 32, 0.88);
+        border-left: 3px solid #f5a623;
+        border-radius: 8px;
+        padding: 12px 22px 14px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      .caption .step {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #f5a623;
+        margin-bottom: 4px;
+      }
+      .caption .line {
+        font-size: 22px;
+        line-height: 1.35;
+        font-weight: 500;
+        color: #ffffff;
+      }
+
+      /* ── Top brand bar ── */
+      #brandbar {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        background: rgba(11, 18, 32, 0.82);
+        border: 1px solid rgba(245, 166, 35, 0.35);
+        border-radius: 999px;
+        padding: 8px 24px;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        color: #ffffff;
+      }
+      #brandbar b {
+        color: #f5a623;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="226"
+      data-width="1260"
+      data-height="992"
+    >
+      <!-- ── Intro title card (0–12s) ── -->
+      <div id="intro" class="clip" data-start="0" data-duration="12" data-track-index="4">
+        <div class="accent-line"></div>
+        <div class="title">Aspire <span>Reimbursement</span> Form</div>
+        <div class="subtitle">Step-by-Step Walkthrough</div>
+        <div class="logo-text">Aspire Homes</div>
+      </div>
+
+      <!-- ── Screen recording starts at 12s ── -->
+      <video
+        id="screen"
+        class="clip"
+        data-start="12"
+        data-duration="214"
+        data-media-start="0"
+        data-track-index="0"
+        src="assets/screen.mp4"
+        muted
+        playsinline
+      ></video>
+
+      <!-- ── Brand bar (appears with video) ── -->
+      <div
+        id="brandbar"
+        class="clip"
+        data-start="12"
+        data-duration="214"
+        data-track-index="3"
+      >
+        Aspire Reimbursement Form &nbsp;·&nbsp; <b>How to Use</b>
+      </div>
+
+      <!-- ── Voiceover (ElevenLabs · Bella) ── -->
+      <audio id="vo1" class="clip" data-start="1"    data-duration="9"  data-track-index="2" src="assets/vo_1.mp3" data-volume="1"></audio>
+      <audio id="vo2" class="clip" data-start="25"   data-duration="9"  data-track-index="2" src="assets/vo_2.mp3" data-volume="1"></audio>
+      <audio id="vo3" class="clip" data-start="43"   data-duration="6"  data-track-index="2" src="assets/vo_3.mp3" data-volume="1"></audio>
+      <audio id="vo4" class="clip" data-start="61"   data-duration="13" data-track-index="2" src="assets/vo_4.mp3" data-volume="1"></audio>
+      <audio id="vo5" class="clip" data-start="85"   data-duration="12" data-track-index="2" src="assets/vo_5.mp3" data-volume="1"></audio>
+      <audio id="vo6" class="clip" data-start="121"  data-duration="11" data-track-index="2" src="assets/vo_6.mp3" data-volume="1"></audio>
+      <audio id="vo7" class="clip" data-start="169"  data-duration="9"  data-track-index="2" src="assets/vo_7.mp3" data-volume="1"></audio>
+      <audio id="vo8" class="clip" data-start="205"  data-duration="11" data-track-index="2" src="assets/vo_8.mp3" data-volume="1"></audio>
+
+      <!-- ── Captions (synced, start after intro) ── -->
+      <div id="c1" class="caption clip" data-start="1"   data-duration="11" data-track-index="1">
+        <span class="step">Welcome</span>
+        <div class="line">This is the Aspire Reimbursement Form. Let's walk through how to complete and submit a reimbursement request.</div>
+      </div>
+      <div id="c2" class="caption clip" data-start="24"  data-duration="18" data-track-index="1">
+        <span class="step">Step 1 · Make a Copy</span>
+        <div class="line">Open the File menu and select Make a copy. Always work from your own copy, never the master template.</div>
+      </div>
+      <div id="c3" class="caption clip" data-start="42"  data-duration="18" data-track-index="1">
+        <span class="step">Step 2 · Open the Panel</span>
+        <div class="line">When your copy opens, a script runs automatically and the Reimbursement panel appears.</div>
+      </div>
+      <div id="c4" class="caption clip" data-start="60"  data-duration="24" data-track-index="1">
+        <span class="step">Step 3 · Solo or Group</span>
+        <div class="line">Choose Solo for one person, or Group for several. Set the Date From and Date To, then enter the Location.</div>
+      </div>
+      <div id="c5" class="caption clip" data-start="84"  data-duration="36" data-track-index="1">
+        <span class="step">Step 4 · Add Members</span>
+        <div class="line">For each member, enter the Staff Name, the YP Name, and the Amount. The Live Preview builds your form in real time.</div>
+      </div>
+      <div id="c6" class="caption clip" data-start="120" data-duration="48" data-track-index="1">
+        <span class="step">Step 5 · Add More Rows</span>
+        <div class="line">Click Add Group Row to include more participants. Each new row appears instantly in the preview.</div>
+      </div>
+      <div id="c7" class="caption clip" data-start="168" data-duration="36" data-track-index="1">
+        <span class="step">Step 6 · Review</span>
+        <div class="line">Once everyone is listed, review the staff names, YP names, and amounts against the live preview.</div>
+      </div>
+      <div id="c8" class="caption clip" data-start="204" data-duration="22" data-track-index="1">
+        <span class="step">Step 7 · Sync &amp; Export</span>
+        <div class="line">Click Sync to Sheet to save, then Export Preview to JPEG to download your finished Group Request Form.</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // ── Intro entrance (staggered, professional) ──
+      tl.from("#intro .accent-line", { scaleX: 0, duration: 0.5, ease: "power3.out" }, 0.3);
+      tl.from("#intro .title", { y: 30, opacity: 0, duration: 0.7, ease: "expo.out" }, 0.6);
+      tl.from("#intro .subtitle", { y: 20, opacity: 0, duration: 0.5, ease: "power2.out" }, 1.0);
+      tl.from("#intro .logo-text", { opacity: 0, duration: 0.4, ease: "power1.out" }, 1.4);
+
+      // ── Intro fade out before video ──
+      tl.to("#intro", { opacity: 0, duration: 0.8, ease: "power2.inOut" }, 10.5);
+
+      // ── Brand bar slides in with video ──
+      tl.from("#brandbar", { y: -24, opacity: 0, duration: 0.5, ease: "power3.out" }, 12.3);
+
+      // ── Caption entrances ──
+      const caps = [
+        ["#c1", 1.2],
+        ["#c2", 24],
+        ["#c3", 42],
+        ["#c4", 60],
+        ["#c5", 84],
+        ["#c6", 120],
+        ["#c7", 168],
+        ["#c8", 204],
+      ];
+      caps.forEach(([sel, t], i) => {
+        const ease = ["power3.out", "power2.out", "expo.out", "back.out(1.2)"][i % 4];
+        tl.from(sel, { y: 18, opacity: 0, duration: 0.4, ease }, t);
+      });
+
+      // ── Final fade ──
+      tl.to(["#c8", "#brandbar"], { opacity: 0, duration: 0.6, ease: "power2.in" }, 225.2);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
