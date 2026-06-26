@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, Send, RefreshCw } from 'lucide-react';
+import { AlertCircle, Send, RefreshCw, ClipboardPaste } from 'lucide-react';
 import { ProcessingState } from '../../types';
 
 interface FormVsReceiptTotals {
@@ -36,6 +36,14 @@ const SoloMode: React.FC<SoloModeProps> = ({
     reimbursementFormRef,
     formVsReceiptTotals,
 }) => {
+    const pasteInto = async (setter: (text: string) => void) => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) setter(text);
+        } catch {
+            // clipboard read blocked (permissions / insecure context) — user can paste manually
+        }
+    };
     return (
         <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden relative group">
             <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
@@ -48,31 +56,57 @@ const SoloMode: React.FC<SoloModeProps> = ({
                 )}
             </div>
             <div className="p-6 space-y-6">
-                <div className="space-y-5">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch relative">
                     <div className="space-y-3">
-                        <h3 className="text-sm font-medium text-slate-400">Reimbursement Form</h3>
+                        <div className="flex items-center justify-between gap-2 h-7">
+                            <h3 className="text-xs font-medium text-slate-400 whitespace-nowrap truncate">Reimbursement Form</h3>
+                            <button
+                                type="button"
+                                onClick={() => pasteInto(setReimbursementFormText)}
+                                className="flex-shrink-0 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-lg transition-colors"
+                                title="Paste from clipboard"
+                            >
+                                <ClipboardPaste size={14} />
+                            </button>
+                        </div>
                         <textarea
                             ref={reimbursementFormRef}
                             value={reimbursementFormText}
                             onChange={(e) => setReimbursementFormText(e.target.value)}
-                            placeholder={`Client's full name: Dylan Crane\nAddress: 3A Acre Street, Oran Park\nStaff member to reimburse: Isaac Thompson\nApproved by: Isaac Thompson\n\nParticular | Date Purchased | Amount | On Charge Y/N\nPocket Money | 15.2.25 | $20 | N\nTakeout | 12.2.26 | $19.45 | N\n\nTotal Amount: $39.45`}
-                            className="w-full h-56 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
+                            placeholder="Paste Reimbursement Form here…"
+                            className="w-full h-11 bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono whitespace-nowrap overflow-x-auto"
                         />
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    {/* Divider: horizontal on mobile, vertical between columns on desktop */}
+                    <div className="flex lg:hidden items-center gap-3">
                         <div className="h-px flex-1 bg-white/10" />
                         <span className="text-[10px] text-slate-500 uppercase tracking-widest">And/Or</span>
                         <div className="h-px flex-1 bg-white/10" />
                     </div>
+                    <div className="hidden lg:flex absolute inset-y-0 left-1/2 -translate-x-1/2 flex-col items-center pointer-events-none">
+                        <div className="w-px flex-1 bg-white/10" />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-widest py-2 bg-[#1c1e24] -mx-2 px-2">And/Or</span>
+                        <div className="w-px flex-1 bg-white/10" />
+                    </div>
 
                     <div className="space-y-3">
-                        <h3 className="text-sm font-medium text-slate-400">Receipt Details</h3>
+                        <div className="flex items-center justify-between gap-2 h-7">
+                            <h3 className="text-xs font-medium text-slate-400 whitespace-nowrap truncate">Receipt Details</h3>
+                            <button
+                                type="button"
+                                onClick={() => pasteInto(setReceiptDetailsText)}
+                                className="flex-shrink-0 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-lg transition-colors"
+                                title="Paste from clipboard"
+                            >
+                                <ClipboardPaste size={14} />
+                            </button>
+                        </div>
                         <textarea
                             value={receiptDetailsText}
                             onChange={(e) => setReceiptDetailsText(e.target.value)}
-                            placeholder={`Receipt # | Unique ID / Fallback | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Hills 1% Milk 3L | Groceries | Included in total | $6.00 | Walang visible OR number\n1 | Hills 1% Milk 3L + Bread Loaf 650g + $6.00 + 29/01/2026 16:52 | Priceline Pharmacy | 29/01/2026 16:52 | Bread Loaf 650g | Groceries | Included in total | $6.00 | Same receipt as above\n2 | 126302897245 | (Handwritten - not clear) | 31/01/2026 | Cool & Creamy - Lolly | Takeaway | $90.00 | $90.00 | Matches Incentive entry\n\nGRAND TOTAL: $39.45`}
-                            className="w-full h-56 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono"
+                            placeholder="Paste Receipt Details here…"
+                            className="w-full h-11 bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors font-mono whitespace-nowrap overflow-x-auto"
                         />
                     </div>
                 </div>
