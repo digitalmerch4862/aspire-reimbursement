@@ -26,7 +26,8 @@ import {
     parseEmployeeData,
     serializeEmployeeData,
     makeEmployeeId,
-    mergeEmployeesByAccount,
+    dedupeByAccount,
+    isValidAccount,
     upsertEmployeeById,
     removeEmployeeById,
     xlsxRowsToRawText,
@@ -2239,14 +2240,23 @@ export const App = () => {
                 return;
             }
 
-            const { merged, pendingDeactivation } = mergeEmployeesByAccount(employeeList, incoming);
-            const incomingAccounts = new Set(incoming.map((e) => e.account.trim()));
-            const updatedCount = employeeList.filter((e) => incomingAccounts.has(e.account.trim())).length;
-            const newCount = incoming.length - updatedCount;
+            // Replace-all: the uploaded file is the single source of truth. Wipe the
+            // current list and load the file, deduped by account (last row wins),
+            // dropping any garbage rows whose account is not numeric.
+            const previousCount = employeeList.length;
+            const nextList = dedupeByAccount(incoming);
+            const droppedInvalid = incoming.length - incoming.filter((e) => isValidAccount(e.account)).length;
+            const collapsedDupes = incoming.filter((e) => isValidAccount(e.account)).length - nextList.length;
 
-            await persistEmployeeList(merged);
-            persistPendingDeactivationEmployees(pendingDeactivation);
-            setCsvImportMessage(`Merged: ${updatedCount} updated, ${newCount} new, ${pendingDeactivation.length} moved to approval-to-deactivate.`);
+            await persistEmployeeList(nextList);
+            persistPendingDeactivationEmployees([]);
+            setEmployeePage(0);
+
+            const extras: string[] = [];
+            if (collapsedDupes > 0) extras.push(`${collapsedDupes} duplicate(s) collapsed`);
+            if (droppedInvalid > 0) extras.push(`${droppedInvalid} invalid row(s) skipped`);
+            const suffix = extras.length ? ` (${extras.join(', ')})` : '';
+            setCsvImportMessage(`Replaced active list: ${nextList.length} employees from file (was ${previousCount})${suffix}.`);
         } catch (error) {
             console.error('Roster import failed:', error);
             setCsvImportMessage('Import failed. Use a clean .xlsx or .csv with the expected columns.');
@@ -2980,34 +2990,52 @@ export const App = () => {
             const headerLine = lines[0].toLowerCase();
             const employeeRows = lines.slice(1);
             
-            const employees = employeeRows.map(line => {
+            // Build rows, keep only valid numeric accounts, and dedupe by account
+            // (last wins) so the onConflict:'account' upsert never hits a same-batch
+            // duplicate. This mirrors the local dedupeByAccount used on upload.
+            const byAccount = new Map<string, { first_name: string; surname: string; concatenate: string; bsb: string | null; account: string }>();
+            employeeRows.forEach(line => {
                 const parts = line.split('\t').map(p => p.trim());
-                if (parts.length < 2) return null;
+                if (parts.length < 2) return;
                 const [firstName, surname, concatenate, bsb, account] = parts;
-                return {
+                const acct = (account || '').trim();
+                if (!isValidAccount(acct)) return;
+                byAccount.set(acct, {
                     first_name: firstName || '',
                     surname: surname || '',
                     concatenate: concatenate || `${surname}, ${firstName}`,
                     bsb: bsb || null,
-                    account: account || null
-                };
-            }).filter(Boolean);
+                    account: acct,
+                });
+            });
+            const employees = Array.from(byAccount.values());
+            if (employees.length === 0) return { success: false, error: 'No valid employee rows' };
 
+            // Replace-all: clear the table, then load the file. Account is the unique
+            // identity, so a same-name / different-account pair is preserved (the old
+            // onConflict:'surname,first_name' silently merged them).
             const { error: deleteError } = await supabase.from('employees').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             if (deleteError) {
                 console.warn('Failed to clear employees:', deleteError);
             }
 
-            const { data, error } = await supabase
-                .from('employees')
-                .upsert(employees, { onConflict: 'surname,first_name' })
-                .select();
-            
-            if (error) {
-                console.error('Failed to save employees to Supabase:', error);
-                return { success: false, error: error.message };
+            // Insert in chunks so a large roster (hundreds of rows) stays within payload
+            // limits. upsert onConflict:'account' keeps the write idempotent even if the
+            // delete above did not fully clear the table.
+            const CHUNK = 500;
+            let saved = 0;
+            for (let i = 0; i < employees.length; i += CHUNK) {
+                const slice = employees.slice(i, i + CHUNK);
+                const { error } = await supabase
+                    .from('employees')
+                    .upsert(slice, { onConflict: 'account' });
+                if (error) {
+                    console.error('Failed to save employees to Supabase:', error);
+                    return { success: false, error: error.message };
+                }
+                saved += slice.length;
             }
-            return { success: true, count: employees.length };
+            return { success: true, count: saved };
         } catch (e) {
             console.error('Error saving employees to Supabase:', e);
             return { success: false, error: String(e) };
@@ -8644,7 +8672,7 @@ export const App = () => {
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <h3 className="text-lg font-medium text-white">Employee Database</h3>
-                                            <p className="text-sm text-slate-400">Upload a new CSV to replace active staff list. Missing accounts go to approval queue, not auto-delete.</p>
+                                            <p className="text-sm text-slate-400">Uploading a file replaces the entire active list — the file is the source of truth. Duplicate account numbers are collapsed (newest wins).</p>
                                         </div>
                                         <div className="flex gap-3">
                                             <input

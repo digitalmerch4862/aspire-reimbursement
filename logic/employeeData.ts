@@ -90,53 +90,25 @@ export const serializeEmployeeData = (employees: Employee[]): string => {
     return [header, ...rows].join('\n');
 };
 
-// Merges an incoming roster into the current list keyed by trimmed account number.
-// Account is the unique identity: the result NEVER contains two rows with the same
-// account. Duplicates are collapsed — both pre-existing duplicates in `current` and
-// repeated account rows within `incoming` (last occurrence wins for the latter).
-export const mergeEmployeesByAccount = (
-    current: Employee[],
-    incoming: Employee[],
-): { merged: Employee[]; pendingDeactivation: Employee[] } => {
-    // mergedByAccount preserves insertion order: current first (deduped), new appended.
-    const mergedByAccount = new Map<string, Employee>();
-    current.forEach((e) => {
+// An account number is valid only when it is all digits (Australian bank accounts).
+// This filters out garbage rows produced by misaligned uploads, e.g. a scraped
+// payee list where the account column held UI text like "Edit/Delete".
+export const isValidAccount = (account: string): boolean => /^\d+$/.test(String(account || '').trim());
+
+// Collapses a roster so that no two rows share an account number. Garbage rows with a
+// non-numeric account are dropped. When the same account appears more than once the
+// LAST occurrence wins (newest data replaces the old), keeping the first-seen position.
+// Used for file uploads where the file is the single source of truth (replace-all).
+export const dedupeByAccount = (list: Employee[]): Employee[] => {
+    const byAccount = new Map<string, Employee>();
+    list.forEach((e) => {
         const key = e.account.trim();
-        if (!key) return;
-        // First occurrence of a current account wins its slot/id.
-        if (!mergedByAccount.has(key)) mergedByAccount.set(key, e);
+        if (!isValidAccount(key)) return;
+        // Map keeps the first insertion position for a key while letting us overwrite
+        // its value, so order = first occurrence, data = last occurrence.
+        byAccount.set(key, { ...e, account: key, fullName: `${e.firstName} ${e.surname}` });
     });
-
-    const incomingAccounts = new Set<string>();
-    incoming.forEach((row) => {
-        const key = row.account.trim();
-        if (!key) return;
-        incomingAccounts.add(key);
-        const existing = mergedByAccount.get(key);
-        mergedByAccount.set(key, {
-            // Keep the existing id (and slot) when the account already exists; otherwise
-            // mint a stable new id. Either way only ONE entry exists per account.
-            id: existing ? existing.id : makeEmployeeId(row.firstName, row.surname, key, `add_${key}`),
-            firstName: row.firstName,
-            surname: row.surname,
-            fullName: `${row.firstName} ${row.surname}`,
-            bsb: row.bsb,
-            account: row.account,
-        });
-    });
-
-    const merged = Array.from(mergedByAccount.values());
-
-    // Current accounts absent from the incoming file → queued for deactivation (deduped).
-    const seenPending = new Set<string>();
-    const pendingDeactivation = current.filter((e) => {
-        const key = e.account.trim();
-        if (!key || incomingAccounts.has(key) || seenPending.has(key)) return false;
-        seenPending.add(key);
-        return true;
-    });
-
-    return { merged, pendingDeactivation };
+    return Array.from(byAccount.values());
 };
 
 export const upsertEmployeeById = (list: Employee[], rec: Employee): Employee[] => {
