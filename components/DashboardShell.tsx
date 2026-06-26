@@ -21,7 +21,7 @@ const DashboardShell: React.FC<DashboardShellProps> = ({ children }) => {
 
   const renderNavButton = (item: DashboardNavItem, layout: 'side' | 'bottom') => {
     const Icon = ICONS[item.icon];
-    const isActive = item.kind === 'internal' && activeId === item.id;
+    const isActive = activeId === item.id;
     const base =
       'group flex items-center justify-center transition-colors rounded-xl ' +
       (layout === 'side'
@@ -37,10 +37,18 @@ const DashboardShell: React.FC<DashboardShellProps> = ({ children }) => {
         <a
           key={item.id}
           href={item.url}
-          target="_blank"
+          // Stable window name (item.id) instead of "_blank":
+          // re-clicking reuses & focuses the same tab rather than
+          // spawning a new one each time.
+          target={item.id}
           rel="noopener noreferrer"
           title={item.label}
           className={className}
+          onClick={(e) => {
+            e.preventDefault();
+            window.open(item.url, item.id);
+            setActiveId(item.id);
+          }}
         >
           <Icon size={20} />
           {layout === 'bottom' && (
