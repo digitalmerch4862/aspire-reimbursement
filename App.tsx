@@ -2174,6 +2174,13 @@ export const App = () => {
     const handleSaveEmployeeModal = async () => {
         if (!employeeModal) return;
         const errors = validateEmployeeDraft(employeeModal.draft);
+        // Account number is the unique identity — block creating a second row with an
+        // account that already belongs to a different employee.
+        const accountKey = employeeModal.draft.account.trim();
+        const accountClash = employeeList.some((e) => e.account.trim() === accountKey && e.id !== employeeModal.id);
+        if (accountClash) {
+            errors.account = 'Account already exists for another employee';
+        }
         if (Object.keys(errors).length > 0) {
             setEmployeeModal({ ...employeeModal, errors });
             return;

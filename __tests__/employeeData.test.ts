@@ -61,6 +61,43 @@ describe('mergeEmployeesByAccount', () => {
         expect(merged.some((e) => e.account === '99999999')).toBe(true);
         expect(pendingDeactivation.map((e) => e.account)).toEqual(['10260865']);
     });
+
+    test('collapses duplicate account rows within the incoming file (last wins)', () => {
+        const incoming: Employee[] = [
+            { id: 'x', firstName: 'New', surname: 'Hire', fullName: 'New Hire', bsb: '012345', account: '99999999' },
+            { id: 'y', firstName: 'New', surname: 'Hire-Updated', fullName: 'New Hire-Updated', bsb: '777777', account: '99999999' },
+        ];
+        const { merged } = mergeEmployeesByAccount(current, incoming);
+        const dupes = merged.filter((e) => e.account === '99999999');
+        expect(dupes).toHaveLength(1);
+        expect(dupes[0].surname).toBe('Hire-Updated');
+        expect(dupes[0].bsb).toBe('777777');
+    });
+
+    test('never produces two rows with the same account number', () => {
+        const incoming: Employee[] = [
+            { id: 'x', firstName: 'Aaron', surname: 'Gray', fullName: 'Aaron Gray', bsb: '923100', account: '65609461' },
+            { id: 'x2', firstName: 'Aaron', surname: 'Gray', fullName: 'Aaron Gray', bsb: '923100', account: '65609461' },
+            { id: 'y', firstName: 'New', surname: 'Hire', fullName: 'New Hire', bsb: '012345', account: '99999999' },
+        ];
+        const { merged } = mergeEmployeesByAccount(current, incoming);
+        const accounts = merged.map((e) => e.account);
+        expect(new Set(accounts).size).toBe(accounts.length);
+    });
+
+    test('dedupes pre-existing duplicate accounts in the current list', () => {
+        const dupeCurrent: Employee[] = [
+            { id: 'c1', firstName: 'Aaron', surname: 'Gray', fullName: 'Aaron Gray', bsb: '923100', account: '65609461' },
+            { id: 'c1b', firstName: 'Aaron', surname: 'Gray', fullName: 'Aaron Gray', bsb: '923100', account: '65609461' },
+        ];
+        const incoming: Employee[] = [
+            { id: 'x', firstName: 'New', surname: 'Hire', fullName: 'New Hire', bsb: '012345', account: '99999999' },
+        ];
+        const { merged, pendingDeactivation } = mergeEmployeesByAccount(dupeCurrent, incoming);
+        expect(merged.filter((e) => e.account === '65609461')).toHaveLength(1);
+        // duplicate '65609461' surfaces once in the deactivation queue, not twice
+        expect(pendingDeactivation.filter((e) => e.account === '65609461')).toHaveLength(1);
+    });
 });
 
 describe('upsert/remove by id', () => {

@@ -90,37 +90,52 @@ export const serializeEmployeeData = (employees: Employee[]): string => {
     return [header, ...rows].join('\n');
 };
 
+// Merges an incoming roster into the current list keyed by trimmed account number.
+// Account is the unique identity: the result NEVER contains two rows with the same
+// account. Duplicates are collapsed — both pre-existing duplicates in `current` and
+// repeated account rows within `incoming` (last occurrence wins for the latter).
 export const mergeEmployeesByAccount = (
     current: Employee[],
     incoming: Employee[],
 ): { merged: Employee[]; pendingDeactivation: Employee[] } => {
-    const currentByAccount = new Map(current.map((e) => [e.account.trim(), e]));
-    const incomingAccounts = new Set(incoming.map((e) => e.account.trim()));
-
-    const merged: Employee[] = current.map((e) => e);
-
-    incoming.forEach((row) => {
-        const key = row.account.trim();
-        const existing = currentByAccount.get(key);
-        if (existing) {
-            const idx = merged.findIndex((e) => e.id === existing.id);
-            merged[idx] = {
-                ...existing,
-                firstName: row.firstName,
-                surname: row.surname,
-                bsb: row.bsb,
-                fullName: `${row.firstName} ${row.surname}`,
-            };
-        } else {
-            merged.push({
-                ...row,
-                fullName: `${row.firstName} ${row.surname}`,
-                id: makeEmployeeId(row.firstName, row.surname, key, `add_${key}`),
-            });
-        }
+    // mergedByAccount preserves insertion order: current first (deduped), new appended.
+    const mergedByAccount = new Map<string, Employee>();
+    current.forEach((e) => {
+        const key = e.account.trim();
+        if (!key) return;
+        // First occurrence of a current account wins its slot/id.
+        if (!mergedByAccount.has(key)) mergedByAccount.set(key, e);
     });
 
-    const pendingDeactivation = current.filter((e) => !incomingAccounts.has(e.account.trim()));
+    const incomingAccounts = new Set<string>();
+    incoming.forEach((row) => {
+        const key = row.account.trim();
+        if (!key) return;
+        incomingAccounts.add(key);
+        const existing = mergedByAccount.get(key);
+        mergedByAccount.set(key, {
+            // Keep the existing id (and slot) when the account already exists; otherwise
+            // mint a stable new id. Either way only ONE entry exists per account.
+            id: existing ? existing.id : makeEmployeeId(row.firstName, row.surname, key, `add_${key}`),
+            firstName: row.firstName,
+            surname: row.surname,
+            fullName: `${row.firstName} ${row.surname}`,
+            bsb: row.bsb,
+            account: row.account,
+        });
+    });
+
+    const merged = Array.from(mergedByAccount.values());
+
+    // Current accounts absent from the incoming file → queued for deactivation (deduped).
+    const seenPending = new Set<string>();
+    const pendingDeactivation = current.filter((e) => {
+        const key = e.account.trim();
+        if (!key || incomingAccounts.has(key) || seenPending.has(key)) return false;
+        seenPending.add(key);
+        return true;
+    });
+
     return { merged, pendingDeactivation };
 };
 
