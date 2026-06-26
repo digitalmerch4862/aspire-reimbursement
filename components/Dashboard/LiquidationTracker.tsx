@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, CheckCircle2, User, DollarSign, Calendar } from 'lucide-react';
+import { AlertCircle, User, DollarSign, Calendar } from 'lucide-react';
 
 interface OutstandingLiquidation {
     id: string;
@@ -16,17 +16,7 @@ interface LiquidationTrackerProps {
 
 const LiquidationTracker: React.FC<LiquidationTrackerProps> = ({ items, onSettle, isSettling }) => {
     if (items.length === 0) {
-        return (
-            <div className="bg-emerald-500/5 backdrop-blur-md rounded-2xl border border-emerald-500/20 px-4 py-3 flex items-center gap-3">
-                <div className="w-8 h-8 bg-emerald-500/10 rounded-full flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="text-emerald-400" size={16} />
-                </div>
-                <div className="min-w-0">
-                    <h3 className="text-white font-bold text-sm leading-tight">All Clear</h3>
-                    <p className="text-slate-400 text-xs">No outstanding liquidations found.</p>
-                </div>
-            </div>
-        );
+        return null;
     }
 
     return (
