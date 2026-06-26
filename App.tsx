@@ -4442,10 +4442,16 @@ export const App = () => {
 
         // 4. Update NAB Code in Text Blob
         // Regex: Look for "NAB Code:"
+        const oldNabWasPending = isPendingNabCodeValue(String(originalRecord.nab_code || ''));
+        const newNabIsValid = isValidNabReference(editedRowData.nabCode);
         if (newContent.match(/NAB (?:Code|Reference):/)) {
             newContent = newContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/, `$1${editedRowData.nabCode}$3`);
         } else {
             newContent += `\n**NAB Code:** ${editedRowData.nabCode}`;
+        }
+        if (oldNabWasPending && newNabIsValid) {
+            newContent = newContent.replace(/\n*<!-- NAB_RESOLVED_AT:.*?-->/g, '');
+            newContent += `\n<!-- NAB_RESOLVED_AT: ${new Date().toISOString()} -->`;
         }
 
         // Optimistic Update (Local State)
@@ -4528,11 +4534,17 @@ export const App = () => {
                     }
 
                     if (massEditData.nabCode) {
+                        const massOldPending = isPendingNabCodeValue(String(originalRecord.nab_code || ''));
+                        const massNewValid = isValidNabReference(massEditData.nabCode);
                         nextRecord.nab_code = massEditData.nabCode;
                         if (newContent.match(/NAB (?:Code|Reference):/)) {
                             newContent = newContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/, `$1${massEditData.nabCode}$3`);
                         } else {
                             newContent += `\n**NAB Code:** ${massEditData.nabCode}`;
+                        }
+                        if (massOldPending && massNewValid) {
+                            newContent = newContent.replace(/\n*<!-- NAB_RESOLVED_AT:.*?-->/g, '');
+                            newContent += `\n<!-- NAB_RESOLVED_AT: ${new Date().toISOString()} -->`;
                         }
                     }
 
@@ -4627,11 +4639,17 @@ export const App = () => {
 
                 // 3. NAB Code
                 if (massEditData.nabCode) {
+                    const singleOldPending = isPendingNabCodeValue(String(originalRecord.nab_code || ''));
+                    const singleNewValid = isValidNabReference(massEditData.nabCode);
                     dbUpdates.nab_code = massEditData.nabCode;
                     if (newContent.match(/NAB (?:Code|Reference):/)) {
                         newContent = newContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/, `$1${massEditData.nabCode}$3`);
                     } else {
                         newContent += `\n**NAB Code:** ${massEditData.nabCode}`;
+                    }
+                    if (singleOldPending && singleNewValid) {
+                        newContent = newContent.replace(/\n*<!-- NAB_RESOLVED_AT:.*?-->/g, '');
+                        newContent += `\n<!-- NAB_RESOLVED_AT: ${new Date().toISOString()} -->`;
                     }
                 }
 
@@ -5433,6 +5451,8 @@ export const App = () => {
                 .map((record: any) => {
                     let updatedContent = record.full_email_content || '';
 
+                    const wasPending = updatedContent.includes('<!-- STATUS: PENDING -->') || isPendingNabCodeValue(record.nab_code);
+
                     if (updatedContent.includes('<!-- STATUS: PENDING -->')) {
                         updatedContent = updatedContent.replace(/<!-- STATUS: PENDING -->/g, '<!-- STATUS: PAID -->');
                     } else if (!updatedContent.includes('<!-- STATUS: PAID -->')) {
@@ -5443,6 +5463,11 @@ export const App = () => {
                         updatedContent = updatedContent.replace(/(NAB (?:Code|Reference):(?:\*\*|)\s*)(.*?)(\n|$)/i, `$1${approvedNabCode}$3`);
                     } else {
                         updatedContent += `\n**NAB Code:** ${approvedNabCode}`;
+                    }
+
+                    if (wasPending) {
+                        updatedContent = updatedContent.replace(/\n*<!-- NAB_RESOLVED_AT:.*?-->/g, '');
+                        updatedContent += `\n<!-- NAB_RESOLVED_AT: ${new Date().toISOString()} -->`;
                     }
 
                     return {
@@ -6583,14 +6608,39 @@ export const App = () => {
     const generateEODSchedule = (records: any[]) => {
         let currentTime = new Date();
         currentTime.setHours(6, 59, 0, 0);
+        const todayNow = new Date();
 
-        const scheduled = records.map(record => {
+        const expandedRecords: Array<{ record: any; isBackJob: boolean; isPendingHalf: boolean }> = [];
+        for (const record of records) {
+            const content = record.full_email_content || '';
+            const resolvedMatch = content.match(/<!-- NAB_RESOLVED_AT:\s*(.*?)\s*-->/);
+            const isResolvedToday = resolvedMatch && isWithinWeekdayResetWindow(resolvedMatch[1], todayNow);
+            const isCreatedToday = isWithinWeekdayResetWindow(record.created_at, todayNow);
+            const hasBackJobPair = !!(isResolvedToday && !isCreatedToday);
+
+            if (hasBackJobPair) {
+                expandedRecords.push({ record, isBackJob: false, isPendingHalf: true });
+                expandedRecords.push({ record, isBackJob: true, isPendingHalf: false });
+            } else {
+                expandedRecords.push({ record, isBackJob: false, isPendingHalf: false });
+            }
+        }
+
+        const scheduled = expandedRecords.map(({ record, isBackJob, isPendingHalf }) => {
             const hasValidNabCode = isValidNabReference(record.nabRef);
-            const activity = record.isReceiptLiquidation
-                ? 'Audit'
-                : record.isVipManual
-                ? 'Audit'
-                : hasValidNabCode ? 'Reimbursement' : 'Pending';
+
+            let activity: string;
+            if (isBackJob) {
+                activity = 'Reimbursement';
+            } else if (isPendingHalf) {
+                activity = 'Pending';
+            } else if (record.isReceiptLiquidation) {
+                activity = 'Audit';
+            } else if (record.isVipManual) {
+                activity = 'Audit';
+            } else {
+                activity = hasValidNabCode ? 'Reimbursement' : 'Pending';
+            }
 
             const startTime = new Date(currentTime);
             startTime.setMinutes(startTime.getMinutes() + 1);
@@ -6610,7 +6660,9 @@ export const App = () => {
             const timeEndStr = endTime.toLocaleTimeString('en-GB', { hour12: false });
 
             let status = '';
-            if (record.isReceiptLiquidation) {
+            if (isBackJob) {
+                status = `Paid to Nab [${record.nabRef}] (Back Job)`;
+            } else if (record.isReceiptLiquidation) {
                 status = 'Liquidation';
             } else if (record.isVipManual) {
                 status = hasValidNabCode
@@ -6638,6 +6690,7 @@ export const App = () => {
 
             return {
                 ...record,
+                id: isBackJob ? `${record.id}-backjob` : record.id,
                 eodTimeStart: timeStartStr,
                 eodTimeEnd: timeEndStr,
                 eodActivity: activity,
@@ -6677,9 +6730,23 @@ export const App = () => {
 
     const todaysProcessedRecords = useMemo<any[]>(() => {
         const now = new Date(nowTick);
-        return logEligibleRecords
-            .filter(r => isWithinWeekdayResetWindow(r.created_at, now))
-            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        const createdToday = logEligibleRecords.filter(r => isWithinWeekdayResetWindow(r.created_at, now));
+        const resolvedToday = logEligibleRecords.filter(r => {
+            if (isWithinWeekdayResetWindow(r.created_at, now)) return false;
+            const content = r.full_email_content || '';
+            const resolvedMatch = content.match(/<!-- NAB_RESOLVED_AT:\s*(.*?)\s*-->/);
+            if (!resolvedMatch) return false;
+            return isWithinWeekdayResetWindow(resolvedMatch[1], now);
+        });
+        const seen = new Set(createdToday.map(r => r.id));
+        const merged = [...createdToday];
+        for (const r of resolvedToday) {
+            if (!seen.has(r.id)) {
+                seen.add(r.id);
+                merged.push(r);
+            }
+        }
+        return merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }, [logEligibleRecords, nowTick]);
 
     const pendingApprovalRecords = useMemo(() => {
