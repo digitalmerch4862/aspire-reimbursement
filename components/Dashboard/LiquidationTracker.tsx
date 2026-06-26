@@ -17,12 +17,14 @@ interface LiquidationTrackerProps {
 const LiquidationTracker: React.FC<LiquidationTrackerProps> = ({ items, onSettle, isSettling }) => {
     if (items.length === 0) {
         return (
-            <div className="bg-emerald-500/5 backdrop-blur-md rounded-[32px] border border-emerald-500/20 p-8 text-center">
-                <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <CheckCircle2 className="text-emerald-400" size={32} />
+            <div className="bg-emerald-500/5 backdrop-blur-md rounded-2xl border border-emerald-500/20 px-4 py-3 flex items-center gap-3">
+                <div className="w-8 h-8 bg-emerald-500/10 rounded-full flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="text-emerald-400" size={16} />
                 </div>
-                <h3 className="text-white font-bold text-lg mb-1">All Clear</h3>
-                <p className="text-slate-400 text-sm">No outstanding liquidations found.</p>
+                <div className="min-w-0">
+                    <h3 className="text-white font-bold text-sm leading-tight">All Clear</h3>
+                    <p className="text-slate-400 text-xs">No outstanding liquidations found.</p>
+                </div>
             </div>
         );
     }

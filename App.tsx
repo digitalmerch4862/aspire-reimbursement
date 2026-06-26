@@ -4181,6 +4181,12 @@ export const App = () => {
         return items;
     }, [currentInputTransactions, fraudInputTransactions, databaseRows, reimbursementFormText, receiptDetailsText, rulesConfig, duplicateCheckResult, overLimitTransactionCount, isOver300ApprovalRequired, currentInputOverallAmount, currentInputAgedCount, hasFraudDuplicate, formVsReceiptTotals, requestMode]);
 
+    // Rules Status panel shows red (blocked) rules only — warning/pass stay hidden
+    const blockedRulesStatusItems = useMemo(
+        () => rulesStatusItems.filter(rule => rule.status === 'blocked'),
+        [rulesStatusItems]
+    );
+
     // Drag Selection State
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
     const [dragStartId, setDragStartId] = useState<string | null>(null);
@@ -7493,11 +7499,11 @@ export const App = () => {
 
                             {showSupportColumn && (
                                 <div className="space-y-6 min-w-0">
-                                    {hasRuleInput && (
+                                    {hasRuleInput && blockedRulesStatusItems.length > 0 && (
                                         <div className="bg-[#1c1e24]/60 backdrop-blur-md rounded-[32px] border border-white/5 shadow-lg p-6 relative">
                                             <h3 className="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest pl-1">Rules Status</h3>
                                             <div className="space-y-3 pl-1">
-                                                {rulesStatusItems.map((rule) => {
+                                                {blockedRulesStatusItems.map((rule) => {
                                                     const isBlocked = rule.status === 'blocked';
                                                     const isWarning = rule.status === 'warning';
                                                     const isExactFraudBlocked = rule.id === 'r1' && isBlocked;
@@ -7570,7 +7576,7 @@ export const App = () => {
                                         </div>
                                     )}
 
-                                    {requestMode === 'solo' && (
+                                    {requestMode === 'solo' && !(blockedRulesStatusItems.length > 0 && dbOutstandingLiquidations.length === 0) && (
                                         <LiquidationTracker
                                             items={dbOutstandingLiquidations}
                                             onSettle={handleSettleLiquidation}
