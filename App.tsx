@@ -3,8 +3,8 @@ import {
     Upload, X, FileText, FileSpreadsheet, CheckCircle, Loader2,
     HelpCircle, AlertCircle, RefreshCw, Send, LayoutDashboard, Edit2, Check,
     Copy, CreditCard, ClipboardList, ClipboardPaste, Calendar, BarChart3, PieChart, TrendingUp,
-    Users, Database, Search, Download, Save, CloudUpload, Trash2, Plus
-
+    Users, Database, Search, Download, Save, CloudUpload, Trash2, Plus,
+    MoreVertical, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
@@ -25,7 +25,13 @@ import {
     normalizeEmployeeName,
     parseEmployeeData,
     serializeEmployeeData,
+    makeEmployeeId,
+    mergeEmployeesByAccount,
+    upsertEmployeeById,
+    removeEmployeeById,
+    xlsxRowsToRawText,
 } from './logic/employeeData';
+import readXlsxFile from 'read-excel-file';
 
 import { hasSupabaseEnv, supabase } from './services/supabaseClient';
 
@@ -1477,6 +1483,9 @@ const buildManualAuditIssues = (
     return issues;
 };
 
+type EmployeeDraft = { firstName: string; surname: string; bsb: string; account: string };
+const emptyEmployeeDraft: EmployeeDraft = { firstName: '', surname: '', bsb: '', account: '' };
+
 export const App = () => {
     const DUPLICATE_LOOKBACK_DAYS = 30;
 
@@ -1641,6 +1650,29 @@ export const App = () => {
     const [csvImportMessage, setCsvImportMessage] = useState<string>('');
     const [saveEmployeeStatus, setSaveEmployeeStatus] = useState<'idle' | 'saved'>('idle');
     const employeeCsvInputRef = useRef<HTMLInputElement | null>(null);
+    const [employeeSearch, setEmployeeSearch] = useState('');
+    const [employeePage, setEmployeePage] = useState(0);
+    const [employeePageSize, setEmployeePageSize] = useState(10);
+    const [openEmployeeMenuId, setOpenEmployeeMenuId] = useState<string | null>(null);
+    const [showAdvancedEmployee, setShowAdvancedEmployee] = useState(false);
+    const [employeeModal, setEmployeeModal] = useState<
+        { mode: 'add' | 'edit'; id: string | null; draft: EmployeeDraft; errors: Record<string, string> } | null
+    >(null);
+    const [employeeDeleteTarget, setEmployeeDeleteTarget] = useState<Employee | null>(null);
+
+    const filteredEmployees = useMemo(() => {
+        const q = normalizeEmployeeName(employeeSearch);
+        if (!q) return employeeList;
+        return employeeList.filter((e) =>
+            normalizeEmployeeName(getEmployeeDisplayName(e)).includes(q) ||
+            e.account.includes(employeeSearch.trim()) ||
+            e.bsb.includes(employeeSearch.trim()));
+    }, [employeeList, employeeSearch]);
+
+    const pagedEmployees = useMemo(() => {
+        const start = employeePage * employeePageSize;
+        return filteredEmployees.slice(start, start + employeePageSize);
+    }, [filteredEmployees, employeePage, employeePageSize]);
 
     // Employee Selection State for Banking Details
     const [selectedEmployees, setSelectedEmployees] = useState<Map<number, Employee>>(new Map());
@@ -2100,24 +2132,71 @@ export const App = () => {
         }, 3000);
     };
 
-    const handleSaveEmployeeList = async () => {
-        localStorage.setItem('aspire_employee_list', employeeRawText);
-        setEmployeeList(parseEmployeeData(employeeRawText));
-        
+    const persistEmployeeList = async (next: Employee[]): Promise<void> => {
+        const serialized = serializeEmployeeData(next);
+        setEmployeeList(next);
+        setEmployeeRawText(serialized);
+        localStorage.setItem('aspire_employee_list', serialized);
         if (hasSupabaseEnv) {
-            const result = await saveEmployeesToSupabase(employeeRawText);
-            if (result.success) {
-                setSaveEmployeeStatus('saved');
-                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
-            } else {
-                setSaveEmployeeStatus('saved');
-                setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+            const result = await saveEmployeesToSupabase(serialized);
+            if (!result.success) {
                 showWarningToast(`Saved locally. Supabase sync failed: ${result.error}`);
             }
-        } else {
-            setSaveEmployeeStatus('saved');
-            setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
         }
+    };
+
+    const handleSaveEmployeeList = async () => {
+        await persistEmployeeList(parseEmployeeData(employeeRawText));
+        setSaveEmployeeStatus('saved');
+        setTimeout(() => setSaveEmployeeStatus('idle'), 2000);
+    };
+
+    const openEmployeeModal = (mode: 'add' | 'edit', emp?: Employee) => {
+        setEmployeeModal({
+            mode,
+            id: emp?.id ?? null,
+            draft: emp
+                ? { firstName: emp.firstName, surname: emp.surname, bsb: emp.bsb, account: emp.account }
+                : { ...emptyEmployeeDraft },
+            errors: {},
+        });
+    };
+
+    const validateEmployeeDraft = (d: EmployeeDraft): Record<string, string> => {
+        const errors: Record<string, string> = {};
+        if (!d.firstName.trim()) errors.firstName = 'Required';
+        if (!d.surname.trim()) errors.surname = 'Required';
+        if (!/^\d{6}$/.test(d.bsb.trim())) errors.bsb = 'BSB must be 6 digits';
+        if (!/^\d{6,10}$/.test(d.account.trim())) errors.account = 'Account must be 6–10 digits';
+        return errors;
+    };
+
+    const handleSaveEmployeeModal = async () => {
+        if (!employeeModal) return;
+        const errors = validateEmployeeDraft(employeeModal.draft);
+        if (Object.keys(errors).length > 0) {
+            setEmployeeModal({ ...employeeModal, errors });
+            return;
+        }
+        const d = employeeModal.draft;
+        const rec: Employee = {
+            id: employeeModal.id ?? makeEmployeeId(d.firstName, d.surname, d.account, `manual_${Date.now()}`),
+            firstName: d.firstName.trim(),
+            surname: d.surname.trim(),
+            fullName: `${d.firstName.trim()} ${d.surname.trim()}`,
+            bsb: d.bsb.trim(),
+            account: d.account.trim(),
+        };
+        await persistEmployeeList(upsertEmployeeById(employeeList, rec));
+        setCsvImportMessage(employeeModal.mode === 'add' ? `Added ${rec.fullName}.` : `Updated ${rec.fullName}.`);
+        setEmployeeModal(null);
+    };
+
+    const handleConfirmDeleteEmployee = async () => {
+        if (!employeeDeleteTarget) return;
+        await persistEmployeeList(removeEmployeeById(employeeList, employeeDeleteTarget.id));
+        setCsvImportMessage(`Deleted ${getEmployeeDisplayName(employeeDeleteTarget)}.`);
+        setEmployeeDeleteTarget(null);
     };
 
     const persistPendingDeactivationEmployees = (records: Employee[]) => {
@@ -2137,55 +2216,45 @@ export const App = () => {
     const handleCsvFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
-
         try {
-            const raw = await file.text();
-            const parsedEmployees = parseEmployeeData(raw);
+            const isXlsx = /\.xlsx$/i.test(file.name);
+            let raw: string;
+            if (isXlsx) {
+                const rows = await readXlsxFile(file);
+                raw = xlsxRowsToRawText(rows as any);
+            } else {
+                raw = await file.text();
+            }
 
-            if (parsedEmployees.length === 0) {
-                setCsvImportMessage('No valid rows found. Check CSV headers: First Names, Surname, BSB, Account.');
+            const incoming = parseEmployeeData(raw);
+            if (incoming.length === 0) {
+                setCsvImportMessage('No valid rows found. Check headers: First Names, Surname, BSB, Account.');
                 return;
             }
 
-            const newAccountSet = new Set(parsedEmployees.map((employee) => employee.account.trim()));
-            const pendingApproval = employeeList.filter((employee) => !newAccountSet.has(employee.account.trim()));
+            const { merged, pendingDeactivation } = mergeEmployeesByAccount(employeeList, incoming);
+            const incomingAccounts = new Set(incoming.map((e) => e.account.trim()));
+            const updatedCount = employeeList.filter((e) => incomingAccounts.has(e.account.trim())).length;
+            const newCount = incoming.length - updatedCount;
 
-            setEmployeeRawText(raw);
-            setEmployeeList(parsedEmployees);
-            localStorage.setItem('aspire_employee_list', raw);
-            
-            if (hasSupabaseEnv) {
-                await saveEmployeesToSupabase(raw);
-            }
-            
-            persistPendingDeactivationEmployees(pendingApproval);
-            setCsvImportMessage(`Imported ${parsedEmployees.length} active records. ${pendingApproval.length} account(s) moved to approval queue.`);
+            await persistEmployeeList(merged);
+            persistPendingDeactivationEmployees(pendingDeactivation);
+            setCsvImportMessage(`Merged: ${updatedCount} updated, ${newCount} new, ${pendingDeactivation.length} moved to approval-to-deactivate.`);
         } catch (error) {
-            console.error('CSV import failed:', error);
-            setCsvImportMessage('CSV import failed. Please try again with a clean .csv file.');
+            console.error('Roster import failed:', error);
+            setCsvImportMessage('Import failed. Use a clean .xlsx or .csv with the expected columns.');
         } finally {
-            if (event.target) {
-                event.target.value = '';
-            }
+            if (event.target) event.target.value = '';
         }
     };
 
     const handleKeepPendingEmployee = async (account: string) => {
         const target = pendingDeactivationEmployees.find((employee) => employee.account === account);
         if (!target) return;
-
         const nextActive = employeeList.some((employee) => employee.account === target.account)
             ? employeeList
             : [...employeeList, target];
-        setEmployeeList(nextActive);
-        const nextRaw = serializeEmployeeData(nextActive);
-        setEmployeeRawText(nextRaw);
-        localStorage.setItem('aspire_employee_list', nextRaw);
-
-        if (hasSupabaseEnv) {
-            await saveEmployeesToSupabase(nextRaw);
-        }
-
+        await persistEmployeeList(nextActive);
         const nextPending = pendingDeactivationEmployees.filter((employee) => employee.account !== account);
         persistPendingDeactivationEmployees(nextPending);
         setCsvImportMessage(`Kept account ${account} as active.`);
@@ -8573,16 +8642,22 @@ export const App = () => {
                                             <input
                                                 ref={employeeCsvInputRef}
                                                 type="file"
-                                                accept=".csv,text/csv,.txt"
+                                                accept=".xlsx,.csv,text/csv,.txt"
                                                 onChange={handleCsvFileChange}
                                                 className="hidden"
                                             />
+                                            <button
+                                                onClick={() => openEmployeeModal('add')}
+                                                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-2"
+                                            >
+                                                <Plus size={14} /> Add Employee
+                                            </button>
                                             <button
                                                 onClick={handleCsvUploadClick}
                                                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-2"
                                             >
                                                 <Upload size={14} />
-                                                Upload .CSV for Update
+                                                Upload File
                                             </button>
                                             <button
                                                 onClick={async () => {
@@ -8615,13 +8690,109 @@ export const App = () => {
                                             {csvImportMessage}
                                         </div>
                                     )}
-                                    <div className="bg-black/30 rounded-xl border border-white/10 p-1">
-                                        <textarea
-                                            value={employeeRawText}
-                                            onChange={(e) => setEmployeeRawText(e.target.value)}
-                                            className="w-full h-64 bg-transparent border-none text-slate-300 font-mono text-xs p-4 focus:ring-0 resize-y"
-                                            spellCheck={false}
-                                        />
+                                    {/* Search + count + page size */}
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                        <div className="relative w-full md:w-80">
+                                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                            <input
+                                                value={employeeSearch}
+                                                onChange={(e) => { setEmployeeSearch(e.target.value); setEmployeePage(0); }}
+                                                placeholder="Search name, account, BSB…"
+                                                className="w-full pl-9 pr-3 py-2 rounded-full bg-black/30 border border-white/10 text-sm text-white outline-none focus:border-indigo-500/50"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                                            <span>
+                                                {filteredEmployees.length === 0 ? '0' :
+                                                    `${employeePage * employeePageSize + 1}–${Math.min((employeePage + 1) * employeePageSize, filteredEmployees.length)}`} of {filteredEmployees.length}
+                                            </span>
+                                            <select
+                                                value={employeePageSize}
+                                                onChange={(e) => { setEmployeePageSize(Number(e.target.value)); setEmployeePage(0); }}
+                                                className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-white outline-none"
+                                            >
+                                                {[10, 25, 50].map((n) => <option key={n} value={n}>{n}/page</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Employee cards */}
+                                    <div className="space-y-2">
+                                        {pagedEmployees.length === 0 && (
+                                            <p className="text-xs text-slate-500">No employees match.</p>
+                                        )}
+                                        {pagedEmployees.map((emp) => (
+                                            <div key={emp.id} className="relative rounded-xl border border-white/10 bg-white/5 p-4 flex items-start justify-between">
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-semibold text-white">{getEmployeeDisplayName(emp)}</p>
+                                                    <p className="text-[11px] text-slate-400 uppercase">{`${emp.surname}, ${emp.firstName}`.toUpperCase()}</p>
+                                                    <div className="flex gap-6 pt-1 text-xs text-slate-300">
+                                                        <span><span className="text-slate-500">BSB </span>{emp.bsb}</span>
+                                                        <span><span className="text-slate-500">Account </span>{emp.account}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={() => setOpenEmployeeMenuId(openEmployeeMenuId === emp.id ? null : emp.id)}
+                                                        className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300"
+                                                        aria-label="Row actions"
+                                                    >
+                                                        <MoreVertical size={16} />
+                                                    </button>
+                                                    {openEmployeeMenuId === emp.id && (
+                                                        <div className="absolute right-0 mt-1 z-10 w-32 rounded-lg border border-white/10 bg-slate-800 shadow-lg overflow-hidden">
+                                                            <button
+                                                                onClick={() => { openEmployeeModal('edit', emp); setOpenEmployeeMenuId(null); }}
+                                                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+                                                            >
+                                                                <Edit2 size={14} /> Edit
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setEmployeeDeleteTarget(emp); setOpenEmployeeMenuId(null); }}
+                                                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10"
+                                                            >
+                                                                <Trash2 size={14} /> Delete
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Pagination */}
+                                    <div className="flex items-center justify-end gap-2 text-xs">
+                                        <button
+                                            disabled={employeePage === 0}
+                                            onClick={() => setEmployeePage((p) => Math.max(0, p - 1))}
+                                            className="px-2 py-1 rounded-lg bg-black/30 border border-white/10 text-slate-300 disabled:opacity-40"
+                                        ><ChevronLeft size={14} /></button>
+                                        <button
+                                            disabled={(employeePage + 1) * employeePageSize >= filteredEmployees.length}
+                                            onClick={() => setEmployeePage((p) => p + 1)}
+                                            className="px-2 py-1 rounded-lg bg-black/30 border border-white/10 text-slate-300 disabled:opacity-40"
+                                        ><ChevronRight size={14} /></button>
+                                    </div>
+
+                                    {/* Advanced raw edit (escape hatch) */}
+                                    <div>
+                                        <button
+                                            onClick={() => setShowAdvancedEmployee((v) => !v)}
+                                            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200"
+                                        >
+                                            <ChevronDown size={14} className={showAdvancedEmployee ? 'rotate-180 transition' : 'transition'} />
+                                            Advanced (raw edit)
+                                        </button>
+                                        {showAdvancedEmployee && (
+                                            <div className="mt-2 bg-black/30 rounded-xl border border-white/10 p-1">
+                                                <textarea
+                                                    value={employeeRawText}
+                                                    onChange={(e) => setEmployeeRawText(e.target.value)}
+                                                    className="w-full h-64 bg-transparent border-none text-slate-300 font-mono text-xs p-4 focus:ring-0 resize-y"
+                                                    spellCheck={false}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="bg-black/20 rounded-xl border border-amber-400/20 p-4 space-y-3">
@@ -9664,6 +9835,51 @@ export const App = () => {
                                         <Save size={18} />
                                         Update {selectedIds.size} Records
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {employeeModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEmployeeModal(null)}>
+                            <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-white/10 p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-lg font-semibold text-white">{employeeModal.mode === 'add' ? 'Add employee' : 'Edit employee'}</h3>
+                                    <button onClick={() => setEmployeeModal(null)} className="text-slate-400 hover:text-white"><X size={18} /></button>
+                                </div>
+                                {(['firstName', 'surname', 'bsb', 'account'] as const).map((field) => {
+                                    const label = field === 'firstName' ? 'First Name' : field === 'surname' ? 'Surname' : field === 'bsb' ? 'BSB' : 'Account number';
+                                    return (
+                                        <div key={field} className="space-y-1">
+                                            <label className="text-xs uppercase tracking-wider text-slate-400">{label}</label>
+                                            <input
+                                                value={employeeModal.draft[field]}
+                                                onChange={(e) => setEmployeeModal({ ...employeeModal, draft: { ...employeeModal.draft, [field]: e.target.value }, errors: { ...employeeModal.errors, [field]: '' } })}
+                                                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/50"
+                                            />
+                                            {employeeModal.errors[field] && <p className="text-[11px] text-red-400">{employeeModal.errors[field]}</p>}
+                                        </div>
+                                    );
+                                })}
+                                <p className="text-[11px] text-slate-500">Account name: {`${employeeModal.draft.surname}, ${employeeModal.draft.firstName}`.toUpperCase()}</p>
+                                <div className="flex justify-end gap-2 pt-2">
+                                    <button onClick={() => setEmployeeModal(null)} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider">Cancel</button>
+                                    <button onClick={handleSaveEmployeeModal} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Save size={14} /> Save</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {employeeDeleteTarget && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEmployeeDeleteTarget(null)}>
+                            <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-white/10 p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+                                <h3 className="text-lg font-semibold text-white">Delete employee?</h3>
+                                <p className="text-sm text-slate-300">
+                                    {getEmployeeDisplayName(employeeDeleteTarget)} — Account {employeeDeleteTarget.account}. This removes them from the active list.
+                                </p>
+                                <div className="flex justify-end gap-2">
+                                    <button onClick={() => setEmployeeDeleteTarget(null)} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider">Cancel</button>
+                                    <button onClick={handleConfirmDeleteEmployee} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Trash2 size={14} /> Delete</button>
                                 </div>
                             </div>
                         </div>
