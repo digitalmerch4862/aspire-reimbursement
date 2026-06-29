@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertCircle, User, DollarSign, Calendar } from 'lucide-react';
+import { formatAmountDisplay, formatPersonName } from '../../utils/formatters';
 
 interface OutstandingLiquidation {
     id: string;
@@ -41,7 +42,7 @@ const LiquidationTracker: React.FC<LiquidationTrackerProps> = ({ items, onSettle
                                         <User size={14} />
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-white uppercase truncate max-w-[150px]">{item.staffName}</p>
+                                        <p className="text-xs font-bold text-white truncate max-w-[150px]">{formatPersonName(item.staffName)}</p>
                                         <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
                                             <Calendar size={10} />
                                             <span>Issued: {item.date}</span>
@@ -50,7 +51,7 @@ const LiquidationTracker: React.FC<LiquidationTrackerProps> = ({ items, onSettle
                                 </div>
                                 <div className="flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/10 rounded-lg px-2 py-1.5 w-fit">
                                     <DollarSign size={12} className="text-emerald-400" />
-                                    <span className="text-xs font-bold text-emerald-300">{item.amount}</span>
+                                    <span className="text-xs font-bold text-emerald-300">{formatAmountDisplay(item.amount, { currency: true })}</span>
                                 </div>
                             </div>
                             

@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertCircle, Send, RefreshCw, ClipboardPaste } from 'lucide-react';
 import { ProcessingState } from '../../types';
+import { formatAmountDisplay } from '../../utils/formatters';
 
 interface FormVsReceiptTotals {
     formTotal: number | null;
@@ -129,10 +130,10 @@ const SoloMode: React.FC<SoloModeProps> = ({
                                 </span>
                             </div>
                             <div className="flex items-center gap-4 text-xs font-mono">
-                                <span>Form: <strong>${(formTotal as number).toFixed(2)}</strong></span>
-                                <span>Receipts: <strong>${(receiptTotal as number).toFixed(2)}</strong></span>
+                                <span>Form: <strong>{formatAmountDisplay(formTotal as number, { currency: true })}</strong></span>
+                                <span>Receipts: <strong>{formatAmountDisplay(receiptTotal as number, { currency: true })}</strong></span>
                                 {!match && difference !== null && (
-                                    <span className="text-red-200 font-bold">Δ ${difference.toFixed(2)}</span>
+                                    <span className="text-red-200 font-bold">Δ {formatAmountDisplay(difference, { currency: true })}</span>
                                 )}
                             </div>
                         </div>

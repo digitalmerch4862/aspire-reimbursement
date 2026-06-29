@@ -9,6 +9,7 @@ import {
 import FileUpload from './components/FileUpload';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import { upsertPendingReason, extractPendingReason } from './utils/pendingReason';
+import { formatAmountDisplay, formatEmployeeAccountName, formatPersonName } from './utils/formatters';
 import Logo from './components/Logo';
 import SoloMode from './components/Dashboard/SoloMode';
 import GroupMode from './components/Dashboard/GroupMode';
@@ -65,7 +66,7 @@ const NICKNAME_MAP: Record<string, string[]> = {
 };
 
 const getEmployeeDisplayName = (employee: Employee): string => {
-    const composed = `${employee.firstName || ''} ${employee.surname || ''}`.replace(/\s+/g, ' ').trim();
+    const composed = formatPersonName(`${employee.firstName || ''} ${employee.surname || ''}`);
     return composed || employee.fullName || '';
 };
 
@@ -7368,7 +7369,7 @@ export const App = () => {
                                                     className="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none"
                                                 />
                                             ) : (
-                                                <p className="text-white font-medium uppercase">{selectedRow.staffName}</p>
+                                                <p className="text-white font-medium">{formatPersonName(selectedRow.staffName)}</p>
                                             )}
                                         </div>
                                         <div className="space-y-1">
@@ -7381,7 +7382,7 @@ export const App = () => {
                                                     className="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none"
                                                 />
                                             ) : (
-                                                <p className="text-emerald-400 font-bold text-lg">{selectedRow.totalAmount}</p>
+                                                <p className="text-emerald-400 font-bold text-lg">{formatAmountDisplay(selectedRow.totalAmount, { currency: true })}</p>
                                             )}
                                         </div>
                                         <div className="space-y-1">
@@ -7554,11 +7555,11 @@ export const App = () => {
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{isPending ? '-' : row.timestamp}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-300 font-mono">{isPending ? '-' : (row.uid || '-')}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs font-bold text-amber-400">{row.nabCode}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{row.totalAmount}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : row.amount}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs font-bold text-slate-200 bg-white/5">{formatAmountDisplay(row.totalAmount, { currency: true })}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-right text-xs text-slate-200">{isPending ? '-' : formatAmountDisplay(row.amount, { currency: true })}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 truncate max-w-[250px]" title={row.youngPersonName}>{row.youngPersonName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
-                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
+                                                            <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 font-semibold">{formatPersonName(row.staffName)}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">
                                                                 {(row.isManualEncode || row.isVipManual) ? (
                                                                     <span className="inline-flex items-center px-2 py-1 rounded-full border border-cyan-400/30 bg-cyan-500/15 text-cyan-200 font-semibold">
@@ -7843,10 +7844,10 @@ export const App = () => {
                                                             )}
                                                             {filteredPendingThisWeek.map((item) => (
                                                                 <tr key={item.id} className="border-t border-white/5">
-                                                                    <td className="px-3 py-2 text-white whitespace-nowrap">{item.staffName}</td>
+                                                                    <td className="px-3 py-2 text-white whitespace-nowrap">{formatPersonName(item.staffName)}</td>
                                                                     <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.ypName}</td>
                                                                     <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.location}</td>
-                                                                    <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">${item.amount}</td>
+                                                                    <td className="px-3 py-2 text-emerald-300 font-semibold text-right whitespace-nowrap">{formatAmountDisplay(item.amount, { currency: true })}</td>
                                                                     <td className="px-3 py-2 text-right">
                                                                         <button
                                                                             onClick={() => handleSettleGroupLiquidation(item.id)}
@@ -7867,10 +7868,10 @@ export const App = () => {
                                                                 <tbody>
                                                                     {filteredPendingPreviousWeeks.map((item) => (
                                                                         <tr key={item.id} className="border-t border-white/5 opacity-75">
-                                                                            <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{item.staffName}</td>
+                                                                            <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{formatPersonName(item.staffName)}</td>
                                                                             <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.ypName}</td>
                                                                             <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{item.location}</td>
-                                                                            <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">${item.amount}</td>
+                                                                            <td className="px-3 py-2 text-slate-300 text-right whitespace-nowrap">{formatAmountDisplay(item.amount, { currency: true })}</td>
                                                                             <td className="px-3 py-2 text-right">
                                                                                 <button
                                                                                     onClick={() => handleSettleGroupLiquidation(item.id)}
@@ -8282,8 +8283,8 @@ export const App = () => {
                                                 <div className="flex-1 space-y-2">
                                                     <div className="space-y-1">
                                                         <div className="flex items-center gap-2">
-                                                            <p className="text-sm font-semibold text-white uppercase">{group.staffName}</p>
-                                                            <span className="text-sm font-bold text-emerald-400">(${group.totalAmount.toFixed(2)})</span>
+                                                            <p className="text-sm font-semibold text-white">{formatPersonName(group.staffName)}</p>
+                                                            <span className="text-sm font-bold text-emerald-400">({formatAmountDisplay(group.totalAmount, { currency: true })})</span>
                                                         </div>
                                                         <p className="text-xs text-slate-400">Pending entries: {group.count}</p>
                                                         <p className="text-xs text-slate-400">Latest date: {group.latestDate}</p>
@@ -8419,7 +8420,7 @@ export const App = () => {
                                                                 </svg>
                                                             </div>
                                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                                <span style={{ fontWeight: 'bold', textTransform: 'uppercase', color: '#ffffff', fontSize: '12px' }}>{row.staff_name}</span>
+                                                                <span style={{ fontWeight: 'bold', color: '#ffffff', fontSize: '12px' }}>{formatPersonName(row.staff_name)}</span>
                                                                 <span style={{ fontSize: '11px', color: '#9ca3af', marginTop: '1px' }}>{row.nabRef}</span>
                                                             </div>
                                                         </div>
@@ -8432,7 +8433,7 @@ export const App = () => {
                                                     </td>
 
                                                     <td style={{ padding: '8px 12px', textAlign: 'right', verticalAlign: 'middle', fontWeight: 'bold', color: '#ffffff' }}>
-                                                        ${Math.abs(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, ""))).toFixed(2)}
+                                                        {formatAmountDisplay(Math.abs(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, ""))))}
                                                     </td>
 
                                                     <td style={{ padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' }}>
@@ -8462,7 +8463,7 @@ export const App = () => {
                                             )}
                                             <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
                                                 <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right', color: '#ffffff', fontWeight: 'bold' }}>Total Processed:</td>
-                                                <td style={{ padding: '10px 12px', textAlign: 'right', color: '#ffffff', fontWeight: 'bold', fontSize: '14px' }}>${totalAmount.toFixed(2)}</td>
+                                                <td style={{ padding: '10px 12px', textAlign: 'right', color: '#ffffff', fontWeight: 'bold', fontSize: '14px' }}>{formatAmountDisplay(totalAmount, { currency: true })}</td>
                                                 <td></td>
                                             </tr>
                                         </tbody>
@@ -8525,9 +8526,9 @@ export const App = () => {
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeStart}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodTimeEnd}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', fontWeight: row.id === EOD_SPECIAL_ROW_ID ? 'bold' : 'normal', whiteSpace: 'pre-line' }}>{row.eodActivity}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staff_name}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatPersonName(row.staff_name)}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>
-                                                        {(row.id === EOD_SPECIAL_ROW_ID || !row.amount) ? '' : `$${parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")).toFixed(2)}`}
+                                                        {(row.id === EOD_SPECIAL_ROW_ID || !row.amount) ? '' : formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true })}
                                                     </td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.eodStatus}</td>
                                                     <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
@@ -8602,8 +8603,8 @@ export const App = () => {
                                                 <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.taggedDate}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.agingDays} day{row.agingDays === 1 ? '' : 's'}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top', textTransform: 'uppercase' }}>{row.staffName}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>${row.amount}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatPersonName(row.staffName)}</td>
+                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatAmountDisplay(row.amount, { currency: true })}</td>
                                                     <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.status}</td>
                                                 </tr>
                                             ))}
@@ -8721,7 +8722,7 @@ export const App = () => {
                                         <TrendingUp size={100} className="text-white" />
                                     </div>
                                     <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Total Claim Value</h3>
-                                    <p className="text-4xl font-bold text-white mb-2">${analyticsData.totalSpend.toFixed(2)}</p>
+                                    <p className="text-4xl font-bold text-white mb-2">{formatAmountDisplay(analyticsData.totalSpend, { currency: true })}</p>
                                     <p className="text-xs text-emerald-400 flex items-center gap-1">
                                         <CheckCircle size={12} /> {analyticsData.totalClaims} unique claims
                                     </p>
@@ -8736,7 +8737,7 @@ export const App = () => {
                                         {analyticsData.locations.length > 0 ? analyticsData.locations[0][0] : 'N/A'}
                                     </p>
                                     <p className="text-xs text-slate-500">
-                                        ${analyticsData.locations.length > 0 ? analyticsData.locations[0][1].toFixed(2) : '0.00'} spent here
+                                        {formatAmountDisplay(analyticsData.locations.length > 0 ? analyticsData.locations[0][1] : 0, { currency: true })} spent here
                                     </p>
                                 </div>
 
@@ -8746,10 +8747,10 @@ export const App = () => {
                                     </div>
                                     <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Top Staff Member</h3>
                                     <p className="text-2xl font-bold text-purple-400 mb-2 truncate">
-                                        {analyticsData.staff.length > 0 ? analyticsData.staff[0][0] : 'N/A'}
+                                        {analyticsData.staff.length > 0 ? formatPersonName(analyticsData.staff[0][0]) : 'N/A'}
                                     </p>
                                     <p className="text-xs text-slate-500">
-                                        ${analyticsData.staff.length > 0 ? analyticsData.staff[0][1].toFixed(2) : '0.00'} claimed total
+                                        {formatAmountDisplay(analyticsData.staff.length > 0 ? analyticsData.staff[0][1] : 0, { currency: true })} claimed total
                                     </p>
                                 </div>
                             </div>
@@ -8798,7 +8799,7 @@ export const App = () => {
                                                         <span className="font-medium text-slate-200">{name}</span>
                                                     </div>
                                                     <div className="flex flex-col items-end">
-                                                        <span className="font-bold text-white">${amount.toFixed(2)}</span>
+                                                        <span className="font-bold text-white">{formatAmountDisplay(amount, { currency: true })}</span>
                                                         <div className="w-24 h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
                                                             <div
                                                                 className="h-full bg-blue-500"
@@ -8830,9 +8831,9 @@ export const App = () => {
                                                         <div className="w-8 h-8 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-xs">
                                                             {idx + 1}
                                                         </div>
-                                                        <span className="font-medium text-slate-200 uppercase">{name}</span>
+                                                        <span className="font-medium text-slate-200">{formatPersonName(name)}</span>
                                                     </div>
-                                                    <span className="font-bold text-white">${amount.toFixed(2)}</span>
+                                                    <span className="font-bold text-white">{formatAmountDisplay(amount, { currency: true })}</span>
                                                 </div>
                                             ))}
                                             {analyticsData.staff.length === 0 && (
@@ -8950,7 +8951,7 @@ export const App = () => {
                                             <div key={emp.id} className="relative rounded-xl border border-white/10 bg-white/5 p-4 flex items-start justify-between">
                                                 <div className="space-y-1">
                                                     <p className="text-sm font-semibold text-white">{getEmployeeDisplayName(emp)}</p>
-                                                    <p className="text-[11px] text-slate-400 uppercase">{buildEmployeeConcatenate(emp.firstName, emp.surname).toUpperCase()}</p>
+                                                    <p className="text-[11px] text-slate-400">{formatEmployeeAccountName(emp.firstName, emp.surname)}</p>
                                                     <div className="flex gap-6 pt-1 text-xs text-slate-300">
                                                         <span><span className="text-slate-500">BSB </span>{emp.bsb}</span>
                                                         <span><span className="text-slate-500">Account </span>{emp.account}</span>
@@ -9034,7 +9035,7 @@ export const App = () => {
                                                 {pendingDeactivationEmployees.map((employee) => (
                                                     <div key={`${employee.account}-${employee.id}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-3 rounded-lg bg-black/25 border border-white/10">
                                                         <div>
-                                                            <p className="text-sm text-white font-semibold uppercase">{getEmployeeDisplayName(employee)}</p>
+                                                            <p className="text-sm text-white font-semibold">{getEmployeeDisplayName(employee)}</p>
                                                             <p className="text-xs text-slate-400">BSB: {employee.bsb} | Account: {employee.account}</p>
                                                         </div>
                                                         <div className="flex items-center gap-2">
@@ -9621,7 +9622,7 @@ export const App = () => {
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <p className="text-xs text-slate-400 mb-1">Staff</p>
-                                            <p className="text-sm text-white font-semibold uppercase">{pendingApprovalStaffGroup.staffName || 'Unknown'}</p>
+                                            <p className="text-sm text-white font-semibold">{formatPersonName(pendingApprovalStaffGroup.staffName || 'Unknown')}</p>
                                         </div>
                                         <div className="flex gap-2">
                                             <button
@@ -9667,7 +9668,7 @@ export const App = () => {
                                                         </td>
                                                         <td className="px-3 py-2">
                                                             <div className="flex items-center gap-1">
-                                                                <span className="text-white font-medium">{pendingApprovalStaffGroup.staffName || '-'}</span>
+                                                                <span className="text-white font-medium">{formatPersonName(pendingApprovalStaffGroup.staffName || '-')}</span>
                                                                 <button
                                                                     onClick={() => handleCopyField(pendingApprovalStaffGroup.staffName || '', `pending-staff-${record.id}`)}
                                                                     className="text-slate-400 hover:text-white transition-colors"
@@ -9677,9 +9678,9 @@ export const App = () => {
                                                                 </button>
                                                             </div>
                                                             <div className="flex items-center gap-1 mt-1">
-                                                                <span className="text-emerald-300 font-semibold">${normalizeMoneyValue(String(record.amount ?? '0'))}</span>
+                                                                <span className="text-emerald-300 font-semibold">{formatAmountDisplay(record.amount ?? '0', { currency: true })}</span>
                                                                 <button
-                                                                    onClick={() => handleCopyField(normalizeMoneyValue(String(record.amount ?? '0')), `pending-amount-${record.id}`)}
+                                                                    onClick={() => handleCopyField(formatAmountDisplay(record.amount ?? '0', { currency: true }), `pending-amount-${record.id}`)}
                                                                     className="text-slate-400 hover:text-white transition-colors"
                                                                     title="Copy amount"
                                                                 >
@@ -9850,7 +9851,7 @@ export const App = () => {
                                                 </p>
                                             ) : (
                                                 <p className="text-white font-semibold">
-                                                    Amount: <span className="text-orange-400">${dup.amount}</span>
+                                                    Amount: <span className="text-orange-400">{formatAmountDisplay(dup.amount, { currency: true })}</span>
                                                 </p>
                                             )}
                                             {dup.date && (
@@ -9964,7 +9965,7 @@ export const App = () => {
                                                 <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
                                                     <td className="py-2 px-3 text-white font-bold">{row.rowNum}</td>
                                                     <td className="py-2 px-3 text-slate-300 font-mono text-xs">{row.uniqueId || '-'}</td>
-                                                    <td className="py-2 px-3 text-red-400 font-semibold">{row.amount}</td>
+                                                    <td className="py-2 px-3 text-red-400 font-semibold">{formatAmountDisplay(row.amount, { currency: true })}</td>
                                                     <td className="py-2 px-3 text-red-400">{row.date}</td>
                                                     <td className="py-2 px-3 text-slate-300">{row.storeName}</td>
                                                     <td className="py-2 px-3 text-amber-400 font-mono">{row.nabCode}</td>
@@ -10086,7 +10087,7 @@ export const App = () => {
                                         </div>
                                     );
                                 })}
-                                <p className="text-[11px] text-slate-500">Account name: {buildEmployeeConcatenate(employeeModal.draft.firstName, employeeModal.draft.surname).toUpperCase()}</p>
+                                <p className="text-[11px] text-slate-500">Account name: {formatEmployeeAccountName(employeeModal.draft.firstName, employeeModal.draft.surname)}</p>
                                 <div className="flex justify-end gap-2 pt-2">
                                     <button onClick={() => setEmployeeModal(null)} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider">Cancel</button>
                                     <button onClick={handleSaveEmployeeModal} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Save size={14} /> Save</button>

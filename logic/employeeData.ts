@@ -1,3 +1,5 @@
+import { formatEmployeeAccountName, formatPersonName } from '../utils/formatters';
+
 export interface Employee {
     id: string;
     firstName: string;
@@ -49,10 +51,7 @@ export const buildEmployeeFullName = (firstName: string, surname: string): strin
     `${String(firstName || '').trim()} ${String(surname || '').trim()}`.replace(/\s+/g, ' ').trim();
 
 export const buildEmployeeConcatenate = (firstName: string, surname: string): string => {
-    const cleanFirst = String(firstName || '').trim();
-    const cleanSurname = String(surname || '').trim();
-    if (cleanFirst && cleanSurname) return `${cleanSurname}, ${cleanFirst}`;
-    return cleanSurname || cleanFirst;
+    return formatEmployeeAccountName(firstName, surname);
 };
 
 const collapseRepeatedNamePhrase = (value: string): string => {
@@ -74,8 +73,8 @@ const collapseRepeatedNamePhrase = (value: string): string => {
 };
 
 export const sanitizeEmployeeNameParts = (firstName: string, surname: string): Pick<Employee, 'firstName' | 'surname' | 'fullName'> => {
-    const rawFirstName = String(firstName || '').replace(/\s+/g, ' ').trim();
-    const rawSurname = String(surname || '').replace(/\s+/g, ' ').trim();
+    const rawFirstName = formatPersonName(String(firstName || '').replace(/\s+/g, ' ').trim());
+    const rawSurname = formatPersonName(String(surname || '').replace(/\s+/g, ' ').trim());
     const originalFullName = buildEmployeeFullName(rawFirstName, rawSurname);
     if (normalizeEmployeeName(rawFirstName) && normalizeEmployeeName(rawFirstName) === normalizeEmployeeName(rawSurname)) {
         return {
