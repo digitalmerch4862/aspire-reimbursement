@@ -77,7 +77,7 @@ const ManualMode: React.FC<ManualModeProps> = ({
                 <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-2xl p-4 flex items-start gap-3">
                     <AlertCircle className="text-cyan-400 mt-0.5 flex-shrink-0" size={18} />
                     <p className="text-xs text-cyan-100/90">
-                        Manual Mode is for VIP or boss special instructions that do not follow the usual process. Required details are still captured so the payment path stays visible in Database, NAB, and EOD.
+                        Manual Mode is for manual-encode payments approved outside the usual process. Required details are still captured so the payment path stays visible in Database, NAB, and EOD.
                     </p>
                 </div>
 
@@ -129,7 +129,7 @@ const ManualMode: React.FC<ManualModeProps> = ({
                     <textarea
                         value={fields.reason}
                         onChange={(e) => updateField('reason', e.target.value)}
-                        placeholder="Why this VIP/manual payment is being processed outside the normal workflow"
+                        placeholder="Why this manual-encode payment is being processed outside the normal workflow"
                         className="w-full h-28 bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-cyan-500/50 resize-none transition-colors"
                     />
                 </div>

@@ -15,8 +15,8 @@ export const processManualMode = (options: ModeOptions): ProcessingResult => {
     const phase2 = `<<<PHASE_2_START>>>\n## Data Standardization\nManual entry standardization active.\n<<<PHASE_2_END>>>`;
     const phase3 = `<<<PHASE_3_START>>>\nManual Mode: Rules validation bypassed.\n<<<PHASE_3_END>>>`;
     
-    const phase4 = `<!-- ENTRY TYPE: VIP_MANUAL -->
-<!-- FLOW TYPE: SPECIAL INSTRUCTION -->
+    const phase4 = `<!-- ENTRY TYPE: MANUAL_ENCODE -->
+<!-- FLOW TYPE: MANUAL_ENCODE -->
 Hi,
 
 I hope this message finds you well.
@@ -37,7 +37,7 @@ I am writing to confirm that your reimbursement request has been processed today
 
 | Receipt # | Store Name | Date & Time | Product (Per Item) | Category | Item Amount | Receipt Total | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | VIP Manual | - | Special Instruction | VIP Manual | $${amountValue} | $${amountValue} | ${reason} |
+| 1 | Manual Encode | - | Manual Encode | Manual Encode | $${amountValue} | $${amountValue} | ${reason} |
 
 **TOTAL AMOUNT: $${amountValue}**
 `;
@@ -48,10 +48,10 @@ I am writing to confirm that your reimbursement request has been processed today
         amount: parseFloat(amountValue),
         ypName: requestedBy,
         location: clientLocation,
-        expenseType: 'VIP Manual',
+        expenseType: 'Manual Encode',
         receiptId: 'MANUAL-ENTRY',
         date: new Date().toLocaleDateString(),
-        product: 'Special Instruction'
+        product: 'Manual Encode'
     }];
 
     return { phase1, phase2, phase3, phase4, transactions };

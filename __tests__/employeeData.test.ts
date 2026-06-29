@@ -6,6 +6,7 @@ import {
     upsertEmployeeById,
     removeEmployeeById,
     xlsxRowsToRawText,
+    sanitizeEmployeeNameParts,
     Employee,
 } from '../logic/employeeData';
 
@@ -83,6 +84,35 @@ describe('dedupeByAccount (replace-all upload)', () => {
         ];
         const accounts = dedupeByAccount(incoming).map((e) => e.account);
         expect(new Set(accounts).size).toBe(accounts.length);
+    });
+});
+
+describe('sanitizeEmployeeNameParts', () => {
+    test('collapses duplicated payee imports into single clean full name', () => {
+        expect(sanitizeEmployeeNameParts('Adeleke Kuye Adeleke Kuye', 'Payee'))
+            .toEqual({
+                firstName: 'Adeleke',
+                surname: 'Kuye',
+                fullName: 'Adeleke Kuye',
+            });
+    });
+
+    test('leaves normal names unchanged', () => {
+        expect(sanitizeEmployeeNameParts('Aaron', 'Gray'))
+            .toEqual({
+                firstName: 'Aaron',
+                surname: 'Gray',
+                fullName: 'Aaron Gray',
+            });
+    });
+
+    test('collapses duplicated mononym into single displayed name', () => {
+        expect(sanitizeEmployeeNameParts('Sangeeta', 'Sangeeta'))
+            .toEqual({
+                firstName: 'Sangeeta',
+                surname: '',
+                fullName: 'Sangeeta',
+            });
     });
 });
 

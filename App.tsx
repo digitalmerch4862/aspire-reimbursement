@@ -26,6 +26,8 @@ import {
     parseEmployeeData,
     serializeEmployeeData,
     makeEmployeeId,
+    sanitizeEmployeeNameParts,
+    buildEmployeeConcatenate,
     dedupeByAccount,
     isValidAccount,
     upsertEmployeeById,
@@ -45,6 +47,7 @@ const EOD_SPECIAL_ROW_ID = 'idle-row';
 const EOD_SPECIAL_ACTIVITY_LABEL = `Data Validation & Reconciliation
 Records Review
 Internal Audit / Quality Check`;
+const MANUAL_ENCODE_MARKERS = ['<!-- ENTRY TYPE: MANUAL_ENCODE -->', '<!-- ENTRY TYPE: VIP_MANUAL -->'];
 
 const NICKNAME_MAP: Record<string, string[]> = {
     tim: ['timothy'],
@@ -2165,8 +2168,10 @@ export const App = () => {
 
     const validateEmployeeDraft = (d: EmployeeDraft): Record<string, string> => {
         const errors: Record<string, string> = {};
-        if (!d.firstName.trim()) errors.firstName = 'Required';
-        if (!d.surname.trim()) errors.surname = 'Required';
+        if (!d.firstName.trim() && !d.surname.trim()) {
+            errors.firstName = 'Enter at least one name';
+            errors.surname = 'Enter at least one name';
+        }
         if (!/^\d{6}$/.test(d.bsb.trim())) errors.bsb = 'BSB must be 6 digits';
         if (!/^\d{6,10}$/.test(d.account.trim())) errors.account = 'Account must be 6–10 digits';
         return errors;
@@ -2187,11 +2192,12 @@ export const App = () => {
             return;
         }
         const d = employeeModal.draft;
+        const normalizedName = sanitizeEmployeeNameParts(d.firstName, d.surname);
         const rec: Employee = {
-            id: employeeModal.id ?? makeEmployeeId(d.firstName, d.surname, d.account, `manual_${Date.now()}`),
-            firstName: d.firstName.trim(),
-            surname: d.surname.trim(),
-            fullName: `${d.firstName.trim()} ${d.surname.trim()}`,
+            id: employeeModal.id ?? makeEmployeeId(normalizedName.firstName, normalizedName.surname, d.account, `manual_${Date.now()}`),
+            firstName: normalizedName.firstName,
+            surname: normalizedName.surname,
+            fullName: normalizedName.fullName,
             bsb: d.bsb.trim(),
             account: d.account.trim(),
         };
@@ -2969,9 +2975,10 @@ export const App = () => {
                 return null;
             }
             if (data && data.length > 0) {
-                const csvContent = data.map(emp => 
-                    `${String(emp.first_name || '')}\t${String(emp.surname || '')}\t${String(emp.surname || '')}, ${String(emp.first_name || '')}\t${String(emp.bsb || '')}\t${String(emp.account || '')}`
-                ).join('\n');
+                const csvContent = data.map((emp) => {
+                    const normalized = sanitizeEmployeeNameParts(String(emp.first_name || ''), String(emp.surname || ''));
+                    return `${normalized.firstName}\t${normalized.surname}\t${buildEmployeeConcatenate(normalized.firstName, normalized.surname)}\t${String(emp.bsb || '')}\t${String(emp.account || '')}`;
+                }).join('\n');
                 return `First Names\tSurname\tConcatenate\tBSB\tAccount\n${csvContent}`;
             }
             return null;
@@ -3000,10 +3007,12 @@ export const App = () => {
                 const [firstName, surname, concatenate, bsb, account] = parts;
                 const acct = (account || '').trim();
                 if (!isValidAccount(acct)) return;
+                const normalized = sanitizeEmployeeNameParts(firstName || '', surname || '');
+                if (!normalized.fullName) return;
                 byAccount.set(acct, {
-                    first_name: firstName || '',
-                    surname: surname || '',
-                    concatenate: concatenate || `${surname}, ${firstName}`,
+                    first_name: normalized.firstName,
+                    surname: normalized.surname,
+                    concatenate: concatenate || buildEmployeeConcatenate(normalized.firstName, normalized.surname),
                     bsb: bsb || null,
                     account: acct,
                 });
@@ -3134,7 +3143,7 @@ export const App = () => {
             const content = record.full_email_content || "";
             const internalId = record.id;
             const isGroupTable = content.includes('<!-- GROUP_TABLE_FORMAT -->');
-            const isVipManual = content.includes('<!-- ENTRY TYPE: VIP_MANUAL -->');
+            const isManualEncode = MANUAL_ENCODE_MARKERS.some((marker) => content.includes(marker));
             const isReceiptLiquidation = content.includes('<!-- ENTRY TYPE: RECEIPT_LIQUIDATION -->');
 
             // Extract Unique Receipt ID from content
@@ -3293,7 +3302,8 @@ export const App = () => {
                     id: `${internalId}-group`,
                     uid: resolveUidDisplayValue(uidFallbacks[0] || receiptId, '-', dateProcessed),
                     internalId: internalId,
-                    isVipManual,
+                    isVipManual: isManualEncode,
+                    isManualEncode,
                     isReceiptLiquidation,
                     timestamp,
                     rawDate,
@@ -3348,7 +3358,8 @@ export const App = () => {
                         id: `${internalId}-${i}`, // Unique key for React using DB ID
                         uid: resolveUidDisplayValue(normalized.uniqueId || fallbackUid, normalized.storeName, receiptDate),
                         internalId: internalId,
-                        isVipManual,
+                        isVipManual: isManualEncode,
+                        isManualEncode,
                         isReceiptLiquidation,
                         timestamp,
                         rawDate,
@@ -3376,7 +3387,8 @@ export const App = () => {
                     id: `${internalId}-summary`,
                     uid: resolveUidDisplayValue(uidFallbacks[0] || receiptId, 'Petty Cash / Reimbursement', dateProcessed),
                     internalId: internalId,
-                    isVipManual,
+                    isVipManual: isManualEncode,
+                    isManualEncode,
                     isReceiptLiquidation,
                     timestamp,
                     rawDate,
@@ -4733,35 +4745,111 @@ export const App = () => {
         }
     };
 
-    // ... (Analytics and Reports functions remain the same) ...
-    const analyticsData = useMemo(() => {
-        const groupedByYP: { [key: string]: number } = {};
-        const groupedByStaff: { [key: string]: number } = {};
-        let totalSpend = 0;
-        let totalRequests = 0;
+    const parseMoneyNumber = (value: any): number => {
+        const parsed = parseFloat(String(value ?? '').replace(/[^0-9.-]+/g, ""));
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
 
-        databaseRows
-            .filter((row: any) => !row.isReceiptLiquidation)
-            .forEach(row => {
-            const val = parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")) || 0;
-
-            const yp = row.ypName || 'Unknown';
-            groupedByYP[yp] = (groupedByYP[yp] || 0) + val;
-
-            const staff = row.staffName || 'Unknown';
-            groupedByStaff[staff] = (groupedByStaff[staff] || 0) + val;
-
-            totalSpend += val;
-            totalRequests++;
+    const claimAnalyticsRows = useMemo(() => {
+        const preferredRowByInternalId = new Map<string, { row: any; score: number }>();
+        databaseRows.forEach((row: any) => {
+            const key = String(row.internalId ?? row.id ?? '').trim();
+            if (!key) return;
+            const score = String(row.id || '').endsWith('-summary') ? 2 : String(row.id || '').endsWith('-group') ? 1 : 0;
+            const current = preferredRowByInternalId.get(key);
+            if (!current || score > current.score) {
+                preferredRowByInternalId.set(key, { row, score });
+            }
         });
 
+        return historyData.map((record: any) => {
+            const key = String(record.id ?? '').trim();
+            const preferred = preferredRowByInternalId.get(key)?.row;
+            const content = String(record.full_email_content || '');
+            const isManualEncode = MANUAL_ENCODE_MARKERS.some((marker) => content.includes(marker));
+            const isReceiptLiquidation = content.includes('<!-- ENTRY TYPE: RECEIPT_LIQUIDATION -->');
+            const hasPendingStatus = content.includes('<!-- STATUS: PENDING -->') || isPendingNabCodeValue(record.nab_code);
+            const hasPaidStatus = content.includes('<!-- STATUS: PAID -->');
+            const hasValidNab = isValidNabReference(String(record.nab_code || preferred?.nabCode || '').trim());
+            const hasRevisionSignal = /discrepancy was found|mismatch/i.test(content)
+                || (!hasPendingStatus && !hasPaidStatus && !hasValidNab && !/successfully processed/i.test(content));
+
+            const status = isReceiptLiquidation
+                ? 'liquidation'
+                : isManualEncode
+                    ? (hasPendingStatus || !hasValidNab ? 'manual_pending' : 'manual_paid')
+                    : hasPendingStatus
+                        ? 'pending'
+                        : hasPaidStatus || hasValidNab
+                            ? 'paid'
+                            : hasRevisionSignal
+                                ? 'revision'
+                                : 'paid';
+
+            return {
+                id: key,
+                rawDate: new Date(record.created_at || preferred?.rawDate || new Date().toISOString()),
+                amount: parseMoneyNumber(preferred?.totalAmount ?? record.amount ?? preferred?.amount ?? 0),
+                clientName: String(preferred?.ypName || record.yp_name || 'Unknown').trim() || 'Unknown',
+                locationName: String(preferred?.youngPersonName || record.location || 'Unknown').trim() || 'Unknown',
+                staffName: String(preferred?.staffName || record.staff_name || 'Unknown').trim() || 'Unknown',
+                status,
+                isManualEncode,
+                isReceiptLiquidation
+            };
+        });
+    }, [databaseRows, historyData]);
+
+    const analyticsData = useMemo(() => {
+        const groupedByClient: { [key: string]: number } = {};
+        const groupedByLocation: { [key: string]: number } = {};
+        const groupedByStaff: { [key: string]: number } = {};
+        let totalSpend = 0;
+        let totalClaims = 0;
+        const statusCounts = { paid: 0, pending: 0, revision: 0, manualEncode: 0 };
+        let dataQualityCount = 0;
+        let pendingAgeTotal = 0;
+        let pendingAgeCount = 0;
+        let oldestPendingAge = 0;
+        const now = new Date(nowTick);
+
+        claimAnalyticsRows
+            .filter((row: any) => !row.isReceiptLiquidation)
+            .forEach((row: any) => {
+                const val = row.amount || 0;
+                groupedByClient[row.clientName] = (groupedByClient[row.clientName] || 0) + val;
+                groupedByLocation[row.locationName] = (groupedByLocation[row.locationName] || 0) + val;
+                groupedByStaff[row.staffName] = (groupedByStaff[row.staffName] || 0) + val;
+                totalSpend += val;
+                totalClaims += 1;
+
+                if (row.status === 'paid' || row.status === 'manual_paid') statusCounts.paid += 1;
+                else if (row.status === 'pending' || row.status === 'manual_pending') {
+                    statusCounts.pending += 1;
+                    const pendingAge = Math.max(0, Math.floor((now.getTime() - row.rawDate.getTime()) / (1000 * 60 * 60 * 24)));
+                    pendingAgeTotal += pendingAge;
+                    pendingAgeCount += 1;
+                    oldestPendingAge = Math.max(oldestPendingAge, pendingAge);
+                }
+                else if (row.status === 'revision') statusCounts.revision += 1;
+                if (row.isManualEncode) statusCounts.manualEncode += 1;
+                if (row.clientName === 'Unknown' || row.clientName === 'N/A' || row.locationName === 'Unknown' || row.locationName === 'N/A' || row.staffName === 'Unknown' || row.staffName === 'N/A') {
+                    dataQualityCount += 1;
+                }
+            });
+
         return {
-            yp: Object.entries(groupedByYP).sort((a, b) => b[1] - a[1]),
+            clients: Object.entries(groupedByClient).sort((a, b) => b[1] - a[1]),
+            locations: Object.entries(groupedByLocation).sort((a, b) => b[1] - a[1]),
             staff: Object.entries(groupedByStaff).sort((a, b) => b[1] - a[1]),
             totalSpend,
-            totalRequests
+            totalClaims,
+            statusCounts,
+            dataQualityCount,
+            averagePendingAgeDays: pendingAgeCount > 0 ? Number((pendingAgeTotal / pendingAgeCount).toFixed(1)) : 0,
+            oldestPendingAgeDays: oldestPendingAge
         };
-    }, [databaseRows]);
+    }, [claimAnalyticsRows, nowTick]);
 
     const handleGenerateReport = (type: 'weekly' | 'monthly' | 'quarterly' | 'yearly') => {
         const now = new Date();
@@ -4777,74 +4865,99 @@ export const App = () => {
                 startDate = new Date(now.getFullYear(), now.getMonth(), 1);
                 reportTitle = "MONTHLY EXPENSE REPORT (MTD)";
                 break;
-            case 'quarterly':
+            case 'quarterly': {
                 const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
                 startDate = new Date(now.getFullYear(), quarterMonth, 1);
                 reportTitle = "QUARTERLY EXPENSE REPORT (QTD)";
                 break;
+            }
             case 'yearly':
                 startDate = new Date(now.getFullYear(), 0, 1);
                 reportTitle = "ANNUAL EXPENSE REPORT (YTD)";
                 break;
         }
 
-        const relevantRows = databaseRows.filter(row => {
-            return !row.isReceiptLiquidation && row.rawDate >= startDate;
-        });
-
+        const relevantRows = claimAnalyticsRows.filter((row: any) => !row.isReceiptLiquidation && row.rawDate >= startDate);
         if (relevantRows.length === 0) {
             showWarningToast('No records found for this period.');
             return;
         }
+        const periodLengthMs = Math.max(1, now.getTime() - startDate.getTime());
+        const previousStartDate = new Date(startDate.getTime() - periodLengthMs);
+        const previousEndDate = new Date(startDate.getTime());
+        const previousRows = claimAnalyticsRows.filter((row: any) =>
+            !row.isReceiptLiquidation
+            && row.rawDate >= previousStartDate
+            && row.rawDate < previousEndDate
+        );
 
         let totalSpend = 0;
-        let totalRequests = relevantRows.length;
+        const totalClaims = relevantRows.length;
         const staffSpend: Record<string, number> = {};
+        const clientSpend: Record<string, number> = {};
         const locationSpend: Record<string, number> = {};
-        let maxItem = { product: '', amount: 0, staff: '' };
+        let highestClaim = { amount: 0, staff: '', client: '' };
+        let dataQualityCount = 0;
+        let paidCount = 0;
         let pendingCount = 0;
+        let revisionCount = 0;
+        let manualEncodeCount = 0;
         const formatReportCurrency = (value: number) => `$${value.toFixed(2)}`;
         const formatReportDate = (value: Date) => value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-        relevantRows.forEach(row => {
-            const amountStr = String(row.amount) || "0";
-            const val = parseFloat(amountStr.replace(/[^0-9.-]+/g, "")) || 0;
-
+        relevantRows.forEach((row: any) => {
+            const val = row.amount || 0;
             totalSpend += val;
 
             const staff = row.staffName || "Unknown";
+            const client = row.clientName || "Unknown";
+            const location = row.locationName || "Unknown";
             staffSpend[staff] = (staffSpend[staff] || 0) + val;
+            clientSpend[client] = (clientSpend[client] || 0) + val;
+            locationSpend[location] = (locationSpend[location] || 0) + val;
 
-            const loc = row.ypName || "Unknown";
-            locationSpend[loc] = (locationSpend[loc] || 0) + val;
-
-            if (val > maxItem.amount) {
-                maxItem = { product: row.product || "N/A", amount: val, staff: staff };
+            if (val > highestClaim.amount) {
+                highestClaim = { amount: val, staff, client };
             }
 
-            if (loc === "N/A" || loc === "Unknown" || staff === "Unknown") {
-                pendingCount++;
+            if (client === "N/A" || client === "Unknown" || location === "N/A" || location === "Unknown" || staff === "Unknown") {
+                dataQualityCount += 1;
             }
+
+            if (row.status === 'paid' || row.status === 'manual_paid') paidCount += 1;
+            else if (row.status === 'pending' || row.status === 'manual_pending') pendingCount += 1;
+            else if (row.status === 'revision') revisionCount += 1;
+            if (row.isManualEncode) manualEncodeCount += 1;
         });
 
         const rankedStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const rankedClients = Object.entries(clientSpend).sort((a, b) => b[1] - a[1]).slice(0, 5);
         const rankedLocations = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 5);
-        const averageRequestValue = totalRequests > 0 ? totalSpend / totalRequests : 0;
+        const averageClaimValue = totalClaims > 0 ? totalSpend / totalClaims : 0;
+        const previousTotalSpend = previousRows.reduce((sum: number, row: any) => sum + (row.amount || 0), 0);
+        const previousTotalClaims = previousRows.length;
+        const spendDelta = totalSpend - previousTotalSpend;
+        const claimDelta = totalClaims - previousTotalClaims;
+        const spendDeltaPct = previousTotalSpend > 0 ? ((spendDelta / previousTotalSpend) * 100) : null;
+        const claimDeltaPct = previousTotalClaims > 0 ? ((claimDelta / previousTotalClaims) * 100) : null;
         const topStaffSummary = rankedStaff[0];
+        const topClientSummary = rankedClients[0];
         const topLocationSummary = rankedLocations[0];
         const shareOfSpend = (value: number) => totalSpend > 0 ? `${((value / totalSpend) * 100).toFixed(1)}%` : '0.0%';
-        const categorizationStatus = pendingCount === 0
+        const formatDelta = (delta: number, pct: number | null, noun: string) => {
+            const direction = delta > 0 ? 'increase' : delta < 0 ? 'decrease' : 'no change';
+            const pctLabel = pct === null ? 'n/a' : `${Math.abs(pct).toFixed(1)}%`;
+            return `${direction} of ${Math.abs(delta)} ${noun} (${pctLabel})`;
+        };
+        const categorizationStatus = dataQualityCount === 0
             ? 'All reviewed records are fully categorised and suitable for circulation.'
-            : `${pendingCount} record${pendingCount === 1 ? '' : 's'} require staff or client data clean-up prior to distribution.`;
-        const followUpMessage = pendingCount === 0
+            : `${dataQualityCount} record${dataQualityCount === 1 ? '' : 's'} require staff, client, or location data clean-up prior to distribution.`;
+        const followUpMessage = dataQualityCount === 0
             ? 'No immediate data quality issues were identified within the selected reporting period.'
             : 'Incomplete records should be reviewed before this report is circulated to stakeholders.';
-
-        const hasTopStaff = Boolean(topStaffSummary);
-        const hasTopLocation = Boolean(topLocationSummary);
-        const highestItemLabel = maxItem.amount > 0
-            ? `${formatReportCurrency(maxItem.amount)} for ${maxItem.product || 'N/A'} (${maxItem.staff || 'Unknown'})`
-            : 'No material single-item variance identified';
+        const highestClaimLabel = highestClaim.amount > 0
+            ? `${formatReportCurrency(highestClaim.amount)} by ${highestClaim.staff || 'Unknown'} for ${highestClaim.client || 'Unknown'}`
+            : 'No material single-claim variance identified';
 
         let professionalReport = `# ${reportTitle}\n\n`;
         professionalReport += `This report has been prepared for management review and summarises reimbursement activity, expenditure concentration and follow-up items for the selected reporting period.\n\n`;
@@ -4853,24 +4966,37 @@ export const App = () => {
         professionalReport += `| :--- | :--- |\n`;
         professionalReport += `| Reporting Period | ${formatReportDate(startDate)} to ${formatReportDate(now)} |\n`;
         professionalReport += `| Report Date | ${formatReportDate(now)} |\n`;
-        professionalReport += `| Scope | Reimbursement transactions recorded within the selected period |\n\n`;
+        professionalReport += `| Scope | Unique reimbursement claims recorded within the selected period |\n\n`;
 
         professionalReport += `## Executive Summary\n`;
         professionalReport += `| Metric | Value |\n`;
         professionalReport += `| :--- | :--- |\n`;
         professionalReport += `| Total Spend | **${formatReportCurrency(totalSpend)}** |\n`;
-        professionalReport += `| Total Requests | **${totalRequests}** |\n`;
-        professionalReport += `| Average Request Value | **${formatReportCurrency(averageRequestValue)}** |\n`;
-        professionalReport += `| Data Quality Follow-Up | ${pendingCount} record${pendingCount === 1 ? '' : 's'} |\n`;
-        professionalReport += `| Highest Single Item | ${highestItemLabel} |\n`;
-        professionalReport += `| Highest Staff Spend | ${hasTopStaff ? `${topStaffSummary[0]} (${formatReportCurrency(topStaffSummary[1])})` : 'N/A'} |\n`;
-        professionalReport += `| Highest Client / Location Spend | ${hasTopLocation ? `${topLocationSummary[0]} (${formatReportCurrency(topLocationSummary[1])})` : 'N/A'} |\n\n`;
+        professionalReport += `| Total Claims | **${totalClaims}** |\n`;
+        professionalReport += `| Average Claim Value | **${formatReportCurrency(averageClaimValue)}** |\n`;
+        professionalReport += `| Paid / Completed | ${paidCount} |\n`;
+        professionalReport += `| Pending | ${pendingCount} |\n`;
+        professionalReport += `| For Revision | ${revisionCount} |\n`;
+        professionalReport += `| Manual Encode | ${manualEncodeCount} |\n`;
+        professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} record${dataQualityCount === 1 ? '' : 's'} |\n`;
+        professionalReport += `| Highest Single Claim | ${highestClaimLabel} |\n`;
+        professionalReport += `| Highest Staff Spend | ${topStaffSummary ? `${topStaffSummary[0]} (${formatReportCurrency(topStaffSummary[1])})` : 'N/A'} |\n`;
+        professionalReport += `| Highest Client Spend | ${topClientSummary ? `${topClientSummary[0]} (${formatReportCurrency(topClientSummary[1])})` : 'N/A'} |\n`;
+        professionalReport += `| Highest Location Spend | ${topLocationSummary ? `${topLocationSummary[0]} (${formatReportCurrency(topLocationSummary[1])})` : 'N/A'} |\n\n`;
+
+        professionalReport += `## Prior Period Comparison\n`;
+        professionalReport += `| Metric | Current Period | Prior Comparable Period | Movement |\n`;
+        professionalReport += `| :--- | :--- | :--- | :--- |\n`;
+        professionalReport += `| Spend | **${formatReportCurrency(totalSpend)}** | ${formatReportCurrency(previousTotalSpend)} | ${formatDelta(spendDelta, spendDeltaPct, 'dollars')} |\n`;
+        professionalReport += `| Claims | **${totalClaims}** | ${previousTotalClaims} | ${formatDelta(claimDelta, claimDeltaPct, 'claims')} |\n\n`;
 
         professionalReport += `## Key Findings\n`;
-        professionalReport += `- Total reimbursement expenditure for the period was **${formatReportCurrency(totalSpend)}** across **${totalRequests}** request${totalRequests === 1 ? '' : 's'}.\n`;
-        professionalReport += `- The average claim value was **${formatReportCurrency(averageRequestValue)}**, which provides a reference point for future period comparison.\n`;
-        professionalReport += `- ${hasTopStaff ? `The highest staff expenditure was attributed to **${topStaffSummary[0]}**, representing **${formatReportCurrency(topStaffSummary[1])}** or **${shareOfSpend(topStaffSummary[1])}** of total period spend.` : 'No material staff concentration was identified for the selected period.'}\n`;
-        professionalReport += `- ${hasTopLocation ? `The highest client or location expenditure was recorded against **${topLocationSummary[0]}**, totalling **${formatReportCurrency(topLocationSummary[1])}** or **${shareOfSpend(topLocationSummary[1])}** of total period spend.` : 'No material client or location concentration was identified for the selected period.'}\n`;
+        professionalReport += `- Total reimbursement expenditure for the period was **${formatReportCurrency(totalSpend)}** across **${totalClaims}** unique claim${totalClaims === 1 ? '' : 's'}.\n`;
+        professionalReport += `- The average claim value was **${formatReportCurrency(averageClaimValue)}**, which provides a reference point for future period comparison.\n`;
+        professionalReport += `- Status mix for the period was **${paidCount} paid/completed**, **${pendingCount} pending**, **${revisionCount} for revision**, and **${manualEncodeCount} manual encode** claim${manualEncodeCount === 1 ? '' : 's'}.\n`;
+        professionalReport += `- ${topStaffSummary ? `The highest staff expenditure was attributed to **${topStaffSummary[0]}**, representing **${formatReportCurrency(topStaffSummary[1])}** or **${shareOfSpend(topStaffSummary[1])}** of total period spend.` : 'No material staff concentration was identified for the selected period.'}\n`;
+        professionalReport += `- ${topClientSummary ? `The highest client expenditure was recorded against **${topClientSummary[0]}**, totalling **${formatReportCurrency(topClientSummary[1])}** or **${shareOfSpend(topClientSummary[1])}** of total period spend.` : 'No material client concentration was identified for the selected period.'}\n`;
+        professionalReport += `- ${topLocationSummary ? `The highest location expenditure was recorded against **${topLocationSummary[0]}**, totalling **${formatReportCurrency(topLocationSummary[1])}** or **${shareOfSpend(topLocationSummary[1])}** of total period spend.` : 'No material location concentration was identified for the selected period.'}\n`;
         professionalReport += `- ${categorizationStatus}\n\n`;
 
         professionalReport += `## Staff Expenditure Ranking\n`;
@@ -4879,71 +5005,44 @@ export const App = () => {
         rankedStaff.forEach((staffEntry, index) => {
             professionalReport += `| ${index + 1} | ${staffEntry[0]} | **${formatReportCurrency(staffEntry[1])}** | ${shareOfSpend(staffEntry[1])} |\n`;
         });
-        if (rankedStaff.length === 0) {
-            professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
-        }
+        if (rankedStaff.length === 0) professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
         professionalReport += `\n`;
 
-        professionalReport += `## Client / Location Expenditure Ranking\n`;
-        professionalReport += `| Rank | Client / Location | Total Spend | Share of Total Spend |\n`;
+        professionalReport += `## Client Expenditure Ranking\n`;
+        professionalReport += `| Rank | Client | Total Spend | Share of Total Spend |\n`;
+        professionalReport += `| :--- | :--- | :--- | :--- |\n`;
+        rankedClients.forEach((clientEntry, index) => {
+            professionalReport += `| ${index + 1} | ${clientEntry[0]} | **${formatReportCurrency(clientEntry[1])}** | ${shareOfSpend(clientEntry[1])} |\n`;
+        });
+        if (rankedClients.length === 0) professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
+        professionalReport += `\n`;
+
+        professionalReport += `## Location Expenditure Ranking\n`;
+        professionalReport += `| Rank | Location | Total Spend | Share of Total Spend |\n`;
         professionalReport += `| :--- | :--- | :--- | :--- |\n`;
         rankedLocations.forEach((locationEntry, index) => {
             professionalReport += `| ${index + 1} | ${locationEntry[0]} | **${formatReportCurrency(locationEntry[1])}** | ${shareOfSpend(locationEntry[1])} |\n`;
         });
-        if (rankedLocations.length === 0) {
-            professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
-        }
+        if (rankedLocations.length === 0) professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
         professionalReport += `\n`;
 
+        professionalReport += `## Exceptions and Controls\n`;
+        professionalReport += `| Control Metric | Count | Note |\n`;
+        professionalReport += `| :--- | :--- | :--- |\n`;
+        professionalReport += `| Pending Claims | ${pendingCount} | Awaiting completion or approval |\n`;
+        professionalReport += `| Revision Claims | ${revisionCount} | Claimant correction required |\n`;
+        professionalReport += `| Manual Encode Claims | ${manualEncodeCount} | Processed outside standard form flow |\n`;
+        professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} | Missing or weak staff/client/location values |\n\n`;
+
         professionalReport += `## Management Notes\n`;
-        professionalReport += `- The leading staff and client / location concentrations should be reviewed to confirm that expenditure patterns remain consistent with expected operational activity.\n`;
+        professionalReport += `- The leading staff, client, and location concentrations should be reviewed to confirm that expenditure patterns remain consistent with expected operational activity.\n`;
         professionalReport += `- ${followUpMessage}\n`;
         professionalReport += `- This report format is suitable for direct circulation within Outlook and other stakeholder reporting channels.\n`;
 
         setGeneratedReport(professionalReport);
         setReportEditableContent(professionalReport);
         setIsEditingReport(false);
-
         navigator.clipboard.writeText(professionalReport);
-        setReportCopied(type);
-        setTimeout(() => setReportCopied(null), 2000);
-        return;
-
-        const topStaff = Object.entries(staffSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
-        const topLoc = Object.entries(locationSpend).sort((a, b) => b[1] - a[1]).slice(0, 3);
-
-        let report = `[≡ƒôï CLICK TO COPY REPORT]\n\n`;
-        report += `# ${reportTitle}\n`;
-        report += `**Date Range:** ${startDate.toLocaleDateString()} - ${now.toLocaleDateString()}\n\n`;
-
-        report += `## ≡ƒôè EXECUTIVE SUMMARY\n`;
-        report += `| Metric | Value |\n`;
-        report += `| :--- | :--- |\n`;
-        report += `| **Total Spend** | **$${totalSpend.toFixed(2)}** |\n`;
-        report += `| **Total Requests** | ${totalRequests} |\n`;
-        report += `| **Pending Categorization** | ${pendingCount} |\n`;
-        report += `| **Highest Single Item** | $${maxItem.amount.toFixed(2)} (${maxItem.product}) |\n\n`;
-
-        report += `## ≡ƒÅå TOP SPENDERS (STAFF)\n`;
-        report += `| Rank | Staff Member | Total Amount |\n`;
-        report += `| :--- | :--- | :--- |\n`;
-        topStaff.forEach((s, i) => {
-            report += `| ${i + 1} | ${s[0]} | **$${s[1].toFixed(2)}** |\n`;
-        });
-        report += `\n`;
-
-        report += `## ≡ƒôì SPENDING BY YP\n`;
-        report += `| Rank | YP Name | Total Amount |\n`;
-        report += `| :--- | :--- | :--- |\n`;
-        topLoc.forEach((l, i) => {
-            report += `| ${i + 1} | ${l[0]} | $${l[1].toFixed(2)} |\n`;
-        });
-
-        setGeneratedReport(report);
-        setReportEditableContent(report);
-        setIsEditingReport(false);
-
-        navigator.clipboard.writeText(report);
         setReportCopied(type);
         setTimeout(() => setReportCopied(null), 2000);
     };
@@ -6531,14 +6630,14 @@ export const App = () => {
     const processRecords = (records: any[]) => {
         return records.map(r => {
             const content = r.full_email_content || "";
-            const isVipManual = content.includes('<!-- ENTRY TYPE: VIP_MANUAL -->');
+            const isManualEncode = MANUAL_ENCODE_MARKERS.some((marker) => content.includes(marker));
             const isReceiptLiquidation = content.includes('<!-- ENTRY TYPE: RECEIPT_LIQUIDATION -->');
 
             const nabRefMatch = content.match(/\*\*NAB (?:Code|Reference):?\*\*?\s*(.*?)(?:\n|$)/i);
             const clientMatch = content.match(/\*\*Client \/ Location:\*\*\s*(.*?)(?:\n|$)/i);
 
             let isDiscrepancy = false;
-            if (isVipManual) {
+            if (isManualEncode) {
                 isDiscrepancy = content.includes("<!-- STATUS: PENDING -->");
             } else if (isReceiptLiquidation) {
                 isDiscrepancy = false;
@@ -6592,7 +6691,8 @@ export const App = () => {
                 nabRef: nabRef,
                 clientName: clientName,
                 isDiscrepancy: isDiscrepancy,
-                isVipManual: isVipManual,
+                isVipManual: isManualEncode,
+                isManualEncode,
                 isReceiptLiquidation: isReceiptLiquidation,
                 discrepancyReason: discrepancyReason,
                 time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -6636,7 +6736,7 @@ export const App = () => {
                 activity = 'Pending';
             } else if (record.isReceiptLiquidation) {
                 activity = 'Audit';
-            } else if (record.isVipManual) {
+            } else if (record.isManualEncode || record.isVipManual) {
                 activity = 'Audit';
             } else {
                 activity = hasValidNabCode ? 'Reimbursement' : 'Pending';
@@ -6664,10 +6764,10 @@ export const App = () => {
                 status = `Paid to Nab [${record.nabRef}] (Back Job)`;
             } else if (record.isReceiptLiquidation) {
                 status = 'Liquidation';
-            } else if (record.isVipManual) {
+            } else if (record.isManualEncode || record.isVipManual) {
                 status = hasValidNabCode
-                    ? `Special Instruction - Paid to Nab [${record.nabRef}]`
-                    : 'Special Instruction';
+                    ? `Manual Encode - Paid to Nab [${record.nabRef}]`
+                    : 'Manual Encode';
             } else if (activity === 'Pending') {
                 const taggedReason = extractPendingReason(record.full_email_content || '').trim();
                 let reasonText: string;
@@ -6870,7 +6970,7 @@ export const App = () => {
         });
         return uniqueNabCodes.size;
     }, [todaysProcessedRecords]);
-    const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && !r.isVipManual && !r.isReceiptLiquidation && r.nabRef !== 'PENDING' && r.nabRef !== '');
+    const nabReportData: any[] = todaysProcessedRecords.filter(r => !r.isDiscrepancy && !(r.isManualEncode || r.isVipManual) && !r.isReceiptLiquidation && r.nabRef !== 'PENDING' && r.nabRef !== '');
     const totalAmount = nabReportData.reduce((sum, r) => sum + parseFloat(String(r.amount).replace(/[^0-9.-]+/g, "")), 0);
 
     const getSaveButtonText = () => {
@@ -7228,13 +7328,13 @@ export const App = () => {
                                 </div>
 
                                 <div className="space-y-4">
-                                    {String(selectedRow.full_email_content || '').includes('<!-- ENTRY TYPE: VIP_MANUAL -->') && (
+                                    {MANUAL_ENCODE_MARKERS.some((marker) => String(selectedRow.full_email_content || '').includes(marker)) && (
                                         <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4 space-y-2">
                                             <div className="flex items-center gap-2">
                                                 <span className="inline-flex items-center px-2 py-1 rounded-full border border-cyan-400/30 bg-cyan-500/15 text-cyan-200 text-[11px] font-semibold uppercase tracking-wider">
-                                                    VIP Manual
+                                                    Manual Encode
                                                 </span>
-                                                <span className="text-xs text-cyan-100/80">Special Instruction</span>
+                                                <span className="text-xs text-cyan-100/80">Manual Encode</span>
                                             </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                                                 <div>
@@ -7428,7 +7528,7 @@ export const App = () => {
                                             <tbody className="divide-y divide-white/5">
                                                 {filteredDatabaseRows.map((row, index) => {
                                                     const isPending = String(row.nabCode || '').trim().toUpperCase() === 'PENDING';
-                                                    const typeLabel = row.isVipManual ? 'VIP Manual' : row.isReceiptLiquidation ? 'Liquidation' : (isPending ? '-' : row.expenseType);
+                                                    const typeLabel = (row.isManualEncode || row.isVipManual) ? 'Manual Encode' : row.isReceiptLiquidation ? 'Liquidation' : (isPending ? '-' : row.expenseType);
                                                     return (
                                                         <tr
                                                             key={row.id}
@@ -7460,9 +7560,9 @@ export const App = () => {
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">{row.ypName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200 uppercase font-semibold">{row.staffName}</td>
                                                             <td className="px-4 py-3 border-r border-white/5 whitespace-nowrap text-xs text-slate-200">
-                                                                {row.isVipManual ? (
+                                                                {(row.isManualEncode || row.isVipManual) ? (
                                                                     <span className="inline-flex items-center px-2 py-1 rounded-full border border-cyan-400/30 bg-cyan-500/15 text-cyan-200 font-semibold">
-                                                                        VIP Manual
+                                                                        Manual Encode
                                                                     </span>
                                                                 ) : row.isReceiptLiquidation ? (
                                                                     <span className="inline-flex items-center px-2 py-1 rounded-full border border-rose-400/30 bg-rose-500/15 text-rose-200 font-semibold">
@@ -8620,10 +8720,10 @@ export const App = () => {
                                     <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                         <TrendingUp size={100} className="text-white" />
                                     </div>
-                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Total Spend (Processed)</h3>
+                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Total Claim Value</h3>
                                     <p className="text-4xl font-bold text-white mb-2">${analyticsData.totalSpend.toFixed(2)}</p>
                                     <p className="text-xs text-emerald-400 flex items-center gap-1">
-                                        <CheckCircle size={12} /> {analyticsData.totalRequests} total requests
+                                        <CheckCircle size={12} /> {analyticsData.totalClaims} unique claims
                                     </p>
                                 </div>
 
@@ -8631,12 +8731,12 @@ export const App = () => {
                                     <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                         <BarChart3 size={100} className="text-blue-500" />
                                     </div>
-                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Top Location (YP)</h3>
+                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Top Location</h3>
                                     <p className="text-2xl font-bold text-blue-400 mb-2 truncate">
-                                        {analyticsData.yp.length > 0 ? analyticsData.yp[0][0] : 'N/A'}
+                                        {analyticsData.locations.length > 0 ? analyticsData.locations[0][0] : 'N/A'}
                                     </p>
                                     <p className="text-xs text-slate-500">
-                                        ${analyticsData.yp.length > 0 ? analyticsData.yp[0][1].toFixed(2) : '0.00'} spent here
+                                        ${analyticsData.locations.length > 0 ? analyticsData.locations[0][1].toFixed(2) : '0.00'} spent here
                                     </p>
                                 </div>
 
@@ -8644,7 +8744,7 @@ export const App = () => {
                                     <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                         <Users size={100} className="text-purple-500" />
                                     </div>
-                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Top Claimant</h3>
+                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-1">Top Staff Member</h3>
                                     <p className="text-2xl font-bold text-purple-400 mb-2 truncate">
                                         {analyticsData.staff.length > 0 ? analyticsData.staff[0][0] : 'N/A'}
                                     </p>
@@ -8654,17 +8754,42 @@ export const App = () => {
                                 </div>
                             </div>
 
+                            <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
+                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-200/70">Paid / Completed</p>
+                                    <p className="text-2xl font-bold text-emerald-300 mt-2">{analyticsData.statusCounts.paid}</p>
+                                </div>
+                                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-amber-200/70">Pending</p>
+                                    <p className="text-2xl font-bold text-amber-300 mt-2">{analyticsData.statusCounts.pending}</p>
+                                    <p className="text-[11px] text-amber-100/60 mt-1">Avg age {analyticsData.averagePendingAgeDays}d</p>
+                                </div>
+                                <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-rose-200/70">For Revision</p>
+                                    <p className="text-2xl font-bold text-rose-300 mt-2">{analyticsData.statusCounts.revision}</p>
+                                </div>
+                                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-cyan-200/70">Manual Encode</p>
+                                    <p className="text-2xl font-bold text-cyan-300 mt-2">{analyticsData.statusCounts.manualEncode}</p>
+                                </div>
+                                <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
+                                    <p className="text-[10px] uppercase tracking-wider font-bold text-fuchsia-200/70">Control Flags</p>
+                                    <p className="text-2xl font-bold text-fuchsia-300 mt-2">{analyticsData.dataQualityCount}</p>
+                                    <p className="text-[11px] text-fuchsia-100/60 mt-1">Oldest pending {analyticsData.oldestPendingAgeDays}d</p>
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                                 <div className="bg-[#1c1e24]/80 backdrop-blur-md rounded-[32px] border border-white/5 shadow-xl overflow-hidden">
                                     <div className="px-6 py-5 border-b border-white/5 flex justify-between items-center">
                                         <div className="flex items-center gap-3">
                                             <PieChart className="text-blue-400" size={20} />
-                                            <h3 className="font-semibold text-white">Expenses by Location (YP)</h3>
+                                            <h3 className="font-semibold text-white">Expenses by Client</h3>
                                         </div>
                                     </div>
                                     <div className="p-6">
                                         <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar">
-                                            {analyticsData.yp.map(([name, amount], idx) => (
+                                            {analyticsData.clients.map(([name, amount], idx) => (
                                                 <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs">
@@ -8677,13 +8802,13 @@ export const App = () => {
                                                         <div className="w-24 h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
                                                             <div
                                                                 className="h-full bg-blue-500"
-                                                                style={{ width: `${Math.min((amount / analyticsData.totalSpend) * 100, 100)}%` }}
+                                                                style={{ width: `${Math.min((amount / Math.max(analyticsData.totalSpend, 1)) * 100, 100)}%` }}
                                                             ></div>
                                                         </div>
                                                     </div>
                                                 </div>
                                             ))}
-                                            {analyticsData.yp.length === 0 && (
+                                            {analyticsData.clients.length === 0 && (
                                                 <p className="text-center text-slate-500 py-4">No data available.</p>
                                             )}
                                         </div>
@@ -8825,7 +8950,7 @@ export const App = () => {
                                             <div key={emp.id} className="relative rounded-xl border border-white/10 bg-white/5 p-4 flex items-start justify-between">
                                                 <div className="space-y-1">
                                                     <p className="text-sm font-semibold text-white">{getEmployeeDisplayName(emp)}</p>
-                                                    <p className="text-[11px] text-slate-400 uppercase">{`${emp.surname}, ${emp.firstName}`.toUpperCase()}</p>
+                                                    <p className="text-[11px] text-slate-400 uppercase">{buildEmployeeConcatenate(emp.firstName, emp.surname).toUpperCase()}</p>
                                                     <div className="flex gap-6 pt-1 text-xs text-slate-300">
                                                         <span><span className="text-slate-500">BSB </span>{emp.bsb}</span>
                                                         <span><span className="text-slate-500">Account </span>{emp.account}</span>
@@ -9961,7 +10086,7 @@ export const App = () => {
                                         </div>
                                     );
                                 })}
-                                <p className="text-[11px] text-slate-500">Account name: {`${employeeModal.draft.surname}, ${employeeModal.draft.firstName}`.toUpperCase()}</p>
+                                <p className="text-[11px] text-slate-500">Account name: {buildEmployeeConcatenate(employeeModal.draft.firstName, employeeModal.draft.surname).toUpperCase()}</p>
                                 <div className="flex justify-end gap-2 pt-2">
                                     <button onClick={() => setEmployeeModal(null)} className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold uppercase tracking-wider">Cancel</button>
                                     <button onClick={handleSaveEmployeeModal} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Save size={14} /> Save</button>

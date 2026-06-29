@@ -45,6 +45,69 @@ export const parseDelimitedLine = (line: string, delimiter: ',' | '\t'): string[
 export const makeEmployeeId = (firstName: string, surname: string, account: string, salt: string | number = ''): string =>
     `${normalizeEmployeeName(firstName)}_${normalizeEmployeeName(surname)}_${String(account).trim()}_${salt}`;
 
+export const buildEmployeeFullName = (firstName: string, surname: string): string =>
+    `${String(firstName || '').trim()} ${String(surname || '').trim()}`.replace(/\s+/g, ' ').trim();
+
+export const buildEmployeeConcatenate = (firstName: string, surname: string): string => {
+    const cleanFirst = String(firstName || '').trim();
+    const cleanSurname = String(surname || '').trim();
+    if (cleanFirst && cleanSurname) return `${cleanSurname}, ${cleanFirst}`;
+    return cleanSurname || cleanFirst;
+};
+
+const collapseRepeatedNamePhrase = (value: string): string => {
+    const tokens = String(value || '').split(/\s+/).filter(Boolean);
+    const total = tokens.length;
+    for (let size = Math.floor(total / 2); size >= 1; size -= 1) {
+        if (total % size !== 0) continue;
+        const head = tokens.slice(0, size).join(' ');
+        let repeated = total / size > 1;
+        for (let index = size; index < total; index += size) {
+            if (tokens.slice(index, index + size).join(' ') !== head) {
+                repeated = false;
+                break;
+            }
+        }
+        if (repeated) return head;
+    }
+    return tokens.join(' ');
+};
+
+export const sanitizeEmployeeNameParts = (firstName: string, surname: string): Pick<Employee, 'firstName' | 'surname' | 'fullName'> => {
+    const rawFirstName = String(firstName || '').replace(/\s+/g, ' ').trim();
+    const rawSurname = String(surname || '').replace(/\s+/g, ' ').trim();
+    const originalFullName = buildEmployeeFullName(rawFirstName, rawSurname);
+    if (normalizeEmployeeName(rawFirstName) && normalizeEmployeeName(rawFirstName) === normalizeEmployeeName(rawSurname)) {
+        return {
+            firstName: rawFirstName,
+            surname: '',
+            fullName: rawFirstName,
+        };
+    }
+    const cleanedFullName = collapseRepeatedNamePhrase(
+        originalFullName.replace(/\bpayee\b/gi, '').replace(/\s+/g, ' ').trim()
+    );
+
+    const shouldNormalize = Boolean(cleanedFullName)
+        && cleanedFullName.split(' ').filter(Boolean).length >= 2
+        && normalizeEmployeeName(cleanedFullName) !== normalizeEmployeeName(originalFullName);
+
+    if (!shouldNormalize) {
+        return {
+            firstName: rawFirstName,
+            surname: rawSurname,
+            fullName: originalFullName,
+        };
+    }
+
+    const normalizedParts = cleanedFullName.split(' ').filter(Boolean);
+    return {
+        firstName: normalizedParts[0],
+        surname: normalizedParts.slice(1).join(' '),
+        fullName: cleanedFullName,
+    };
+};
+
 export const parseEmployeeData = (rawData: string): Employee[] => {
     const rows = rawData
         .split(/\r?\n/)
@@ -68,12 +131,13 @@ export const parseEmployeeData = (rawData: string): Employee[] => {
             const surname = surnameIndex >= 0 ? (cols[surnameIndex] || '').trim() : (cols[1] || '').trim();
             const bsb = bsbIndex >= 0 ? (cols[bsbIndex] || '').trim() : (cols[3] || '').trim();
             const account = accountIndex >= 0 ? (cols[accountIndex] || '').trim() : (cols[4] || '').trim();
-            if (!firstName || !surname || !bsb || !account) return null;
+            const normalized = sanitizeEmployeeNameParts(firstName, surname);
+            if (!normalized.fullName || !bsb || !account) return null;
             return {
-                id: makeEmployeeId(firstName, surname, account, index),
-                firstName,
-                surname,
-                fullName: `${firstName} ${surname}`,
+                id: makeEmployeeId(normalized.firstName, normalized.surname, account, index),
+                firstName: normalized.firstName,
+                surname: normalized.surname,
+                fullName: normalized.fullName,
                 bsb,
                 account,
             };
@@ -86,7 +150,7 @@ export const parseEmployeeData = (rawData: string): Employee[] => {
 export const serializeEmployeeData = (employees: Employee[]): string => {
     const header = 'First Names\tSurname\tConcatenate\tBSB\tAccount';
     const rows = employees.map((e) =>
-        `${e.firstName}\t${e.surname}\t${e.surname}, ${e.firstName}\t${e.bsb}\t${e.account}`);
+        `${e.firstName}\t${e.surname}\t${buildEmployeeConcatenate(e.firstName, e.surname)}\t${e.bsb}\t${e.account}`);
     return [header, ...rows].join('\n');
 };
 
@@ -104,9 +168,16 @@ export const dedupeByAccount = (list: Employee[]): Employee[] => {
     list.forEach((e) => {
         const key = e.account.trim();
         if (!isValidAccount(key)) return;
+        const normalized = sanitizeEmployeeNameParts(e.firstName, e.surname);
         // Map keeps the first insertion position for a key while letting us overwrite
         // its value, so order = first occurrence, data = last occurrence.
-        byAccount.set(key, { ...e, account: key, fullName: `${e.firstName} ${e.surname}` });
+        byAccount.set(key, {
+            ...e,
+            firstName: normalized.firstName,
+            surname: normalized.surname,
+            fullName: normalized.fullName,
+            account: key,
+        });
     });
     return Array.from(byAccount.values());
 };
@@ -143,8 +214,9 @@ export const xlsxRowsToRawText = (rows: Cell[][]): string => {
         const surname = recognized ? (cols[surnameIndex] || '') : (cols[1] || '');
         const bsb = recognized ? (cols[bsbIndex] || '') : (cols[3] || '');
         const account = recognized ? (cols[accountIndex] || '') : (cols[4] || '');
-        if (!firstName || !surname || !bsb || !account) return;
-        out.push(`${firstName}\t${surname}\t${surname}, ${firstName}\t${bsb}\t${account}`);
+        const normalized = sanitizeEmployeeNameParts(firstName, surname);
+        if (!normalized.fullName || !bsb || !account) return;
+        out.push(`${normalized.firstName}\t${normalized.surname}\t${buildEmployeeConcatenate(normalized.firstName, normalized.surname)}\t${bsb}\t${account}`);
     });
     return out.join('\n');
 };
