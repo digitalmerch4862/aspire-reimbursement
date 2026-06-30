@@ -6741,7 +6741,7 @@ export const App = () => {
 
             let status = '';
             if (isBackJob) {
-                status = `Paid to Nab [${record.nabRef}] (Back Job)`;
+                status = `Paid to Nab [${record.nabRef}] (Reopened for Processing)`;
             } else if (record.isReceiptLiquidation) {
                 status = 'Liquidation';
             } else if (record.isManualEncode || record.isVipManual) {
@@ -8361,7 +8361,7 @@ export const App = () => {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => handleCopyTable('nab-log-table', 'nab')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'nab' ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                                    <button onClick={() => handleCopyTable('nab-report-container', 'nab')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'nab' ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                                         {reportCopied === 'nab' ? <Check size={16} /> : <Copy size={16} />}
                                         {reportCopied === 'nab' ? 'Copied Table!' : 'Copy for Outlook'}
                                     </button>
@@ -8372,8 +8372,17 @@ export const App = () => {
                             </div>
 
                             <div className="p-6 overflow-x-auto">
-                                <div className="bg-transparent rounded-lg overflow-hidden">
-                                    <table id="nab-log-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
+                                <div id="nab-report-container" style={{ fontFamily: 'Arial, sans-serif', color: '#ffffff' }}>
+                                    <div style={{ marginBottom: '24px' }}>
+                                        <div style={{ fontSize: '14px', color: '#ffffff' }}>NAB BANKING PROCESSED ({new Date().getDate().toString().padStart(2, '0')}-{new Date().toLocaleString('en-US', { month: 'short' })}-{new Date().getFullYear()})</div>
+                                        <hr style={{ borderTop: '1px solid rgba(255, 255, 255, 0.2)', borderBottom: 'none', margin: '12px 0' }} />
+                                        <div style={{ fontSize: '13px', color: '#ffffff' }}>
+                                            Hi Josh,<br /><br />
+                                            Please see below the list of reimbursements processed in our NAB banking today
+                                        </div>
+                                    </div>
+                                    <div className="bg-transparent rounded-lg overflow-hidden">
+                                        <table id="nab-log-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
                                         <thead>
                                             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                                                 <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 'bold', color: '#ffffff', width: '100px' }}>Date</th>
@@ -8447,6 +8456,7 @@ export const App = () => {
                                             </tr>
                                         </tbody>
                                     </table>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -8486,7 +8496,15 @@ export const App = () => {
 
                             <div className="p-8 overflow-x-auto">
                                 <div id="eod-report" style={{ fontFamily: 'Arial, sans-serif', color: '#ffffff' }}>
-                                <div className="bg-transparent rounded-lg overflow-hidden">
+                                    <div style={{ marginBottom: '24px' }}>
+                                        <div style={{ fontSize: '14px', color: '#ffffff' }}>End of the Day Report ({new Date().getDate().toString().padStart(2, '0')}-{new Date().toLocaleString('en-US', { month: 'short' })}-{new Date().getFullYear()})</div>
+                                        <hr style={{ borderTop: '1px solid rgba(255, 255, 255, 0.2)', borderBottom: 'none', margin: '12px 0' }} />
+                                        <div style={{ fontSize: '13px', color: '#ffffff' }}>
+                                            Hi Josh<br /><br />
+                                            Please see my end-of-day report
+                                        </div>
+                                    </div>
+                                    <div className="bg-transparent rounded-lg overflow-hidden">
                                     <table id="eod-schedule-table" style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Arial, sans-serif', fontSize: '13px', backgroundColor: 'transparent', color: '#ffffff' }}>
                                         <thead>
                                             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
