@@ -8596,18 +8596,45 @@ export const App = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {eodPendingRows.map((row: any) => (
-                                                <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.taggedDate}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.agingDays} day{row.agingDays === 1 ? '' : 's'}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatPersonName(row.staffName)}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatAmountDisplay(row.amount, { currency: true })}</td>
-                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.status}</td>
-                                                </tr>
-                                            ))}
-                                            {eodPendingRows.length === 0 && (
-                                                <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No prior-day pending records. Today's pending appears in the timeline above.</td></tr>
-                                            )}
+                                            {(() => {
+                                                if (eodPendingRows.length === 0) {
+                                                    return (
+                                                        <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No prior-day pending records. Today's pending appears in the timeline above.</td></tr>
+                                                    );
+                                                }
+
+                                                const julianRows = eodPendingRows.filter((row: any) => row.status === 'For Julian\'s Approval');
+                                                const bindiRows = eodPendingRows.filter((row: any) => row.status === 'NAB details C/o Bindi');
+                                                const otherRows = eodPendingRows.filter((row: any) => row.status !== 'For Julian\'s Approval' && row.status !== 'NAB details C/o Bindi');
+
+                                                const renderGroup = (rows: any[], title: string) => {
+                                                    if (rows.length === 0) return null;
+                                                    return (
+                                                        <React.Fragment key={title}>
+                                                            <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                                                                <td colSpan={5} style={{ padding: '8px 16px', fontWeight: 'bold', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</td>
+                                                            </tr>
+                                                            {rows.map((row: any) => (
+                                                                <tr key={row.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'transparent' }}>
+                                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.taggedDate}</td>
+                                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.agingDays} day{row.agingDays === 1 ? '' : 's'}</td>
+                                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatPersonName(row.staffName)}</td>
+                                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{formatAmountDisplay(row.amount, { currency: true })}</td>
+                                                                    <td style={{ padding: '12px 16px', color: '#ffffff', verticalAlign: 'top' }}>{row.status}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </React.Fragment>
+                                                    );
+                                                };
+
+                                                return (
+                                                    <>
+                                                        {renderGroup(julianRows, "For Julian's Approval")}
+                                                        {renderGroup(bindiRows, "NAB details C/o Bindi")}
+                                                        {renderGroup(otherRows, "Other Pending")}
+                                                    </>
+                                                );
+                                            })()}
                                         </tbody>
                                     </table>
                                 </div>
