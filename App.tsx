@@ -6415,9 +6415,10 @@ export const App = () => {
                     });
                     
                     // Collect Layer 1 duplicates (Unique ID matches)
+                    // Only flag if the UID is actually found in history DB (has a real NAB code) — prevents false alerts for new receipts
                     const uniqueIdDuplicates: Array<{uniqueId: string, rows: number[], matchType: string}> = [];
                     uniqueIdMap.forEach((rows, uid) => {
-                        if (rows.length > 1) {
+                        if (rows.length > 1 && historyUniqueIdNabMap.has(uid)) {
                             uniqueIdDuplicates.push({ uniqueId: uid, rows, matchType: 'UNIQUE ID DUPLICATE' });
                         }
                     });
@@ -6509,7 +6510,9 @@ export const App = () => {
                     }
                     
                     // If fraud detected, show popup immediately after Start Audit.
-                    if (allFraudDuplicates.length > 0) {
+                    // Only show if at least one row has a confirmed NAB code from history (avoid false positives when nabCode is '-')
+                    const hasConfirmedNabCode = fraudReceiptsList.some(r => r.nabCode && r.nabCode !== '-');
+                    if (allFraudDuplicates.length > 0 && hasConfirmedNabCode) {
                         setFraudDuplicates(allFraudDuplicates);
                         setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
                         setPendingProcessResult(result);
