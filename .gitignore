@@ -69,3 +69,5 @@ nul
 
 # Git worktrees
 .claude/worktrees/
+
+.vercel

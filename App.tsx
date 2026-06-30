@@ -3788,7 +3788,6 @@ export const App = () => {
                 const hasTxDate = Boolean(txDateKey && txDateKey !== '-');
                 const hasHistoryDate = Boolean(historyDateKey && historyDateKey !== '-');
                 const dateMatch = hasTxDate && hasHistoryDate ? txDateKey === historyDateKey : false;
-
                 const hasTxStore = Boolean(txStoreKey && txStoreKey !== '-');
                 const hasHistoryStore = Boolean(historyStoreKey && historyStoreKey !== '-');
                 const storeMatch = hasTxStore && hasHistoryStore ? txStoreKey === historyStoreKey : false;
@@ -3798,6 +3797,10 @@ export const App = () => {
                 const uidMatch = hasTxUid && hasHistoryUid ? txReference === historyReference : false;
 
                 if (!totalAmountMatch) return;
+
+                // Only flag as a duplicate if the history record was actually paid (has a valid NAB code).
+                // If the matched record has no NAB code it is still pending/unpaid - not a real duplicate payment.
+                if (!historyNabCode) return;
 
                 const evidence: DuplicateMatchEvidence = {
                     txStaffName: tx.staffName,
@@ -9853,7 +9856,9 @@ export const App = () => {
                                             .filter(r => dup.rows.includes(r.rowNum))
                                             .map(r => r.nabCode)
                                             .filter(n => n && n !== '-');
-                                        const nabDisplay = dupNabCodes.length > 0 ? dupNabCodes.join(', ') : null;
+                                        // Always show: guaranteed by our duplicate guard that historyNabCode exists.
+                                        // Fall back to any nab code from the row list.
+                                        const nabDisplay = dupNabCodes.length > 0 ? dupNabCodes.join(', ') : '-';
                                         return (
                                         <div key={idx} className={`rounded-xl border p-4 ${(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? 'border-red-500/30 bg-red-500/10' : 'border-orange-500/30 bg-orange-500/10'}`}>
                                             {(dup.matchType === 'UNIQUE ID DUPLICATE' || dup.matchType === 'exact') ? (
@@ -9873,19 +9878,18 @@ export const App = () => {
                                             <p className="text-slate-300 text-sm mt-2">
                                                 Rows: <span className="text-white font-bold">{dup.rows.join(', ')}</span>
                                             </p>
-                                            {nabDisplay && (
-                                                <div className="mt-2 flex items-center gap-2 bg-black/30 rounded-lg px-3 py-2 border border-white/10">
-                                                    <span className="text-[10px] uppercase text-slate-400 font-bold shrink-0">NAB Code:</span>
-                                                    <span className="text-emerald-300 font-mono font-bold text-sm flex-1">{nabDisplay}</span>
-                                                    <button
-                                                        onClick={() => handleCopyField(nabDisplay, `fraud-nab-${idx}`)}
-                                                        className="text-slate-400 hover:text-white transition-colors shrink-0"
-                                                        title="Copy NAB Code"
-                                                    >
-                                                        {copiedField === `fraud-nab-${idx}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                                                    </button>
-                                                </div>
-                                            )}
+                                            <div className="mt-2 flex items-center gap-2 bg-black/30 rounded-lg px-3 py-2 border border-emerald-500/30">
+                                                <span className="text-[10px] uppercase text-emerald-400 font-bold shrink-0">NAB Code:</span>
+                                                <span className="text-emerald-300 font-mono font-bold text-sm flex-1">{nabDisplay}</span>
+                                                <button
+                                                    onClick={() => handleCopyField(nabDisplay, `fraud-nab-${idx}`)}
+                                                    className="text-slate-400 hover:text-white transition-colors shrink-0"
+                                                    title="Copy NAB Code"
+                                                >
+                                                    {copiedField === `fraud-nab-${idx}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                                                </button>
+                                            </div>
+
                                             <p className="text-xs mt-2 px-2 py-0.5 rounded-full inline-block bg-slate-600 text-white">
                                                 {dup.matchType}
                                             </p>
