@@ -3900,8 +3900,6 @@ export const App = () => {
         if (fraudPopupSignalKeyRef.current === fraudPopupPayload.signalKey) return;
 
         fraudPopupSignalKeyRef.current = fraudPopupPayload.signalKey;
-        const hasConfirmedNab = fraudPopupPayload.rows.some(r => r.nabCode && r.nabCode.trim() !== '-' && r.nabCode.trim().length > 0);
-        if (!hasConfirmedNab) return;
         setPendingProcessResult(null);
         setFraudDuplicates(fraudPopupPayload.duplicates);
         setFraudReceiptRows(fraudPopupPayload.rows.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
@@ -5948,8 +5946,6 @@ export const App = () => {
                 'amber': 'WEAK (Amount + UID)'
             };
             
-            const isBlockSignal = signal === 'red' || signal === 'orange';
-
             const detail = `⚠️ FRAUD ${signalLabels[signal] || signal.toUpperCase()} MATCH DETECTED\n\n` +
                 `Amount: $${amountPreview}\n` +
                 `Date: ${datePreview}\n` +
@@ -5957,29 +5953,9 @@ export const App = () => {
                 `Staff Name: ${staffNamePreview}\n` +
                 `Unique ID / Fallback: ${uniqueIdPreview}\n` +
                 `NAB Code: ${nabCodePreview}\n\n` +
-                (isBlockSignal
-                    ? `❌ SAVE BLOCKED: This receipt appears to be a duplicate. Please review and use a different receipt.`
-                    : `Do you want to proceed anyway?`);
+                `Warning only. Review match, then choose whether to proceed.`;
 
-            if (isBlockSignal) {
-                const hasConfirmedNabCode = nabCodePreview !== '-' && nabCodePreview.trim().length > 0;
-                if (hasConfirmedNabCode) {
-                    // Duplicate has a paid NAB code — ask if already paid before blocking
-                    setSaveModalDecision({
-                        mode: 'already-paid',
-                        detail: 'Was this expense already paid by another means (cash, card advance, petty cash)?',
-                        pendingSignal: signal,
-                        pendingDetail: detail
-                    });
-                    setShowSaveModal(true);
-                    return;
-                }
-                // Duplicate has no NAB code — still pending, all clear, proceed to save
-                confirmSave('PAID', { duplicateSignal: 'green', detail: 'Duplicate matched but no confirmed NAB code — treated as clear.' });
-                return;
-            }
-
-            setSaveModalDecision({ mode: 'yellow', detail });
+            setSaveModalDecision({ mode: 'yellow', detail, pendingSignal: signal });
             setShowSaveModal(true);
             return;
         }
@@ -6529,18 +6505,15 @@ export const App = () => {
                         });
                     }
                     
-                    // If fraud detected and has confirmed NAB code, show popup
+                    // If fraud detected, show popup immediately after Start Audit.
                     if (allFraudDuplicates.length > 0) {
-                        const hasConfirmedNab = fraudReceiptsList.some(r => r.nabCode && r.nabCode.trim() !== '-' && r.nabCode.trim().length > 0);
-                        if (hasConfirmedNab) {
-                            setFraudDuplicates(allFraudDuplicates);
-                            setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
-                            setPendingProcessResult(result);
-                            setShowFraudPopup(true);
-                            setProcessingState(ProcessingState.IDLE);
-                            setOcrStatus('Fraud Check');
-                            return;
-                        }
+                        setFraudDuplicates(allFraudDuplicates);
+                        setFraudReceiptRows(fraudReceiptsList.filter(r => parseFloat(r.amount.replace(/[^0-9.-]/g, '')) > 0));
+                        setPendingProcessResult(result);
+                        setShowFraudPopup(true);
+                        setProcessingState(ProcessingState.IDLE);
+                        setOcrStatus('Fraud Check');
+                        return;
                     }
                 }
 
@@ -9437,7 +9410,7 @@ export const App = () => {
                                                         ? 'This can proceed only as Pending and will be routed for Julian approval.'
                                                         : isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                             ? 'This is rejected for payment because reimbursement form total is higher than receipt total. Save as Pending to send claimant revision email.'
-                                                            : 'This can proceed only as Pending. Reviewer reason is required for audit trail.'}
+                                                            : 'Warning only. Review duplicate details, then proceed as Paid or save as Pending.'}
                                             </p>
                                             {(saveModalDecision.mode === 'red' || (saveModalDecision.mode === 'yellow' && !isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail))) && (
                                                 <div className="rounded-xl border border-red-400/20 bg-red-500/5 p-3 space-y-2">
@@ -9488,7 +9461,7 @@ export const App = () => {
                                             )}
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">
-                                                    {(isJulianApprovalDetail(saveModalDecision?.detail) || isFormHigherMismatchDetail(saveModalDecision?.detail)) ? 'Reviewer reason (optional)' : 'Reviewer reason (required)'}
+                                                    {(isJulianApprovalDetail(saveModalDecision?.detail) || isFormHigherMismatchDetail(saveModalDecision?.detail)) ? 'Reviewer reason (optional)' : 'Reviewer reason (optional)'}
                                                 </label>
                                                 <textarea
                                                     value={reviewerOverrideReason}
@@ -9498,7 +9471,7 @@ export const App = () => {
                                                         ? (isFormHigherMismatchDetail(saveModalDecision?.detail)
                                                             ? 'Optional note for claimant revision request'
                                                             : 'Optional note for Julian approval routing')
-                                                        : 'Explain why this should be saved as pending'}
+                                                        : 'Optional note for duplicate warning'}
                                                     className="w-full bg-black/20 border border-white/15 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-amber-400/70 resize-none"
                                                 />
                                             </div>
@@ -9557,27 +9530,40 @@ export const App = () => {
                                         </>
                                     )}
                                     {(saveModalDecision?.mode === 'red' || saveModalDecision?.mode === 'yellow') ? (
-                                        <button
-                                            onClick={() => confirmSave('PENDING', {
-                                                duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : saveModalDecision.mode as DuplicateTrafficLight,
-                                                reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
-                                                    ? (isOver30DaysDetail(saveModalDecision?.detail)
-                                                        ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
-                                                        : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
+                                        <>
+                                            {!isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && (
+                                                <button
+                                                    onClick={() => confirmSave('PAID', {
+                                                        duplicateSignal: (saveModalDecision.pendingSignal as DuplicateTrafficLight) || 'yellow',
+                                                        reviewerReason: reviewerOverrideReason.trim(),
+                                                        detail: saveModalDecision.detail
+                                                    })}
+                                                    className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-500 transition-colors"
+                                                >
+                                                    Proceed as PAID
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => confirmSave('PENDING', {
+                                                    duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : (saveModalDecision.pendingSignal as DuplicateTrafficLight) || saveModalDecision.mode as DuplicateTrafficLight,
+                                                    reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
+                                                        ? (isOver30DaysDetail(saveModalDecision?.detail)
+                                                            ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
+                                                            : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
+                                                        : isFormHigherMismatchDetail(saveModalDecision?.detail)
+                                                            ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
+                                                            : reviewerOverrideReason),
+                                                    detail: saveModalDecision.detail
+                                                })}
+                                                className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {isJulianApprovalDetail(saveModalDecision?.detail)
+                                                    ? 'Save as PENDING (For Julian Approval)'
                                                     : isFormHigherMismatchDetail(saveModalDecision?.detail)
-                                                        ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
-                                                        : reviewerOverrideReason),
-                                                detail: saveModalDecision.detail
-                                            })}
-                                            disabled={!isJulianApprovalDetail(saveModalDecision?.detail) && !isFormHigherMismatchDetail(saveModalDecision?.detail) && !reviewerOverrideReason.trim()}
-                                            className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {isJulianApprovalDetail(saveModalDecision?.detail)
-                                                ? 'Save as PENDING (For Julian Approval)'
-                                                : isFormHigherMismatchDetail(saveModalDecision?.detail)
-                                                    ? 'Reject and Save as PENDING'
-                                                    : 'Save as PENDING'}
-                                        </button>
+                                                        ? 'Reject and Save as PENDING'
+                                                        : 'Save as PENDING'}
+                                            </button>
+                                        </>
                                     ) : (
                                         <>
                                             <button
