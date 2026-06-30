@@ -9543,26 +9543,51 @@ export const App = () => {
                                                     Proceed as PAID
                                                 </button>
                                             )}
-                                            <button
-                                                onClick={() => confirmSave('PENDING', {
-                                                    duplicateSignal: isFormHigherMismatchDetail(saveModalDecision?.detail) ? 'green' : (saveModalDecision.pendingSignal as DuplicateTrafficLight) || saveModalDecision.mode as DuplicateTrafficLight,
-                                                    reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
-                                                        ? (isOver30DaysDetail(saveModalDecision?.detail)
-                                                            ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
-                                                            : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
-                                                        : isFormHigherMismatchDetail(saveModalDecision?.detail)
-                                                            ? 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.'
-                                                            : reviewerOverrideReason),
-                                                    detail: saveModalDecision.detail
-                                                })}
-                                                className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                            >
-                                                {isJulianApprovalDetail(saveModalDecision?.detail)
-                                                    ? 'Save as PENDING (For Julian Approval)'
-                                                    : isFormHigherMismatchDetail(saveModalDecision?.detail)
-                                                        ? 'Reject and Save as PENDING'
-                                                        : 'Save as PENDING'}
-                                            </button>
+                                            {isFormHigherMismatchDetail(saveModalDecision?.detail) ? (
+                                                <button
+                                                    onClick={() => confirmSave('PENDING', {
+                                                        duplicateSignal: 'green',
+                                                        reviewerReason: reviewerOverrideReason.trim() || 'Auto-rejected: reimbursement form total is higher than receipt total. Claimant revision requested.',
+                                                        detail: saveModalDecision.detail
+                                                    })}
+                                                    className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
+                                                >
+                                                    Reject and Save as PENDING
+                                                </button>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={() => confirmSave('PENDING', {
+                                                            duplicateSignal: (saveModalDecision.pendingSignal as DuplicateTrafficLight) || saveModalDecision.mode as DuplicateTrafficLight,
+                                                            reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
+                                                                ? (isOver30DaysDetail(saveModalDecision?.detail)
+                                                                    ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
+                                                                    : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
+                                                                : reviewerOverrideReason),
+                                                            detail: saveModalDecision.detail,
+                                                            pendingReason: 'NAB details C/o Bindi'
+                                                        })}
+                                                        className="px-4 py-2 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
+                                                    >
+                                                        Pending: NAB details C/o Bindi
+                                                    </button>
+                                                    <button
+                                                        onClick={() => confirmSave('PENDING', {
+                                                            duplicateSignal: (saveModalDecision.pendingSignal as DuplicateTrafficLight) || saveModalDecision.mode as DuplicateTrafficLight,
+                                                            reviewerReason: reviewerOverrideReason.trim() || (isJulianApprovalDetail(saveModalDecision?.detail)
+                                                                ? (isOver30DaysDetail(saveModalDecision?.detail)
+                                                                    ? 'Auto-routed: receipt is older than 60 days, pending Julian approval.'
+                                                                    : 'Auto-routed: total reimbursement at or above $300, pending Julian approval.')
+                                                                : reviewerOverrideReason),
+                                                            detail: saveModalDecision.detail,
+                                                            pendingReason: 'For Julian\'s Approval'
+                                                        })}
+                                                        className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-semibold hover:bg-indigo-400 transition-colors"
+                                                    >
+                                                        Pending: For Julian's Approval
+                                                    </button>
+                                                </>
+                                            )}
                                         </>
                                     ) : (
                                         <>
