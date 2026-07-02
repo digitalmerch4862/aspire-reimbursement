@@ -8321,6 +8321,21 @@ export const App = () => {
                                                                         >
                                                                             Julian
                                                                         </button>
+                                                                        <button
+                                                                            onClick={() => openPendingApprovalModal({
+                                                                                key: `${group.key}-${record.id}`,
+                                                                                staffName: group.staffName,
+                                                                                records: [record],
+                                                                                count: 1,
+                                                                                totalAmount: Number(record.amount || 0),
+                                                                                latestDate: String(record.date || '-'),
+                                                                                oldestAgeDays: record.pendingAgeDays || 0
+                                                                            })}
+                                                                            title="Approve Record"
+                                                                            className="p-1.5 rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors ml-1"
+                                                                        >
+                                                                            <Check size={14} />
+                                                                        </button>
                                                                     </div>
                                                                 </div>
                                                             );
