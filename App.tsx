@@ -6932,15 +6932,18 @@ export const App = () => {
         });
     }, [pendingApprovalRecords, nowTick]);
     const eodPendingStatusSummary = useMemo(() => {
-        return eodPendingRows.reduce(
-            (acc, row: any) => {
-                if (row.status === 'NAB details C/o Bindi') acc.bindi += 1;
-                if (row.status === 'For Julian\'s Approval') acc.julian += 1;
+        // Count from ALL pendingApprovalRecords (same source as Audit Dashboard Pending section)
+        // so both sections stay in sync — not just the time-filtered eodPendingRows.
+        return pendingApprovalRecords.reduce(
+            (acc: { bindi: number; julian: number }, record: any) => {
+                const reason = extractPendingReason(record.full_email_content || '') || 'For Julian\'s Approval';
+                if (reason === 'NAB details C/o Bindi') acc.bindi += 1;
+                else if (reason === 'For Julian\'s Approval') acc.julian += 1;
                 return acc;
             },
             { bindi: 0, julian: 0 }
         );
-    }, [eodPendingRows]);
+    }, [pendingApprovalRecords]);
     const accomplishedNabCount = useMemo(() => {
         const uniqueNabCodes = new Set<string>();
         todaysProcessedRecords.forEach((record: any) => {
