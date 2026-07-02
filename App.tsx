@@ -21,6 +21,7 @@ import InputMethodToggle, { InputMethod } from './components/Dashboard/InputMeth
 import AIInputPanel from './components/Dashboard/AIInputPanel';
 import { FileWithPreview, ProcessingResult, ProcessingState } from './types';
 import * as ModeLogic from './logic/modes';
+import { getReportPeriod } from './logic/reportPeriods';
 import {
     Employee,
     normalizeEmployeeName,
@@ -1561,6 +1562,10 @@ export const App = () => {
 
     // Analytics Report State
     const [generatedReport, setGeneratedReport] = useState<string | null>(null);
+    const [reportTargetDate, setReportTargetDate] = useState<string>(() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
     const [isEditingReport, setIsEditingReport] = useState(false);
     const [reportEditableContent, setReportEditableContent] = useState('');
 
@@ -4855,32 +4860,11 @@ export const App = () => {
     }, [claimAnalyticsRows, nowTick]);
 
     const handleGenerateReport = (type: 'weekly' | 'monthly' | 'quarterly' | 'yearly') => {
-        const now = new Date();
-        let startDate = new Date();
-        let reportTitle = "";
+        const targetDate = new Date(`${reportTargetDate}T23:59:59`);
+        const { startDate, endDate, reportTitle } = getReportPeriod(type, targetDate);
+        const now = endDate; // period end drives Reporting Period, Report Date, and prior-period math
 
-        switch (type) {
-            case 'weekly':
-                startDate.setDate(now.getDate() - 7);
-                reportTitle = "WEEKLY EXPENSE REPORT";
-                break;
-            case 'monthly':
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-                reportTitle = "MONTHLY EXPENSE REPORT (MTD)";
-                break;
-            case 'quarterly': {
-                const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
-                startDate = new Date(now.getFullYear(), quarterMonth, 1);
-                reportTitle = "QUARTERLY EXPENSE REPORT (QTD)";
-                break;
-            }
-            case 'yearly':
-                startDate = new Date(now.getFullYear(), 0, 1);
-                reportTitle = "ANNUAL EXPENSE REPORT (YTD)";
-                break;
-        }
-
-        const relevantRows = claimAnalyticsRows.filter((row: any) => !row.isReceiptLiquidation && row.rawDate >= startDate);
+        const relevantRows = claimAnalyticsRows.filter((row: any) => !row.isReceiptLiquidation && row.rawDate >= startDate && row.rawDate <= endDate);
         if (relevantRows.length === 0) {
             showWarningToast('No records found for this period.');
             return;
@@ -8909,6 +8893,15 @@ export const App = () => {
                                         <h3 className="font-semibold text-white">Executive Reporting Suite</h3>
                                     </div>
                                     <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Outlook Optimized</span>
+                                </div>
+                                <div className="px-6 pt-5 flex items-center gap-3">
+                                    <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Report Target Date</label>
+                                    <input
+                                        type="date"
+                                        value={reportTargetDate}
+                                        onChange={(e) => setReportTargetDate(e.target.value)}
+                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-400 [color-scheme:dark]"
+                                    />
                                 </div>
                                 <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <button
