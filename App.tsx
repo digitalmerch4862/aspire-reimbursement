@@ -6890,7 +6890,12 @@ export const App = () => {
         if (!query) return pendingApprovalStaffGroups;
         return pendingApprovalStaffGroups.filter(group =>
             group.staffName?.toLowerCase().includes(query) ||
-            String(group.totalAmount?.toFixed(2) ?? '').includes(query)
+            String(group.totalAmount?.toFixed(2) ?? '').includes(query) ||
+            group.records.some((r: any) =>
+                String(r.amount ?? '').toLowerCase().includes(query) ||
+                String(r.clientName ?? '').toLowerCase().includes(query) ||
+                String(r.date ?? '').toLowerCase().includes(query)
+            )
         );
     }, [pendingApprovalStaffGroups, pendingGroupSearchQuery]);
 
@@ -8259,7 +8264,7 @@ export const App = () => {
                                         <span className="px-2 py-1 rounded-full bg-red-500/15 border border-red-400/25 text-red-200">8+d: {pendingAgingSummary.stale}</span>
                                     </div>
 
-                                    <div className="p-6 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
+                                    <div className="p-6 space-y-3">
                                         {filteredPendingGroups.length > 0 ? filteredPendingGroups.map((group) => (
                                             <div key={group.key} className="bg-black/20 border border-white/10 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                                                 <div className="flex-1 space-y-2">
@@ -8286,10 +8291,15 @@ export const App = () => {
                                                             const isJulian = activeReason === 'For Julian\'s Approval';
                                                             const busy = taggingRecordId === record.id;
                                                             return (
-                                                                <div key={record.id} className="flex items-center justify-between gap-2">
-                                                                    <span className="text-xs text-slate-300 truncate">
-                                                                        {String(record.clientFullName || record.client_name || record.date || record.id)}
-                                                                    </span>
+                                                                <div key={record.id} className="flex items-center justify-between gap-2 py-0.5">
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <span className="text-xs text-slate-300 truncate max-w-[180px]" title={String(record.clientFullName || record.clientName || record.date || record.id)}>
+                                                                            {String(record.clientFullName || record.clientName || record.date || record.id)}
+                                                                        </span>
+                                                                        <span className="text-xs font-semibold text-amber-300 shrink-0 tabular-nums">
+                                                                            ${String(record.amount || '0.00')}
+                                                                        </span>
+                                                                    </div>
                                                                     <div className="flex items-center gap-1.5 shrink-0">
                                                                         <button
                                                                             onClick={() => void handleTagPendingReason(record, 'NAB details C/o Bindi')}
