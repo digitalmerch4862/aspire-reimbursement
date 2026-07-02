@@ -5221,10 +5221,87 @@ export const App = () => {
         }
     };
 
+    const generatePendingReimbursementsHtml = () => {
+        const summaryRowsHtml = `
+        <tr style="border-bottom: 1px solid #dddddd;">
+            <td style="padding: 10px 12px; color: #333333;">NAB details C/o Bindi</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: bold;">${eodPendingStatusSummary.bindi}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #dddddd;">
+            <td style="padding: 10px 12px; color: #333333;">For Julian's Approval</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: bold;">${eodPendingStatusSummary.julian}</td>
+        </tr>
+        `;
+
+        const renderGroupHtml = (rows: any[], title: string) => {
+            if (rows.length === 0) return '';
+            const groupHeaderHtml = `
+            <tr style="background-color: #f4f4f4;">
+                <td colspan="5" style="padding: 8px 12px; font-weight: bold; color: #666666; border-bottom: 1px solid #dddddd; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;">${escapeHtml(title)}</td>
+            </tr>
+            `;
+            const rowsHtml = rows.map((row: any) => `
+                <tr style="border-bottom: 1px solid #dddddd;">
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.taggedDate)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${row.agingDays} day${row.agingDays === 1 ? '' : 's'}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.status)}</td>
+                </tr>
+            `).join('');
+            return groupHeaderHtml + rowsHtml;
+        };
+
+        let pendingTableBodyHtml = '';
+        if (eodPendingRows.length === 0) {
+            pendingTableBodyHtml = `<tr><td colspan="5" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
+        } else {
+            const julianRows = eodPendingRows.filter((row: any) => row.status === 'For Julian\'s Approval');
+            const bindiRows = eodPendingRows.filter((row: any) => row.status === 'NAB details C/o Bindi');
+            const otherRows = eodPendingRows.filter((row: any) => row.status !== 'For Julian\'s Approval' && row.status !== 'NAB details C/o Bindi');
+            pendingTableBodyHtml = renderGroupHtml(julianRows, "For Julian's Approval") + renderGroupHtml(bindiRows, "NAB details C/o Bindi") + renderGroupHtml(otherRows, "Other Pending");
+        }
+
+        return `
+            <div style="margin-bottom: 12px;">
+                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
+                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
+            </div>
+            <div style="margin-bottom: 18px;">
+                <h4 style="margin: 0 0 8px 0; color: #333333; font-size: 14px; font-weight: bold;">Pending Status Summary</h4>
+                <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+                    <thead>
+                        <tr>
+                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status</th>
+                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${summaryRowsHtml}
+                    </tbody>
+                </table>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+                <thead>
+                    <tr>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Date</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Aging</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Name</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pendingTableBodyHtml}
+                </tbody>
+            </table>
+        `;
+    };
+
     const generateNabOutlookHtml = () => {
         const now = new Date();
         const dateStr = `${now.getDate().toString().padStart(2, '0')}-${now.toLocaleString('en-US', { month: 'short' })}-${now.getFullYear()}`;
-        
+
         let rowsHtml = '';
         if (nabReportData.length === 0) {
             rowsHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No banking records in the current cycle.</td></tr>`;
@@ -5249,22 +5326,6 @@ export const App = () => {
         }
 
         const totalFormatted = escapeHtml(formatAmountDisplay(totalAmount, { currency: true }));
-
-        let pendingSummaryHtml = '';
-        if (eodPendingRows.length === 0) {
-            pendingSummaryHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
-        } else {
-            pendingSummaryHtml = eodPendingRows.map((row: any) => {
-                return `
-                <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.location)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold; text-align: right;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-style: italic; color: #666666;">Carried over from dashboard</td>
-                </tr>
-                `;
-            }).join('');
-        }
 
         return `
         <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 800px;">
@@ -5294,23 +5355,7 @@ export const App = () => {
                 </tbody>
             </table>
 
-            <div style="margin-bottom: 12px;">
-                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
-                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
-            </div>
-            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
-                <thead>
-                    <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Location</th>
-                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${pendingSummaryHtml}
-                </tbody>
-            </table>
+            ${generatePendingReimbursementsHtml()}
         </div>
         `;
     };
@@ -5344,22 +5389,6 @@ export const App = () => {
             }).join('');
         }
 
-        let pendingSummaryHtml = '';
-        if (eodPendingRows.length === 0) {
-            pendingSummaryHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
-        } else {
-            pendingSummaryHtml = eodPendingRows.map((row: any) => {
-                return `
-                <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.location)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold; text-align: right;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-style: italic; color: #666666;">Carried over from dashboard</td>
-                </tr>
-                `;
-            }).join('');
-        }
-
         return `
         <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 1000px;">
             <div style="margin-bottom: 24px;">
@@ -5370,7 +5399,7 @@ export const App = () => {
                     Please see my end-of-day report:
                 </div>
             </div>
-            
+
             <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
                 <thead>
                     <tr>
@@ -5387,23 +5416,7 @@ export const App = () => {
                 </tbody>
             </table>
 
-            <div style="margin-bottom: 12px;">
-                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
-                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
-            </div>
-            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
-                <thead>
-                    <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Location</th>
-                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${pendingSummaryHtml}
-                </tbody>
-            </table>
+            ${generatePendingReimbursementsHtml()}
         </div>
         `;
     };
