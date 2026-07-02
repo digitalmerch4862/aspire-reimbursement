@@ -5222,14 +5222,16 @@ export const App = () => {
     };
 
     const generatePendingReimbursementsHtml = () => {
+        const N = (text: string | number) => `<span style="font-weight: 400;">${text}</span>`;
+
         const summaryRowsHtml = `
         <tr style="border-bottom: 1px solid #dddddd;">
-            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">NAB details C/o Bindi</td>
-            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${eodPendingStatusSummary.bindi}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${N('NAB details C/o Bindi')}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${N(eodPendingStatusSummary.bindi)}</td>
         </tr>
         <tr style="border-bottom: 1px solid #dddddd;">
-            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">For Julian's Approval</td>
-            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${eodPendingStatusSummary.julian}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${N('For Julian\'s Approval')}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${N(eodPendingStatusSummary.julian)}</td>
         </tr>
         `;
 
@@ -5237,16 +5239,16 @@ export const App = () => {
             if (rows.length === 0) return '';
             const groupHeaderHtml = `
             <tr style="background-color: #f4f4f4;">
-                <td colspan="5" style="padding: 8px 12px; font-weight: bold; color: #666666; border-bottom: 1px solid #dddddd; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;">${escapeHtml(title)}</td>
+                <td colspan="5" style="padding: 8px 12px; font-weight: bold; color: #666666; border-bottom: 1px solid #dddddd; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;"><span style="font-weight: 700;">${escapeHtml(title)}</span></td>
             </tr>
             `;
             const rowsHtml = rows.map((row: any) => `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.taggedDate)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${row.agingDays} day${row.agingDays === 1 ? '' : 's'}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(formatPersonName(row.staffName))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.status)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${N(escapeHtml(row.taggedDate))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${N(`${row.agingDays} day${row.agingDays === 1 ? '' : 's'}`)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${N(escapeHtml(formatPersonName(row.staffName)))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${N(escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true })))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${N(escapeHtml(row.status))}</td>
                 </tr>
             `).join('');
             return groupHeaderHtml + rowsHtml;
@@ -5254,7 +5256,7 @@ export const App = () => {
 
         let pendingTableBodyHtml = '';
         if (eodPendingRows.length === 0) {
-            pendingTableBodyHtml = `<tr><td colspan="5" style="padding: 12px; text-align: center; color: #666666; font-style: italic; font-weight: normal; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
+            pendingTableBodyHtml = `<tr><td colspan="5" style="padding: 12px; text-align: center; color: #666666; font-style: italic; font-weight: normal; border-bottom: 1px solid #dddddd;">${N('No pending records.')}</td></tr>`;
         } else {
             const julianRows = eodPendingRows.filter((row: any) => row.status === 'For Julian\'s Approval');
             const bindiRows = eodPendingRows.filter((row: any) => row.status === 'NAB details C/o Bindi');
@@ -5264,16 +5266,16 @@ export const App = () => {
 
         return `
             <div style="margin-bottom: 12px;">
-                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
-                <p style="margin: 0; color: #666666; font-size: 12px; font-weight: normal;">Carried-over pending records synced from Dashboard Pending.</p>
+                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;"><span style="font-weight: 700;">Pending Reimbursements</span></h3>
+                <p style="margin: 0; color: #666666; font-size: 12px; font-weight: normal;"><span style="font-weight: 400;">Carried-over pending records synced from Dashboard Pending.</span></p>
             </div>
             <div style="margin-bottom: 18px;">
-                <h4 style="margin: 0 0 8px 0; color: #333333; font-size: 14px; font-weight: bold;">Pending Status Summary</h4>
+                <h4 style="margin: 0 0 8px 0; color: #333333; font-size: 14px; font-weight: bold;"><span style="font-weight: 700;">Pending Status Summary</span></h4>
                 <table style="width: 400px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
                     <thead>
                         <tr>
-                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 300px;">Status</th>
-                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Count</th>
+                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 300px;"><span style="font-weight: 700;">Status</span></th>
+                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;"><span style="font-weight: 700;">Count</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5284,11 +5286,11 @@ export const App = () => {
             <table style="width: 700px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
                 <thead>
                     <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Date</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Aging</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;">Staff Name</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 160px;">Status</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;"><span style="font-weight: 700;">Date</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;"><span style="font-weight: 700;">Aging</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;"><span style="font-weight: 700;">Staff Name</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;"><span style="font-weight: 700;">Amount</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 160px;"><span style="font-weight: 700;">Status</span></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -5313,13 +5315,13 @@ export const App = () => {
                 const amountDisplay = escapeHtml(formatAmountDisplay(amountClean));
                 return `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.date)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${escapeHtml(row.date)}</span></td>
                     <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">
-                        <div style="font-weight: normal; color: #333333; margin-bottom: 4px;">🔻 ${staffName}</div>
-                        <div style="font-size: 11px; font-weight: normal; color: #666666;">${nabRef}</div>
+                        <div style="font-weight: normal; color: #333333; margin-bottom: 4px;"><span style="font-weight: 400;">🔻 ${staffName}</span></div>
+                        <div style="font-size: 11px; font-weight: normal; color: #666666;"><span style="font-weight: 400;">${nabRef}</span></div>
                     </td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">Transfers out</td>
-                    <td style="padding: 10px 12px; text-align: right; font-weight: normal; color: #333333; vertical-align: top;">${amountDisplay}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">Transfers out</span></td>
+                    <td style="padding: 10px 12px; text-align: right; font-weight: normal; color: #333333; vertical-align: top;"><span style="font-weight: 400;">${amountDisplay}</span></td>
                 </tr>
                 `;
             }).join('');
@@ -5340,17 +5342,17 @@ export const App = () => {
             <table style="width: 700px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
                 <thead>
                     <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Date</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 380px;">Staff Member</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Category</th>
-                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;"><span style="font-weight: 700;">Date</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 380px;"><span style="font-weight: 700;">Staff Member</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;"><span style="font-weight: 700;">Category</span></th>
+                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;"><span style="font-weight: 700;">Amount</span></th>
                     </tr>
                 </thead>
                 <tbody>
                     ${rowsHtml}
                     <tr style="background-color: #f9f9f9;">
-                        <td colspan="3" style="padding: 12px; text-align: right; color: #333333; font-weight: bold; border-top: 2px solid #333333;">Total Processed:</td>
-                        <td style="padding: 12px; text-align: right; color: #333333; font-weight: bold; font-size: 14px; border-top: 2px solid #333333;">${totalFormatted}</td>
+                        <td colspan="3" style="padding: 12px; text-align: right; color: #333333; font-weight: bold; border-top: 2px solid #333333;"><span style="font-weight: 700;">Total Processed:</span></td>
+                        <td style="padding: 12px; text-align: right; color: #333333; font-weight: bold; font-size: 14px; border-top: 2px solid #333333;"><span style="font-weight: 700;">${totalFormatted}</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -5371,6 +5373,7 @@ export const App = () => {
             rowsHtml = eodData.map((row: any) => {
                 const isSpecial = row.id === EOD_SPECIAL_ROW_ID;
                 const activityStyle = isSpecial ? 'font-weight: bold;' : 'font-weight: normal;';
+                const activitySpanWeight = isSpecial ? '700' : '400';
                 const staffName = escapeHtml(formatPersonName(row.staff_name));
                 const amountFormatted = (isSpecial || !row.amount) ? '' : escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }));
                 const activityHtml = escapeHtml(row.eodActivity || '').replace(/\\n/g, '<br />');
@@ -5378,12 +5381,12 @@ export const App = () => {
 
                 return `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.eodTimeStart)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.eodTimeEnd)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; ${activityStyle}">${activityHtml}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${staffName}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${amountFormatted}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${statusHtml}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${escapeHtml(row.eodTimeStart)}</span></td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${escapeHtml(row.eodTimeEnd)}</span></td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; ${activityStyle}"><span style="font-weight: ${activitySpanWeight};">${activityHtml}</span></td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${staffName}</span></td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${amountFormatted}</span></td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;"><span style="font-weight: 400;">${statusHtml}</span></td>
                 </tr>
                 `;
             }).join('');
@@ -5403,12 +5406,12 @@ export const App = () => {
             <table style="width: 900px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
                 <thead>
                     <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">Start</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">End</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;">Activity</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 150px;">Staff Name</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 290px;">Description / Status</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;"><span style="font-weight: 700;">Start</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;"><span style="font-weight: 700;">End</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;"><span style="font-weight: 700;">Activity</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 150px;"><span style="font-weight: 700;">Staff Name</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;"><span style="font-weight: 700;">Amount</span></th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 290px;"><span style="font-weight: 700;">Description / Status</span></th>
                     </tr>
                 </thead>
                 <tbody>
