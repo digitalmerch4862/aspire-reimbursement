@@ -4978,10 +4978,10 @@ export const App = () => {
         professionalReport += `| Total Claims | **${totalClaims}** |\n`;
         professionalReport += `| Average Claim Value | **${formatReportCurrency(averageClaimValue)}** |\n`;
         professionalReport += `| Paid / Completed | ${paidCount} |\n`;
-        professionalReport += `| Pending | ${pendingCount} |\n`;
-        professionalReport += `| For Revision | ${revisionCount} |\n`;
-        professionalReport += `| Manual Encode | ${manualEncodeCount} |\n`;
-        professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} record${dataQualityCount === 1 ? '' : 's'} |\n`;
+        if (pendingCount > 0) professionalReport += `| Pending | ${pendingCount} |\n`;
+        if (revisionCount > 0) professionalReport += `| For Revision | ${revisionCount} |\n`;
+        if (manualEncodeCount > 0) professionalReport += `| Manual Encode | ${manualEncodeCount} |\n`;
+        if (dataQualityCount > 0) professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} record${dataQualityCount === 1 ? '' : 's'} |\n`;
         professionalReport += `| Highest Single Claim | ${highestClaimLabel} |\n`;
         professionalReport += `| Highest Staff Spend | ${topStaffSummary ? `${topStaffSummary[0]} (${formatReportCurrency(topStaffSummary[1])})` : 'N/A'} |\n`;
         professionalReport += `| Highest Client Spend | ${topClientSummary ? `${topClientSummary[0]} (${formatReportCurrency(topClientSummary[1])})` : 'N/A'} |\n`;
@@ -4996,7 +4996,16 @@ export const App = () => {
         professionalReport += `## Key Findings\n`;
         professionalReport += `- Total reimbursement expenditure for the period was **${formatReportCurrency(totalSpend)}** across **${totalClaims}** unique claim${totalClaims === 1 ? '' : 's'}.\n`;
         professionalReport += `- The average claim value was **${formatReportCurrency(averageClaimValue)}**, which provides a reference point for future period comparison.\n`;
-        professionalReport += `- Status mix for the period was **${paidCount} paid/completed**, **${pendingCount} pending**, **${revisionCount} for revision**, and **${manualEncodeCount} manual encode** claim${manualEncodeCount === 1 ? '' : 's'}.\n`;
+        const statusMixParts = [
+            `**${paidCount} paid/completed**`,
+            ...(pendingCount > 0 ? [`**${pendingCount} pending**`] : []),
+            ...(revisionCount > 0 ? [`**${revisionCount} for revision**`] : []),
+            ...(manualEncodeCount > 0 ? [`**${manualEncodeCount} manual encode**`] : [])
+        ];
+        const statusMixLabel = statusMixParts.length > 1
+            ? `${statusMixParts.slice(0, -1).join(', ')}, and ${statusMixParts[statusMixParts.length - 1]}`
+            : statusMixParts[0];
+        professionalReport += `- Status mix for the period was ${statusMixLabel} claim${totalClaims === 1 ? '' : 's'}.\n`;
         professionalReport += `- ${topStaffSummary ? `The highest staff expenditure was attributed to **${topStaffSummary[0]}**, representing **${formatReportCurrency(topStaffSummary[1])}** or **${shareOfSpend(topStaffSummary[1])}** of total period spend.` : 'No material staff concentration was identified for the selected period.'}\n`;
         professionalReport += `- ${topClientSummary ? `The highest client expenditure was recorded against **${topClientSummary[0]}**, totalling **${formatReportCurrency(topClientSummary[1])}** or **${shareOfSpend(topClientSummary[1])}** of total period spend.` : 'No material client concentration was identified for the selected period.'}\n`;
         professionalReport += `- ${topLocationSummary ? `The highest location expenditure was recorded against **${topLocationSummary[0]}**, totalling **${formatReportCurrency(topLocationSummary[1])}** or **${shareOfSpend(topLocationSummary[1])}** of total period spend.` : 'No material location concentration was identified for the selected period.'}\n`;
@@ -5029,13 +5038,22 @@ export const App = () => {
         if (rankedLocations.length === 0) professionalReport += `| - | No data available | ${formatReportCurrency(0)} | 0.0% |\n`;
         professionalReport += `\n`;
 
-        professionalReport += `## Exceptions and Controls\n`;
-        professionalReport += `| Control Metric | Count | Note |\n`;
-        professionalReport += `| :--- | :--- | :--- |\n`;
-        professionalReport += `| Pending Claims | ${pendingCount} | Awaiting completion or approval |\n`;
-        professionalReport += `| Revision Claims | ${revisionCount} | Claimant correction required |\n`;
-        professionalReport += `| Manual Encode Claims | ${manualEncodeCount} | Processed outside standard form flow |\n`;
-        professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} | Missing or weak staff/client/location values |\n\n`;
+        const exceptionRows: string[] = [];
+        if (pendingCount > 0) exceptionRows.push(`| Pending Claims | ${pendingCount} | Awaiting completion or approval |\n`);
+        if (revisionCount > 0) exceptionRows.push(`| Revision Claims | ${revisionCount} | Claimant correction required |\n`);
+        if (manualEncodeCount > 0) exceptionRows.push(`| Manual Encode Claims | ${manualEncodeCount} | Processed outside standard form flow |\n`);
+        if (dataQualityCount > 0) exceptionRows.push(`| Data Quality Follow-Up | ${dataQualityCount} | Missing or weak staff/client/location values |\n`);
+
+        if (exceptionRows.length > 0) {
+            professionalReport += `## Exceptions and Controls\n`;
+            professionalReport += `| Control Metric | Count | Note |\n`;
+            professionalReport += `| :--- | :--- | :--- |\n`;
+            exceptionRows.forEach((row) => { professionalReport += row; });
+            professionalReport += `\n`;
+        } else {
+            professionalReport += `## Exceptions and Controls\n`;
+            professionalReport += `No exceptions were identified for the selected reporting period; all claims are paid or completed with complete staff, client, and location data.\n\n`;
+        }
 
         professionalReport += `## Management Notes\n`;
         professionalReport += `- The leading staff, client, and location concentrations should be reviewed to confirm that expenditure patterns remain consistent with expected operational activity.\n`;
