@@ -5269,10 +5269,10 @@ export const App = () => {
             </div>
             <div style="margin-bottom: 18px;">
                 <h4 style="margin: 0 0 8px 0; color: #333333; font-size: 14px; font-weight: bold;">Pending Status Summary</h4>
-                <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+                <table style="width: 400px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
                     <thead>
                         <tr>
-                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status</th>
+                            <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 300px;">Status</th>
                             <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Count</th>
                         </tr>
                     </thead>
@@ -5281,14 +5281,14 @@ export const App = () => {
                     </tbody>
                 </table>
             </div>
-            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+            <table style="width: 700px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
                 <thead>
                     <tr>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Date</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Aging</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Name</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Date</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Aging</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;">Staff Name</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 160px;">Status</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -5337,11 +5337,11 @@ export const App = () => {
                     Please see below the list of reimbursements processed in our NAB banking today:
                 </div>
             </div>
-            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
+            <table style="width: 700px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
                 <thead>
                     <tr>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Date</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 380px;">Staff Member</th>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Category</th>
                         <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
                     </tr>
@@ -5400,15 +5400,15 @@ export const App = () => {
                 </div>
             </div>
 
-            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
+            <table style="width: 900px; table-layout: fixed; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
                 <thead>
                     <tr>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">Start</th>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">End</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Activity</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 200px;">Activity</th>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 150px;">Staff Name</th>
                         <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
-                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Description / Status</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 290px;">Description / Status</th>
                     </tr>
                 </thead>
                 <tbody>
