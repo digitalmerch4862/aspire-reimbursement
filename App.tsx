@@ -5224,12 +5224,12 @@ export const App = () => {
     const generatePendingReimbursementsHtml = () => {
         const summaryRowsHtml = `
         <tr style="border-bottom: 1px solid #dddddd;">
-            <td style="padding: 10px 12px; color: #333333;">NAB details C/o Bindi</td>
-            <td style="padding: 10px 12px; color: #333333; font-weight: bold;">${eodPendingStatusSummary.bindi}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">NAB details C/o Bindi</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${eodPendingStatusSummary.bindi}</td>
         </tr>
         <tr style="border-bottom: 1px solid #dddddd;">
-            <td style="padding: 10px 12px; color: #333333;">For Julian's Approval</td>
-            <td style="padding: 10px 12px; color: #333333; font-weight: bold;">${eodPendingStatusSummary.julian}</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">For Julian's Approval</td>
+            <td style="padding: 10px 12px; color: #333333; font-weight: normal;">${eodPendingStatusSummary.julian}</td>
         </tr>
         `;
 
@@ -5242,11 +5242,11 @@ export const App = () => {
             `;
             const rowsHtml = rows.map((row: any) => `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.taggedDate)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${row.agingDays} day${row.agingDays === 1 ? '' : 's'}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.status)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.taggedDate)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${row.agingDays} day${row.agingDays === 1 ? '' : 's'}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(formatPersonName(row.staffName))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.status)}</td>
                 </tr>
             `).join('');
             return groupHeaderHtml + rowsHtml;
@@ -5254,7 +5254,7 @@ export const App = () => {
 
         let pendingTableBodyHtml = '';
         if (eodPendingRows.length === 0) {
-            pendingTableBodyHtml = `<tr><td colspan="5" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
+            pendingTableBodyHtml = `<tr><td colspan="5" style="padding: 12px; text-align: center; color: #666666; font-style: italic; font-weight: normal; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
         } else {
             const julianRows = eodPendingRows.filter((row: any) => row.status === 'For Julian\'s Approval');
             const bindiRows = eodPendingRows.filter((row: any) => row.status === 'NAB details C/o Bindi');
@@ -5265,7 +5265,7 @@ export const App = () => {
         return `
             <div style="margin-bottom: 12px;">
                 <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
-                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
+                <p style="margin: 0; color: #666666; font-size: 12px; font-weight: normal;">Carried-over pending records synced from Dashboard Pending.</p>
             </div>
             <div style="margin-bottom: 18px;">
                 <h4 style="margin: 0 0 8px 0; color: #333333; font-size: 14px; font-weight: bold;">Pending Status Summary</h4>
@@ -5313,13 +5313,13 @@ export const App = () => {
                 const amountDisplay = escapeHtml(formatAmountDisplay(amountClean));
                 return `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.date)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">
-                        <div style="font-weight: bold; color: #333333; margin-bottom: 4px;">🔻 ${staffName}</div>
-                        <div style="font-size: 11px; color: #666666;">${nabRef}</div>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.date)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">
+                        <div style="font-weight: normal; color: #333333; margin-bottom: 4px;">🔻 ${staffName}</div>
+                        <div style="font-size: 11px; font-weight: normal; color: #666666;">${nabRef}</div>
                     </td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">Transfers out</td>
-                    <td style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; vertical-align: top;">${amountDisplay}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">Transfers out</td>
+                    <td style="padding: 10px 12px; text-align: right; font-weight: normal; color: #333333; vertical-align: top;">${amountDisplay}</td>
                 </tr>
                 `;
             }).join('');
@@ -5328,11 +5328,11 @@ export const App = () => {
         const totalFormatted = escapeHtml(formatAmountDisplay(totalAmount, { currency: true }));
 
         return `
-        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 800px;">
+        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 800px; font-weight: normal;">
             <div style="margin-bottom: 24px;">
                 <div style="font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 12px;">NAB BANKING PROCESSED (${dateStr})</div>
                 <hr style="border: 0; border-top: 1px solid #dddddd; margin: 0 0 16px 0;" />
-                <div style="font-size: 13px; color: #333333; line-height: 1.5;">
+                <div style="font-size: 13px; font-weight: normal; color: #333333; line-height: 1.5;">
                     Hi Josh,<br /><br />
                     Please see below the list of reimbursements processed in our NAB banking today:
                 </div>
@@ -5370,7 +5370,7 @@ export const App = () => {
         } else {
             rowsHtml = eodData.map((row: any) => {
                 const isSpecial = row.id === EOD_SPECIAL_ROW_ID;
-                const activityStyle = isSpecial ? 'font-weight: bold;' : '';
+                const activityStyle = isSpecial ? 'font-weight: bold;' : 'font-weight: normal;';
                 const staffName = escapeHtml(formatPersonName(row.staff_name));
                 const amountFormatted = (isSpecial || !row.amount) ? '' : escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }));
                 const activityHtml = escapeHtml(row.eodActivity || '').replace(/\\n/g, '<br />');
@@ -5378,23 +5378,23 @@ export const App = () => {
 
                 return `
                 <tr style="border-bottom: 1px solid #dddddd;">
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.eodTimeStart)}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.eodTimeEnd)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.eodTimeStart)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${escapeHtml(row.eodTimeEnd)}</td>
                     <td style="padding: 10px 12px; color: #333333; vertical-align: top; ${activityStyle}">${activityHtml}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${staffName}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${amountFormatted}</td>
-                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${statusHtml}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${staffName}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${amountFormatted}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: normal;">${statusHtml}</td>
                 </tr>
                 `;
             }).join('');
         }
 
         return `
-        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 1000px;">
+        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 1000px; font-weight: normal;">
             <div style="margin-bottom: 24px;">
                 <div style="font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 12px;">End of the Day Report (${dateStr})</div>
                 <hr style="border: 0; border-top: 1px solid #dddddd; margin: 0 0 16px 0;" />
-                <div style="font-size: 13px; color: #333333; line-height: 1.5;">
+                <div style="font-size: 13px; font-weight: normal; color: #333333; line-height: 1.5;">
                     Hi Josh,<br /><br />
                     Please see my end-of-day report:
                 </div>
