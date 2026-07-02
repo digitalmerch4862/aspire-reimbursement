@@ -6996,7 +6996,7 @@ export const App = () => {
         idleEndTime.setSeconds(0);
 
         if (idleStartTime > idleEndTime) {
-            idleEndTime.setTime(idleStartTime.getTime());
+            return scheduled;
         }
 
         const idleRow = {
