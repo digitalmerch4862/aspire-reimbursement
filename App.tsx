@@ -5221,14 +5221,206 @@ export const App = () => {
         }
     };
 
-    const handleCopyTable = async (elementId: string, type: 'nab' | 'eod') => {
+    const generateNabOutlookHtml = () => {
+        const now = new Date();
+        const dateStr = `${now.getDate().toString().padStart(2, '0')}-${now.toLocaleString('en-US', { month: 'short' })}-${now.getFullYear()}`;
+        
+        let rowsHtml = '';
+        if (nabReportData.length === 0) {
+            rowsHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No banking records in the current cycle.</td></tr>`;
+        } else {
+            rowsHtml = nabReportData.map(row => {
+                const amountClean = Math.abs(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")));
+                const staffName = escapeHtml(formatPersonName(row.staff_name));
+                const nabRef = escapeHtml(row.nabRef);
+                const amountDisplay = escapeHtml(formatAmountDisplay(amountClean));
+                return `
+                <tr style="border-bottom: 1px solid #dddddd;">
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.date)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">
+                        <div style="font-weight: bold; color: #333333; margin-bottom: 4px;">🔻 ${staffName}</div>
+                        <div style="font-size: 11px; color: #666666;">${nabRef}</div>
+                    </td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">Transfers out</td>
+                    <td style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; vertical-align: top;">${amountDisplay}</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        const totalFormatted = escapeHtml(formatAmountDisplay(totalAmount, { currency: true }));
+
+        let pendingSummaryHtml = '';
+        if (eodPendingRows.length === 0) {
+            pendingSummaryHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
+        } else {
+            pendingSummaryHtml = eodPendingRows.map((row: any) => {
+                return `
+                <tr style="border-bottom: 1px solid #dddddd;">
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.location)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold; text-align: right;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-style: italic; color: #666666;">Carried over from dashboard</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        return `
+        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 800px;">
+            <div style="margin-bottom: 24px;">
+                <div style="font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 12px;">NAB BANKING PROCESSED (${dateStr})</div>
+                <hr style="border: 0; border-top: 1px solid #dddddd; margin: 0 0 16px 0;" />
+                <div style="font-size: 13px; color: #333333; line-height: 1.5;">
+                    Hi Josh,<br /><br />
+                    Please see below the list of reimbursements processed in our NAB banking today:
+                </div>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
+                <thead>
+                    <tr>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Date</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 120px;">Category</th>
+                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                    <tr style="background-color: #f9f9f9;">
+                        <td colspan="3" style="padding: 12px; text-align: right; color: #333333; font-weight: bold; border-top: 2px solid #333333;">Total Processed:</td>
+                        <td style="padding: 12px; text-align: right; color: #333333; font-weight: bold; font-size: 14px; border-top: 2px solid #333333;">${totalFormatted}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="margin-bottom: 12px;">
+                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
+                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+                <thead>
+                    <tr>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Location</th>
+                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pendingSummaryHtml}
+                </tbody>
+            </table>
+        </div>
+        `;
+    };
+
+    const generateEodOutlookHtml = () => {
+        const now = new Date();
+        const dateStr = `${now.getDate().toString().padStart(2, '0')}-${now.toLocaleString('en-US', { month: 'short' })}-${now.getFullYear()}`;
+        
+        let rowsHtml = '';
+        if (todaysProcessedRecords.length === 0 && pendingApprovalRecords.length === 0) {
+            rowsHtml = `<tr><td colspan="6" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No activity recorded in the current cycle.</td></tr>`;
+        } else {
+            rowsHtml = eodData.map((row: any) => {
+                const isSpecial = row.id === EOD_SPECIAL_ROW_ID;
+                const activityStyle = isSpecial ? 'font-weight: bold;' : '';
+                const staffName = escapeHtml(formatPersonName(row.staff_name));
+                const amountFormatted = (isSpecial || !row.amount) ? '' : escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }));
+                const activityHtml = escapeHtml(row.eodActivity || '').replace(/\\n/g, '<br />');
+                const statusHtml = escapeHtml(row.eodStatus || '').replace(/\\n/g, '<br />');
+
+                return `
+                <tr style="border-bottom: 1px solid #dddddd;">
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.eodTimeStart)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.eodTimeEnd)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; ${activityStyle}">${activityHtml}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${staffName}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${amountFormatted}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${statusHtml}</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        let pendingSummaryHtml = '';
+        if (eodPendingRows.length === 0) {
+            pendingSummaryHtml = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: #666666; font-style: italic; border-bottom: 1px solid #dddddd;">No pending records.</td></tr>`;
+        } else {
+            pendingSummaryHtml = eodPendingRows.map((row: any) => {
+                return `
+                <tr style="border-bottom: 1px solid #dddddd;">
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold;">${escapeHtml(formatPersonName(row.staffName))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top;">${escapeHtml(row.location)}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-weight: bold; text-align: right;">${escapeHtml(formatAmountDisplay(parseFloat(String(row.amount).replace(/[^0-9.-]+/g, "")), { currency: true }))}</td>
+                    <td style="padding: 10px 12px; color: #333333; vertical-align: top; font-style: italic; color: #666666;">Carried over from dashboard</td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        return `
+        <div style="font-family: Arial, sans-serif; color: #333333; background: #ffffff; padding: 16px; max-width: 1000px;">
+            <div style="margin-bottom: 24px;">
+                <div style="font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 12px;">End of the Day Report (${dateStr})</div>
+                <hr style="border: 0; border-top: 1px solid #dddddd; margin: 0 0 16px 0;" />
+                <div style="font-size: 13px; color: #333333; line-height: 1.5;">
+                    Hi Josh,<br /><br />
+                    Please see my end-of-day report:
+                </div>
+            </div>
+            
+            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333; margin-bottom: 32px;">
+                <thead>
+                    <tr>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">Start</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 80px;">End</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Activity</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 150px;">Staff Name</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333; width: 100px;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Description / Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                </tbody>
+            </table>
+
+            <div style="margin-bottom: 12px;">
+                <h3 style="margin: 0 0 4px 0; color: #333333; font-size: 16px; font-weight: bold;">Pending Reimbursements</h3>
+                <p style="margin: 0; color: #666666; font-size: 12px;">Carried-over pending records synced from Dashboard Pending.</p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #333333;">
+                <thead>
+                    <tr>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Staff Member</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Location</th>
+                        <th style="padding: 10px 12px; text-align: right; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Amount</th>
+                        <th style="padding: 10px 12px; text-align: left; font-weight: bold; color: #333333; border-bottom: 2px solid #333333;">Status Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pendingSummaryHtml}
+                </tbody>
+            </table>
+        </div>
+        `;
+    };
+
+    const handleCopyTable = async (elementId: string, type: 'nab' | 'eod', htmlOverride?: string) => {
         const element = document.getElementById(elementId);
-        if (!element) return;
+        if (!element && !htmlOverride) return;
+        
         try {
-            const blobHtml = new Blob([element.outerHTML], { type: 'text/html' });
-            const blobText = new Blob([element.innerText], { type: 'text/plain' });
+            const htmlContent = htmlOverride || (element ? element.outerHTML : '');
+            const textContent = element ? element.innerText : 'Data copied.';
+            
+            const blobHtml = new Blob([htmlContent], { type: 'text/html' });
+            const blobText = new Blob([textContent], { type: 'text/plain' });
             const data = [new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })];
             await navigator.clipboard.write(data);
+            
             setReportCopied(type);
             setTimeout(() => setReportCopied(null), 2000);
         } catch (e) {
@@ -8391,7 +8583,7 @@ export const App = () => {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => handleCopyTable('nab-report-container', 'nab')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'nab' ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                                    <button onClick={() => handleCopyTable('nab-report-container', 'nab', generateNabOutlookHtml())} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'nab' ? 'bg-emerald-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                                         {reportCopied === 'nab' ? <Check size={16} /> : <Copy size={16} />}
                                         {reportCopied === 'nab' ? 'Copied Table!' : 'Copy for Outlook'}
                                     </button>
@@ -8514,7 +8706,7 @@ export const App = () => {
                                             <span className="text-red-400 font-mono font-bold">{eodPendingRows.length}</span>
                                         </div>
                                     </div>
-                                    <button onClick={() => handleCopyTable('eod-report', 'eod')} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'eod' ? 'bg-indigo-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                                    <button onClick={() => handleCopyTable('eod-report', 'eod', generateEodOutlookHtml())} className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-2 ${reportCopied === 'eod' ? 'bg-indigo-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
                                         {reportCopied === 'eod' ? <Check size={16} /> : <Copy size={16} />}
                                         {reportCopied === 'eod' ? 'Copied Report!' : 'Copy for Outlook'}
                                     </button>
