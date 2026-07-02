@@ -1577,6 +1577,7 @@ export const App = () => {
             .map(row => ({
                 id: `db-${String(row.id)}`,
                 staffName: String(row.staff_name || row.staffName || 'Unknown'),
+                ypName: String(row.yp_name || row.ypName || row.client_name || row.clientName || ''),
                 amount: normalizeMoneyValue(String(row.amount || row.totalAmount || '0.00'), '0.00'),
                 date: String(row.created_at || row.timestamp || row.dateProcessed || 'N/A')
             }));
@@ -6249,6 +6250,7 @@ export const App = () => {
                 ? groupPendingThisWeek.map((item) => ({
                     id: item.id,
                     staffName: item.staffName,
+                    ypName: item.ypName,
                     amount: item.amount,
                     date: item.date
                 }))

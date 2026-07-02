@@ -1,5 +1,5 @@
 import { TransactionRecord, ProcessingResult, ModeOptions, ManualAuditIssue } from './types';
-import { normalizeMoneyValue } from './helpers';
+import { normalizeMoneyValue, normalizeNameKey } from './helpers';
 
 export const processSoloMode = (options: ModeOptions): ProcessingResult & { errorMessage?: string, issues?: ManualAuditIssue[] } => {
     const { formText, receiptText } = options;
@@ -14,6 +14,8 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     const address = addressMatch ? addressMatch[1].trim() : '';
     const staffMember = staffMatch ? staffMatch[1].trim() : '';
     const approvedBy = approvedMatch ? approvedMatch[1].trim() : '';
+
+
 
     const formTotalMatch = formText.match(/Total\s*Amount:\s*\$?([\d,]+\.?\d*)/i);
     const receiptTotalMatch = receiptText.match(/GRAND\s*TOTAL.*?\$\s*([\d,]+\.?\d*)/i);
@@ -186,6 +188,18 @@ export const processSoloMode = (options: ModeOptions): ProcessingResult & { erro
     if (!clientName) issues.push({ level: 'warning', message: "Missing 'Client Name' in Reimbursement Form." });
     if (!address) issues.push({ level: 'warning', message: "Missing 'Address' in Reimbursement Form." });
     if (!staffMember) issues.push({ level: 'warning', message: "Missing 'Staff Member' in Reimbursement Form." });
+    
+    if (staffMember) {
+        const staffKey = normalizeNameKey(staffMember);
+        const pendingItem = (options.outstandingLiquidations || []).find((ol: any) => 
+            normalizeNameKey(String(ol.staffName || '')) === staffKey
+        );
+
+        if (pendingItem) {
+            const ypName = pendingItem.ypName ? pendingItem.ypName.trim() : 'Unknown YP';
+            issues.push({ level: 'error', message: `Double-dip Risk: ${staffMember} (YP: ${ypName}) currently has an outstanding petty cash liquidation in Group Mode.` });
+        }
+    }
 
     if (items.length === 0) {
         issues.push({ level: 'error', message: 'No valid receipt rows found. Check table format.' });
