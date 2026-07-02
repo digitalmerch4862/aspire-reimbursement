@@ -4955,14 +4955,21 @@ export const App = () => {
         professionalReport += `| Report Date | ${formatReportDate(now)} |\n`;
         professionalReport += `| Scope | Unique reimbursement claims recorded within the selected period |\n\n`;
 
+        professionalReport += `## Processing Summary\n`;
+        professionalReport += `| Metric | Value |\n`;
+        professionalReport += `| :--- | :--- |\n`;
+        professionalReport += `| Claims Processed | **${totalClaims}** |\n`;
+        professionalReport += `| Total Value Processed | **${formatReportCurrency(totalSpend)}** |\n`;
+        professionalReport += `| Completed / Paid | ${paidCount} |\n`;
+        if (pendingCount > 0) professionalReport += `| Pending Follow-up | ${pendingCount} |\n`;
+        professionalReport += `\n`;
+
         professionalReport += `## Executive Summary\n`;
         professionalReport += `| Metric | Value |\n`;
         professionalReport += `| :--- | :--- |\n`;
         professionalReport += `| Total Spend | **${formatReportCurrency(totalSpend)}** |\n`;
         professionalReport += `| Total Claims | **${totalClaims}** |\n`;
         professionalReport += `| Average Claim Value | **${formatReportCurrency(averageClaimValue)}** |\n`;
-        professionalReport += `| Paid / Completed | ${paidCount} |\n`;
-        if (pendingCount > 0) professionalReport += `| Pending | ${pendingCount} |\n`;
         if (revisionCount > 0) professionalReport += `| For Revision | ${revisionCount} |\n`;
         if (manualEncodeCount > 0) professionalReport += `| Manual Encode | ${manualEncodeCount} |\n`;
         if (dataQualityCount > 0) professionalReport += `| Data Quality Follow-Up | ${dataQualityCount} record${dataQualityCount === 1 ? '' : 's'} |\n`;
